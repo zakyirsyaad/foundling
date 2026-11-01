@@ -92,7 +92,10 @@ async fn mock_outlayer_rejects_oversize_payload() -> anyhow::Result<()> {
         .await?;
     assert_eq!(request["oversize"], true);
     assert_eq!(request["response_len"], MAX_RESPONSE_BYTES + 1);
-    assert!(result.logs().iter().any(|log| log.contains("oversize answer")));
+    assert!(result
+        .logs()
+        .iter()
+        .any(|log| log.contains("oversize answer")));
     let failed = event_data(&result, "cycle_failed").expect("a cycle_failed event");
     assert_eq!(failed, json!({"nonce": 1, "code": "OVERSIZE"}));
     assert_eq!(stage(&env).await?, json!("Idle"));
@@ -173,7 +176,11 @@ async fn mock_token_refunds_a_deposit_the_vault_refuses() -> anyhow::Result<()> 
     assert!(result.is_success(), "{}", failures(&result));
     assert!(event_data(&result, "deposit_queued").is_none());
     let balance: String = env
-        .view_contract(&env.usdc, "ft_balance_of", json!({"account_id": env.alice.id()}))
+        .view_contract(
+            &env.usdc,
+            "ft_balance_of",
+            json!({"account_id": env.alice.id()}),
+        )
         .await?;
     assert_eq!(balance, "20000000");
     Ok(())

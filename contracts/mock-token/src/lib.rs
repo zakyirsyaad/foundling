@@ -230,7 +230,10 @@ impl MockToken {
 
 impl MockToken {
     fn transfer(&mut self, sender: &AccountId, receiver: &AccountId, amount: u128) {
-        require!(sender != receiver, "Sender and receiver should be different");
+        require!(
+            sender != receiver,
+            "Sender and receiver should be different"
+        );
         require!(amount > 0, "The amount should be a positive number");
         let Some(&sender_held) = self.balances.get(sender) else {
             env::panic_str("The sender is not registered");
@@ -243,7 +246,8 @@ impl MockToken {
             "The account doesn't have enough balance"
         );
         self.balances.insert(sender.clone(), sender_held - amount);
-        self.balances.insert(receiver.clone(), receiver_held + amount);
+        self.balances
+            .insert(receiver.clone(), receiver_held + amount);
     }
 }
 

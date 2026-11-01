@@ -213,7 +213,11 @@ impl Foundling {
                 .max_gas()
                 .transact()
                 .await?;
-            anyhow::ensure!(result.is_success(), "setup_storage {target}: {}", failures(&result));
+            anyhow::ensure!(
+                result.is_success(),
+                "setup_storage {target}: {}",
+                failures(&result)
+            );
         }
         let result = self
             .stranger
@@ -223,7 +227,8 @@ impl Foundling {
             .await?;
         anyhow::ensure!(result.is_success(), "selftest: {}", failures(&result));
         anyhow::ensure!(
-            self.view_vault::<bool>("selftest_passed", json!({})).await?,
+            self.view_vault::<bool>("selftest_passed", json!({}))
+                .await?,
             "selftest did not pass: {:?}",
             events(&result)
         );
@@ -292,7 +297,8 @@ impl Foundling {
     }
 
     pub async fn trigger_cycle(&self) -> anyhow::Result<ExecutionFinalResult> {
-        self.call_vault(&self.keeper, "trigger_cycle", json!({})).await
+        self.call_vault(&self.keeper, "trigger_cycle", json!({}))
+            .await
     }
 }
 
