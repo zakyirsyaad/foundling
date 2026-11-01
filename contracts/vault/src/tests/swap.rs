@@ -1,5 +1,6 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
+use near_sdk::test_utils::get_created_receipts;
 use near_sdk::{AccountId, NearToken, PromiseResult};
 
 use crate::cycle::Stage;
@@ -446,7 +447,7 @@ fn a_zero_withdraw_is_stuck_and_credits_nothing() {
 }
 
 #[test]
-fn a_partial_withdraw_credits_what_arrived_and_is_stuck() {
+fn a_partial_withdraw_is_stuck_and_credits_nothing() {
     let out = 17 * WNEAR_UNIT / 10;
     let mut vault = swapped(8 * USDC_UNIT, out);
 
@@ -459,7 +460,70 @@ fn a_partial_withdraw_credits_what_arrived_and_is_stuck() {
             ..
         }
     ));
-    assert_eq!(vault.book().wnear, U128(5));
+    assert_eq!(vault.book().wnear, U128(0));
+}
+
+fn redeem_then_deposit_returns(result: PromiseResult) {
+    let mut vault = priced("buy_risk", 8 * USDC_UNIT);
+    let shares = vault.shares_of(alice());
+    set_caller_with_yocto(alice());
+    vault.redeem(shares);
+    set_callback(vec![result]);
+
+    vault.on_deposited(1, 0);
+
+    assert_eq!(vault.book().usdc, U128(40 * USDC_UNIT));
+    set_caller_with_yocto(alice());
+    vault.claim_bucket(1);
+    assert_eq!(call_to(&usdc()).1["amount"], (4 * USDC_UNIT).to_string());
+}
+
+#[test]
+fn a_holder_who_redeems_before_a_failed_deposit_keeps_a_claim() {
+    redeem_then_deposit_returns(PromiseResult::Failed);
+}
+
+#[test]
+fn a_holder_who_redeems_before_an_unused_deposit_keeps_a_claim() {
+    redeem_then_deposit_returns(PromiseResult::Successful(b"\"0\"".to_vec()));
+}
+
+#[test]
+fn a_zero_swap_output_is_stuck_and_sends_no_withdraw() {
+    let vault = swapped(8 * USDC_UNIT, 0);
+
+    assert!(matches!(
+        vault.stage(),
+        Stage::Stuck {
+            step: SwapStep::Swap,
+            ..
+        }
+    ));
+    assert!(get_created_receipts().is_empty());
+}
+
+#[test]
+fn a_huge_reference_price_ends_the_cycle_without_a_panic() {
+    let mut vault = ready_at("buy_risk", 8 * USDC_UNIT, u128::MAX / 100);
+    set_caller(keeper());
+    vault.execute_decision(1);
+    set_callback(prices("450000000", "100000000"));
+
+    vault.on_price(1);
+
+    assert_eq!(vault.stage(), Stage::Idle);
+    assert!(logs_contain("PRICE_DEVIATION"));
+}
+
+#[test]
+fn the_executed_event_reports_both_amounts() {
+    let out = 17 * WNEAR_UNIT / 10;
+    let mut vault = swapped(8 * USDC_UNIT, out);
+
+    withdrawn(&mut vault, &out.to_string());
+
+    assert!(logs_contain(r#""amount_in":"8000000""#));
+    assert!(logs_contain(&format!(r#""amount_out":"{out}""#)));
 }
 
 #[test]

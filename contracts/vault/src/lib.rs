@@ -30,6 +30,7 @@ use crate::setup::SetupState;
 use crate::swap::{Bucket, Inflight};
 
 const MILLIS_PER_SECOND: u64 = 1_000;
+const FULL_BPS: u32 = 10_000;
 
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -170,6 +171,30 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
     require!(
         policy.per_user_cap.0 <= policy.tvl_cap.0,
         "init: per_user_cap above tvl_cap"
+    );
+    require!(
+        config.assets.usdc_decimals <= config.assets.wnear_decimals,
+        "init: usdc_decimals above wnear_decimals"
+    );
+    require!(
+        policy.slippage_bps < FULL_BPS,
+        "init: slippage_bps must stay below 100%"
+    );
+    require!(
+        config.agent.outlayer_deposit.0 <= policy.ops_budget.0,
+        "init: outlayer_deposit above ops_budget"
+    );
+    require!(
+        config.oracle.near_id != config.oracle.usdc_id,
+        "init: the two price feeds must differ"
+    );
+    require!(
+        !config.agent.wasm_hash.is_empty(),
+        "init: wasm_hash must be set"
+    );
+    require!(
+        !config.agent.commitment.is_empty(),
+        "init: commitment must be set"
     );
 }
 

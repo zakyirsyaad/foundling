@@ -19,6 +19,11 @@ pub fn mul_div_ceil(a: u128, b: u128, denominator: u128) -> u128 {
     ((U256::from(a) * U256::from(b) + denominator - U256::one()) / denominator).as_u128()
 }
 
+/// `a·b ≤ c·d` for any u128, so comparing two ratios cannot overflow.
+pub fn product_at_most(a: u128, b: u128, c: u128, d: u128) -> bool {
+    U256::from(a) * U256::from(b) <= U256::from(c) * U256::from(d)
+}
+
 /// Takes the lower of the offset price and the book price: the offset alone would
 /// let a deposit after a gain buy below the redemption price and dilute old holders.
 pub fn shares_for_deposit(amount: u128, total_shares: u128, nav: u128) -> u128 {

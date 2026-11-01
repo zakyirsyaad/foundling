@@ -177,10 +177,7 @@ impl Vault {
                 }
             }
             Hop::Failed | Hop::Amount(0) => {
-                self.credit(inflight.token_in, inflight.amount_in.0);
-                self.inflight = None;
-                self.stage = Stage::Idle;
-                emit("swap_reverted", &format!(r#"{{"nonce":{nonce}}}"#));
+                self.settle_swap(nonce, inflight.token_in, inflight.amount_in.0, true);
             }
             _ => self.mark_stuck(nonce, SwapStep::Deposit),
         }
@@ -196,6 +193,8 @@ impl Vault {
             return;
         };
         match read_hop() {
+            // Ref never returns 0 here, and `withdraw` would read it as "take everything".
+            Hop::Amount(0) | Hop::Unreadable => self.mark_stuck(nonce, SwapStep::Swap),
             Hop::Amount(amount_out) => {
                 inflight.amount_out = Some(U128(amount_out));
                 self.remove_rhea(inflight.token_in, inflight.amount_in.0);
@@ -210,7 +209,6 @@ impl Vault {
                 inflight.amount_in.0,
                 true,
             ),
-            Hop::Unreadable => self.mark_stuck(nonce, SwapStep::Swap),
         }
     }
 
@@ -235,11 +233,8 @@ impl Vault {
                 self.remove_rhea(token, delivered);
                 self.settle_swap(nonce, token, delivered, unwinding);
             }
-            Hop::Amount(delivered) if delivered > 0 => {
-                self.remove_rhea(token, delivered);
-                self.credit(token, delivered);
-                self.mark_stuck(nonce, SwapStep::Withdraw);
-            }
+            // A partial delivery waits for the probe, which can see what actually arrived
+            // and split it with the bucket. Crediting it here would skip that split.
             _ => self.mark_stuck(nonce, SwapStep::Withdraw),
         }
     }
@@ -483,15 +478,20 @@ impl Vault {
         };
         self.credit(token, result - reserved);
         self.stage = Stage::Idle;
-        let event = if unwinding {
-            "swap_reverted"
+        if unwinding {
+            emit(
+                "swap_reverted",
+                &format!(r#"{{"nonce":{nonce},"amount":"{result}"}}"#),
+            );
         } else {
-            "executed"
-        };
-        emit(
-            event,
-            &format!(r#"{{"nonce":{nonce},"amount":"{result}"}}"#),
-        );
+            let amount_in = inflight.amount_in.0;
+            emit(
+                "executed",
+                &format!(
+                    r#"{{"nonce":{nonce},"amount_in":"{amount_in}","amount_out":"{result}"}}"#
+                ),
+            );
+        }
     }
 
     fn mark_stuck(&mut self, nonce: u64, step: SwapStep) {

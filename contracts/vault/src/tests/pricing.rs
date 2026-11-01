@@ -131,6 +131,41 @@ fn the_widest_allowed_confidence_passes() {
 }
 
 #[test]
+fn a_huge_confidence_is_wide_without_a_panic() {
+    let mut value = body();
+    value[NEAR_ID]["conf"] = json!(u128::MAX.to_string());
+
+    assert_eq!(read(&value), Err(PriceReject::Wide));
+}
+
+#[test]
+fn a_huge_price_is_unavailable_without_a_panic() {
+    let mut value = body();
+    value[NEAR_ID]["price"] = json!(u128::MAX.to_string());
+
+    assert_eq!(read(&value), Err(PriceReject::Unavailable));
+}
+
+#[test]
+fn the_highest_valid_price_gives_a_reference_price() {
+    let mut value = body();
+    value[NEAR_ID]["price"] = json!(i64::MAX.to_string());
+    value[USDC_ID]["price"] = json!("1");
+    value[USDC_ID]["conf"] = json!("0");
+
+    let expected = i64::MAX as u128 * 100_000_000;
+    assert_eq!(read(&value).unwrap().ref_price(), expected);
+}
+
+#[test]
+fn a_huge_publish_time_is_stale_without_a_panic() {
+    let mut value = body();
+    value[NEAR_ID]["publish_time"] = json!(u64::MAX);
+
+    assert_eq!(read(&value), Err(PriceReject::Stale));
+}
+
+#[test]
 fn the_reference_price_is_wnear_in_usdc() {
     assert_eq!(anchor().ref_price(), 450_000_000);
 }
@@ -145,6 +180,11 @@ fn a_reference_price_inside_the_band_passes() {
 fn a_reference_price_outside_the_band_is_refused() {
     assert!(!anchor().accepts_ref_price(459_000_001, 200));
     assert!(!anchor().accepts_ref_price(440_999_999, 200));
+}
+
+#[test]
+fn a_huge_reference_price_is_outside_the_band() {
+    assert!(!anchor().accepts_ref_price(u128::MAX, 200));
 }
 
 #[test]
