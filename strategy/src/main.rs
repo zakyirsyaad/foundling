@@ -4,20 +4,18 @@
 use std::io::{self, Read, Write};
 use std::process::exit;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
+mod http;
+
 #[cfg(feature = "rehearsal")]
 use foundling_strategy::rehearsal_observe as observe;
 use foundling_strategy::respond;
-#[cfg(not(feature = "rehearsal"))]
-use foundling_strategy::{
-    sources::{observe_market, Call},
-    Obs, Secret,
-};
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "rehearsal")))]
+use foundling_strategy::{Input, Obs, Secret};
+#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
+use http::observe;
 
 const SECRET_NAME: &str = "FOUNDLING_SECRET";
-#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
-const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
-const STATUS_OK: u16 = 200;
 
 // Covered by the WASM hash, so these door rules cannot change without a new hash.
 #[cfg(target_arch = "wasm32")]
@@ -26,31 +24,9 @@ const STATUS_OK: u16 = 200;
 static OUTLAYER_MANIFEST: [u8; include_bytes!("../manifest.json").len()] =
     *include_bytes!("../manifest.json");
 
-#[cfg(not(feature = "rehearsal"))]
-fn observe(_secret: &Secret) -> Option<Obs> {
-    observe_market(send)
-}
-
-#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
-fn send(call: &Call) -> Option<Vec<u8>> {
-    let client = wasi_http_client::Client::new();
-    let request = match &call.body {
-        Some(body) => client
-            .post(call.url)
-            .header("Content-Type", "application/json")
-            .body(body.as_bytes()),
-        None => client.get(call.url),
-    };
-    let response = request.connect_timeout(CONNECT_TIMEOUT).send().ok()?;
-    if response.status() != STATUS_OK {
-        return None;
-    }
-    response.body().ok()
-}
-
 // The host build has no sockets, so it answers as if every source had failed.
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "rehearsal")))]
-fn send(_call: &Call) -> Option<Vec<u8>> {
+fn observe(_secret: &Secret, _input: &Input) -> Option<Obs> {
     None
 }
 

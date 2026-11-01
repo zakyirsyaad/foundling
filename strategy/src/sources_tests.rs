@@ -1,18 +1,19 @@
 use serde_json::json;
 
-use super::sources::{observe_market, parse_price, pool_spot, read_block, read_trade, Call};
+use super::sources::{observe_market, parse_decimal, pool_spot, read_block, read_trades, Call};
 use super::AI_SILENT;
 
-// Raw replies, read on 2026-11-01.
-const TRADE: &[u8] = br#"{"error":[],"result":{"NEARUSD":[["4.38770","61.00000000",1793541547.5691323,"b","l","",5877703]],"last":"1793541547569132368"}}"#;
+// Raw replies, read on 2026-11-01. The trades were asked with `count=3` to stay short.
+const TRADES: &[u8] = br#"{"error":[],"result":{"NEARUSD":[["4.37780","67.00000000",1793543565.4516315,"b","l","",5877989],["4.37780","127.71266986",1793543565.4516315,"b","l","",5877990],["4.37790","305.28733014",1793543565.4516315,"b","l","",5877991]],"last":"1793543565451631496"}}"#;
 const POOL: &str = r#"{"pool_kind":"SIMPLE_POOL","token_account_ids":["17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1","wrap.near"],"amounts":["1053151412531","239807900351508781854310773855"],"total_fee":30,"shares_total_supply":"93730843345258110775473380964","amp":0}"#;
 const HEIGHT: u64 = 222_578_796;
 const BLOCK_NANOS: u64 = 1_793_541_593_157_973_801;
 const BLOCK_SECONDS: u64 = 1_793_541_593;
 // 1053151412531 · 10^8 / 239807900351, computed with Python.
 const SPOT: u128 = 439_164_602;
-const TRADE_PRICE: u128 = 438_770_000;
-const TRADE_SECONDS: u64 = 1_793_541_547;
+// Weighted by volume, computed with Python.
+const TRADE_PRICE: u128 = 437_786_105;
+const TRADE_SECONDS: u64 = 1_793_543_565;
 const POOL_ARGS: &str = "eyJwb29sX2lkIjo0NTEyfQ==";
 
 fn block_reply() -> Vec<u8> {
@@ -28,7 +29,7 @@ fn pool_reply(pool: &str) -> Vec<u8> {
 }
 
 fn spot_of(pool: &str) -> Option<u128> {
-    pool_spot(&pool_reply(pool))
+    pool_spot(&pool_reply(pool), HEIGHT)
 }
 
 fn pool_with(field: &str, value: serde_json::Value) -> String {
@@ -37,8 +38,9 @@ fn pool_with(field: &str, value: serde_json::Value) -> String {
     pool.to_string()
 }
 
-fn trade_of(text: &str) -> Option<(u128, u64)> {
-    read_trade(text.as_bytes())
+fn trades_of(rows: &str) -> Option<(u128, u64)> {
+    let reply = format!(r#"{{"error":[],"result":{{"NEARUSD":{rows}}}}}"#);
+    read_trades(reply.as_bytes())
 }
 
 /// Answers every call, except the one that `broken` names.
@@ -53,7 +55,7 @@ fn network(broken: Option<&'static str>) -> impl FnMut(&Call) -> Option<Vec<u8>>
             return None;
         }
         Some(match name {
-            "trade" => TRADE.to_vec(),
+            "trade" => TRADES.to_vec(),
             "block" => block_reply(),
             _ => pool_reply(POOL),
         })
@@ -61,65 +63,109 @@ fn network(broken: Option<&'static str>) -> impl FnMut(&Call) -> Option<Vec<u8>>
 }
 
 #[test]
-fn a_real_trade_reply_gives_its_price_and_time() {
-    assert_eq!(read_trade(TRADE), Some((TRADE_PRICE, TRADE_SECONDS)));
+fn a_real_trade_reply_gives_the_weighted_price_and_the_newest_time() {
+    assert_eq!(read_trades(TRADES), Some((TRADE_PRICE, TRADE_SECONDS)));
+}
+
+#[test]
+fn a_small_print_at_an_odd_price_barely_moves_the_price() {
+    let rows = r#"[["4.00","1000.0",100.0,"b","l","",1],["5.00","0.1",200.0,"b","l","",2]]"#;
+
+    let (price, _) = trades_of(rows).unwrap();
+
+    assert_eq!(price, 400_009_999);
+}
+
+#[test]
+fn the_newest_time_is_the_last_row() {
+    let rows = r#"[["4.1","1",100.0,"b","l","",1],["4.1","1",200.0,"b","l","",2]]"#;
+
+    assert_eq!(trades_of(rows), Some((410_000_000, 200)));
 }
 
 #[test]
 fn a_trade_reply_with_an_error_is_refused() {
     let reply = r#"{"error":["EQuery:Unknown asset pair"],"result":{"NEARUSD":[["4.3","1",1793541547.5,"b","l","",1]]}}"#;
 
-    assert_eq!(trade_of(reply), None);
+    assert_eq!(read_trades(reply.as_bytes()), None);
 }
 
 #[test]
 fn a_trade_reply_without_rows_is_refused() {
-    assert_eq!(trade_of(r#"{"error":[],"result":{"NEARUSD":[]}}"#), None);
+    assert_eq!(trades_of("[]"), None);
 }
 
 #[test]
 fn a_trade_reply_of_another_pair_is_refused() {
     let reply = r#"{"error":[],"result":{"XBTUSD":[["4.3","1",1793541547.5,"b","l","",1]]}}"#;
 
-    assert_eq!(trade_of(reply), None);
+    assert_eq!(read_trades(reply.as_bytes()), None);
 }
 
 #[test]
 fn a_trade_price_that_is_not_text_is_refused() {
-    let reply = r#"{"error":[],"result":{"NEARUSD":[[4.3,"1",1793541547.5,"b","l","",1]]}}"#;
+    assert_eq!(trades_of(r#"[[4.3,"1",100.0,"b","l","",1]]"#), None);
+}
 
-    assert_eq!(trade_of(reply), None);
+#[test]
+fn a_trade_volume_that_is_not_text_is_refused() {
+    assert_eq!(trades_of(r#"[["4.3",1,100.0,"b","l","",1]]"#), None);
 }
 
 #[test]
 fn a_trade_time_that_is_not_a_number_is_refused() {
-    let reply = r#"{"error":[],"result":{"NEARUSD":[["4.3","1","soon","b","l","",1]]}}"#;
-
-    assert_eq!(trade_of(reply), None);
+    assert_eq!(trades_of(r#"[["4.3","1","soon","b","l","",1]]"#), None);
 }
 
 #[test]
-fn the_newest_trade_is_the_last_row() {
-    let reply = r#"{"error":[],"result":{"NEARUSD":[["4.1","1",100.0,"b","l","",1],["4.2","1",200.0,"b","l","",2]]}}"#;
+fn one_broken_row_refuses_the_whole_reply() {
+    let rows = r#"[["4.1","1",100.0,"b","l","",1],["broken","1",200.0,"b","l","",2]]"#;
 
-    assert_eq!(trade_of(reply), Some((420_000_000, 200)));
+    assert_eq!(trades_of(rows), None);
+}
+
+#[test]
+fn trades_without_volume_are_refused() {
+    assert_eq!(trades_of(r#"[["4.1","0",100.0,"b","l","",1]]"#), None);
+}
+
+#[test]
+fn a_volume_too_big_for_the_arithmetic_is_refused() {
+    let rows = format!(
+        r#"[["4.1","{}",100.0,"b","l","",1]]"#,
+        u128::MAX / 100_000_000
+    );
+
+    assert_eq!(trades_of(&rows), None);
+}
+
+#[test]
+fn a_time_outside_the_type_saturates_and_is_left_to_the_age_rule() {
+    assert_eq!(
+        trades_of(r#"[["4.1","1",-5.0,"b","l","",1]]"#),
+        Some((410_000_000, 0))
+    );
+    assert_eq!(
+        trades_of(r#"[["4.1","1",1e30,"b","l","",1]]"#),
+        Some((410_000_000, u64::MAX))
+    );
 }
 
 #[test]
 fn garbage_is_not_a_trade() {
-    assert_eq!(read_trade(b"<html>blocked</html>"), None);
+    assert_eq!(read_trades(b"<html>blocked</html>"), None);
 }
 
 #[test]
 fn prices_scale_to_eight_decimals() {
-    assert_eq!(parse_price("4.38770"), Some(438_770_000));
-    assert_eq!(parse_price("4"), Some(400_000_000));
-    assert_eq!(parse_price("0.00000001"), Some(1));
+    assert_eq!(parse_decimal("4.38770"), Some(438_770_000));
+    assert_eq!(parse_decimal("4"), Some(400_000_000));
+    assert_eq!(parse_decimal("0.00000001"), Some(1));
 }
 
 #[test]
 fn digits_past_eight_decimals_are_dropped() {
-    assert_eq!(parse_price("4.123456789"), Some(412_345_678));
+    assert_eq!(parse_decimal("4.123456789"), Some(412_345_678));
 }
 
 #[test]
@@ -127,13 +173,13 @@ fn malformed_prices_are_refused() {
     for text in [
         "", ".5", "4.", "-1", "+1", "1e3", "4,3", "4.3.1", " 4.3", "NaN",
     ] {
-        assert_eq!(parse_price(text), None, "{text}");
+        assert_eq!(parse_decimal(text), None, "{text}");
     }
 }
 
 #[test]
 fn a_price_too_big_for_the_type_is_refused() {
-    assert_eq!(parse_price(&"9".repeat(40)), None);
+    assert_eq!(parse_decimal(&"9".repeat(40)), None);
 }
 
 #[test]
@@ -188,14 +234,19 @@ fn a_pool_too_big_for_the_arithmetic_is_refused() {
 fn a_view_that_failed_is_refused() {
     let reply = json!({"jsonrpc": "2.0", "id": "f", "result": {"error": "wasm trap", "logs": [], "block_height": HEIGHT, "block_hash": "h"}});
 
-    assert_eq!(pool_spot(reply.to_string().as_bytes()), None);
+    assert_eq!(pool_spot(reply.to_string().as_bytes(), HEIGHT), None);
+}
+
+#[test]
+fn a_pool_read_at_another_height_is_refused() {
+    assert_eq!(pool_spot(&pool_reply(POOL), HEIGHT + 1), None);
 }
 
 #[test]
 fn an_rpc_error_is_refused() {
     let reply = json!({"jsonrpc": "2.0", "id": "f", "error": {"code": -32000, "message": "busy"}});
 
-    assert_eq!(pool_spot(reply.to_string().as_bytes()), None);
+    assert_eq!(pool_spot(reply.to_string().as_bytes(), HEIGHT), None);
     assert_eq!(read_block(reply.to_string().as_bytes()), None);
 }
 

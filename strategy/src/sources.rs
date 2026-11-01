@@ -9,9 +9,12 @@ use serde_json::{json, Value};
 
 use crate::{Obs, AI_SILENT};
 
-const TRADE_URL: &str = "https://api.kraken.com/0/public/Trades?pair=NEARUSD&count=1";
+const TRADE_HOST: &str = "api.kraken.com";
+/// Several trades, so one small print at an odd price cannot set `pb`.
+const TRADE_PATH: &str = "/0/public/Trades?pair=NEARUSD&count=20";
 const TRADE_PAIR: &str = "NEARUSD";
-const RPC_URL: &str = "https://free.rpc.fastnear.com";
+const RPC_HOST: &str = "free.rpc.fastnear.com";
+const RPC_PATH: &str = "/";
 const REF: &str = "v2.ref-finance.near";
 const USDC: &str = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 const WNEAR: &str = "wrap.near";
@@ -25,7 +28,8 @@ const WNEAR_UNITS_PER_USDC_UNIT: u128 = 1_000_000_000_000_000_000;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 pub struct Call {
-    pub url: &'static str,
+    pub host: &'static str,
+    pub path: &'static str,
     pub body: Option<String>,
 }
 
@@ -53,6 +57,7 @@ struct ViewReply {
 #[derive(Deserialize)]
 struct ViewResult {
     result: Vec<u8>,
+    block_height: u64,
 }
 
 #[derive(Deserialize)]
@@ -66,8 +71,8 @@ struct Pool {
 /// in yet, so this reading can record prices but cannot trade.
 pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<Obs> {
     let (height, ta) = read_block(&send(&block_call())?)?;
-    let pa = pool_spot(&send(&pool_call(height))?)?;
-    let (pb, tb) = read_trade(&send(&trade_call())?)?;
+    let pa = pool_spot(&send(&pool_call(height))?, height)?;
+    let (pb, tb) = read_trades(&send(&trades_call())?)?;
     Some(Obs {
         pa,
         pb,
@@ -81,7 +86,8 @@ pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<
 fn rpc_call(method: &str, params: Value) -> Call {
     let body = json!({ "jsonrpc": "2.0", "id": "foundling", "method": method, "params": params });
     Call {
-        url: RPC_URL,
+        host: RPC_HOST,
+        path: RPC_PATH,
         body: Some(body.to_string()),
     }
 }
@@ -90,7 +96,7 @@ fn block_call() -> Call {
     rpc_call("block", json!({ "finality": "final" }))
 }
 
-/// Pinned to a height, so `ta` is the time of this very price.
+/// Pinned to a height, and `pool_spot` checks the reply, so `ta` is the time of this price.
 fn pool_call(height: u64) -> Call {
     rpc_call(
         "query",
@@ -104,9 +110,10 @@ fn pool_call(height: u64) -> Call {
     )
 }
 
-fn trade_call() -> Call {
+fn trades_call() -> Call {
     Call {
-        url: TRADE_URL,
+        host: TRADE_HOST,
+        path: TRADE_PATH,
         body: None,
     }
 }
@@ -118,8 +125,11 @@ pub fn read_block(reply: &[u8]) -> Option<(u64, u64)> {
 }
 
 /// USDC per wNEAR with eight decimals, the unit of the vault's reference price.
-pub fn pool_spot(reply: &[u8]) -> Option<u128> {
+pub fn pool_spot(reply: &[u8], height: u64) -> Option<u128> {
     let reply: ViewReply = serde_json::from_slice(reply).ok()?;
+    if reply.result.block_height != height {
+        return None;
+    }
     let pool: Pool = serde_json::from_slice(&reply.result.result).ok()?;
     if pool.pool_kind != POOL_KIND || pool.token_account_ids != [USDC, WNEAR] {
         return None;
@@ -133,16 +143,23 @@ pub fn pool_spot(reply: &[u8]) -> Option<u128> {
         .checked_div(wnear / WNEAR_UNITS_PER_USDC_UNIT)
 }
 
-/// The rows run oldest to newest; each is `[price, volume, time, ...]`.
-pub fn read_trade(reply: &[u8]) -> Option<(u128, u64)> {
+/// The price weighted by volume, and the time of the newest trade. The rows run oldest to
+/// newest; each is `[price, volume, time, ...]`.
+pub fn read_trades(reply: &[u8]) -> Option<(u128, u64)> {
     let reply: Value = serde_json::from_slice(reply).ok()?;
     if !reply["error"].as_array()?.is_empty() {
         return None;
     }
-    let row = reply["result"][TRADE_PAIR].as_array()?.last()?;
-    let price = parse_price(row[0].as_str()?)?;
-    let seconds = row[2].as_f64()? as u64;
-    Some((price, seconds))
+    let rows = reply["result"][TRADE_PAIR].as_array()?;
+    let (mut value, mut volume) = (0_u128, 0_u128);
+    for row in rows {
+        let price = parse_decimal(row[0].as_str()?)?;
+        let size = parse_decimal(row[1].as_str()?)?;
+        value = value.checked_add(price.checked_mul(size)?)?;
+        volume = volume.checked_add(size)?;
+    }
+    let seconds = rows.last()?[2].as_f64()? as u64;
+    Some((value.checked_div(volume)?, seconds))
 }
 
 fn is_digits(text: &str) -> bool {
@@ -150,7 +167,7 @@ fn is_digits(text: &str) -> bool {
 }
 
 /// A decimal text to eight decimals. Digits past the eighth are dropped.
-pub fn parse_price(text: &str) -> Option<u128> {
+pub fn parse_decimal(text: &str) -> Option<u128> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, "0"));
     if !is_digits(whole) || !is_digits(fraction) {
         return None;
