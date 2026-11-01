@@ -1,30 +1,101 @@
-//! SP9 stub: roles, parent-only init and events of the Foundling vault, no vault logic.
+//! Foundling vault: a USDC vault born without access keys. See `docs/SPEC.md` for the invariants.
 
-use near_sdk::{env, near, require, AccountId, PanicOnDefault};
+use near_sdk::json_types::U128;
+use near_sdk::store::{IterableMap, LookupMap, LookupSet};
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, PanicOnDefault};
 
-const EVENT_STANDARD: &str = "foundling";
-const EVENT_VERSION: &str = "1.0.0";
-const STUB_VERSION: &str = "sp9-0.1.0";
+pub mod deposit;
+pub mod events;
+pub mod governance;
+pub mod limits;
+pub mod math;
+pub mod policy;
+pub mod redeem;
+pub mod setup;
 
-#[near(serializers = [json])]
-pub struct SelfTest {
-    pub version: String,
-    pub args_hash: String,
+#[cfg(test)]
+mod tests;
+
+use crate::events::emit;
+use crate::governance::RoleChange;
+use crate::policy::Policy;
+use crate::setup::SetupState;
+
+const MILLIS_PER_SECOND: u64 = 1_000;
+
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Token {
+    Usdc,
+    Wnear,
+}
+
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Roles {
     pub governor: AccountId,
     pub keeper: AccountId,
     pub guardian: AccountId,
-    pub frozen: bool,
-    pub cycles: u64,
+}
+
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Assets {
+    pub usdc: AccountId,
+    pub wnear: AccountId,
+    pub rhea: AccountId,
+    pub pool_id: u64,
+}
+
+#[near(serializers = [json])]
+pub struct InitConfig {
+    pub roles: Roles,
+    pub assets: Assets,
+    pub policy: Policy,
+    pub allowlist: Vec<AccountId>,
+}
+
+#[near(serializers = [json])]
+pub struct Book {
+    pub usdc: U128,
+    pub wnear: U128,
+}
+
+#[near(serializers = [borsh])]
+#[derive(BorshStorageKey)]
+enum StorageKey {
+    Shares,
+    NetDeposits,
+    Pending,
+    Claimable,
+    Allowlist,
 }
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Vault {
-    governor: AccountId,
-    keeper: AccountId,
-    guardian: AccountId,
+    roles: Roles,
+    keeper_change: Option<RoleChange>,
+    guardian_change: Option<RoleChange>,
+    assets: Assets,
+    policy: Policy,
+    initial_policy: Policy,
     frozen: bool,
-    cycles: u64,
+    halted: bool,
+    setup: SetupState,
+    /// Change only from call return values, never from `ft_balance_of`, so a donation
+    /// cannot move the share price.
+    usdc_book: u128,
+    wnear_book: u128,
+    total_shares: u128,
+    /// Sum of net deposits, the figure `tvl_cap` is held against.
+    total_net: u128,
+    shares: LookupMap<AccountId, u128>,
+    net_deposits: LookupMap<AccountId, u128>,
+    pending: IterableMap<AccountId, u128>,
+    claimable: LookupMap<(AccountId, Token), u128>,
+    allowlist: LookupSet<AccountId>,
+    last_trigger: u64,
     args_hash: String,
 }
 
@@ -32,14 +103,12 @@ fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn emit(event: &str, data: &str) {
-    env::log_str(&format!(
-        r#"EVENT_JSON:{{"standard":"{EVENT_STANDARD}","version":"{EVENT_VERSION}","event":"{event}","data":[{data}]}}"#
-    ));
-}
-
 fn parent_of(account: &AccountId) -> Option<&str> {
     account.as_str().split_once('.').map(|(_, parent)| parent)
+}
+
+pub(crate) fn now_seconds() -> u64 {
+    env::block_timestamp_ms() / MILLIS_PER_SECOND
 }
 
 #[near]
@@ -47,78 +116,119 @@ impl Vault {
     /// Only the parent account may initialise, so a born-sealed vault can only be
     /// configured inside the parent's CreateAccount + Transfer + DeployContract + init tx.
     #[init]
-    pub fn init(governor: AccountId, keeper: AccountId, guardian: AccountId) -> Self {
+    pub fn init(config: InitConfig) -> Self {
         let me = env::current_account_id();
         let caller = env::predecessor_account_id();
-        require!(parent_of(&me) == Some(caller.as_str()), "init: only the parent account");
+        require!(
+            parent_of(&me) == Some(caller.as_str()),
+            "init: only the parent account"
+        );
         let args_hash = to_hex(&env::sha256(&env::input().unwrap_or_default()));
         emit("initialized", &format!(r#"{{"args_hash":"{args_hash}"}}"#));
-        Self { governor, keeper, guardian, frozen: false, cycles: 0, args_hash }
-    }
 
-    // Keeper methods (the keeper FCK allows exactly these five).
-    pub fn trigger_cycle(&mut self) {
-        self.only(&self.keeper.clone(), "keeper");
-        require!(!self.frozen, "frozen");
-        self.cycles += 1;
-        emit("cycle_triggered", &format!(r#"{{"cycle":{}}}"#, self.cycles));
-    }
-
-    pub fn execute_decision(&mut self) {
-        self.keeper_noop("execute_decision");
-    }
-
-    pub fn advance(&mut self) {
-        self.keeper_noop("advance");
-    }
-
-    pub fn abort_stale_cycle(&mut self) {
-        self.keeper_noop("abort_stale_cycle");
-    }
-
-    pub fn expire_decision(&mut self) {
-        self.keeper_noop("expire_decision");
-    }
-
-    // Guardian methods (the guardian FCK allows exactly these two).
-    pub fn freeze(&mut self) {
-        self.only(&self.guardian.clone(), "guardian");
-        self.frozen = true;
-        emit("frozen", r#"{"by":"guardian"}"#);
-    }
-
-    pub fn cancel_keeper_change(&mut self) {
-        self.only(&self.guardian.clone(), "guardian");
-        emit("keeper_change_cancelled", "{}");
-    }
-
-    // Governor method, not reachable from either FCK.
-    pub fn unfreeze(&mut self) {
-        self.only(&self.governor.clone(), "governor");
-        self.frozen = false;
-        emit("unfrozen", "{}");
-    }
-
-    pub fn selftest(&self) -> SelfTest {
-        SelfTest {
-            version: STUB_VERSION.to_string(),
-            args_hash: self.args_hash.clone(),
-            governor: self.governor.clone(),
-            keeper: self.keeper.clone(),
-            guardian: self.guardian.clone(),
-            frozen: self.frozen,
-            cycles: self.cycles,
+        let mut allowlist = LookupSet::new(StorageKey::Allowlist);
+        allowlist.extend(config.allowlist);
+        Self {
+            roles: config.roles,
+            keeper_change: None,
+            guardian_change: None,
+            assets: config.assets,
+            initial_policy: config.policy.clone(),
+            policy: config.policy,
+            frozen: false,
+            halted: false,
+            setup: SetupState::default(),
+            usdc_book: 0,
+            wnear_book: 0,
+            total_shares: 0,
+            total_net: 0,
+            shares: LookupMap::new(StorageKey::Shares),
+            net_deposits: LookupMap::new(StorageKey::NetDeposits),
+            pending: IterableMap::new(StorageKey::Pending),
+            claimable: LookupMap::new(StorageKey::Claimable),
+            allowlist,
+            last_trigger: 0,
+            args_hash,
         }
+    }
+
+    pub fn roles(&self) -> Roles {
+        self.roles.clone()
+    }
+
+    pub fn policy(&self) -> Policy {
+        self.policy.clone()
+    }
+
+    pub fn book(&self) -> Book {
+        Book {
+            usdc: U128(self.usdc_book),
+            wnear: U128(self.wnear_book),
+        }
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
+    pub fn is_allowed(&self, account: AccountId) -> bool {
+        self.allowlist.contains(&account)
+    }
+
+    pub fn total_shares(&self) -> U128 {
+        U128(self.total_shares)
+    }
+
+    pub fn shares_of(&self, account: AccountId) -> U128 {
+        U128(self.shares.get(&account).copied().unwrap_or(0))
+    }
+
+    pub fn pending_of(&self, account: AccountId) -> U128 {
+        U128(self.pending.get(&account).copied().unwrap_or(0))
+    }
+
+    pub fn net_deposit_of(&self, account: AccountId) -> U128 {
+        U128(self.net_deposit(&account))
+    }
+
+    pub fn claimable_of(&self, account: AccountId, token: Token) -> U128 {
+        U128(self.claimable_amount(&account, token))
+    }
+
+    pub fn args_hash(&self) -> String {
+        self.args_hash.clone()
     }
 }
 
 impl Vault {
-    fn only(&self, role_account: &AccountId, role: &str) {
-        require!(env::predecessor_account_id() == *role_account, format!("only {role}"));
+    pub(crate) fn net_deposit(&self, account: &AccountId) -> u128 {
+        self.net_deposits.get(account).copied().unwrap_or(0)
     }
 
-    fn keeper_noop(&mut self, method: &str) {
-        self.only(&self.keeper.clone(), "keeper");
-        emit("keeper_call", &format!(r#"{{"method":"{method}"}}"#));
+    pub(crate) fn token_account(&self, token: Token) -> AccountId {
+        match token {
+            Token::Usdc => self.assets.usdc.clone(),
+            Token::Wnear => self.assets.wnear.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Vault {
+    pub fn set_halted_for_tests(&mut self, halted: bool) {
+        self.halted = halted;
+    }
+
+    pub fn set_books_for_tests(&mut self, usdc: u128, wnear: u128) {
+        self.usdc_book = usdc;
+        self.wnear_book = wnear;
+    }
+
+    pub fn set_max_mint_for_tests(&mut self, limit: u32) {
+        self.policy.max_mint_per_cycle = limit;
     }
 }
