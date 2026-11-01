@@ -28,8 +28,8 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | --- | --- | --- | --- |
 | 1 | Partner bisa clone repo dan build `contracts/vault`; mesin partner bisa build amd64 (Linux x86-64 atau Docker `--platform linux/amd64`); akun guardian testnet dibuat | Partner | Sebelum mulai |
 | 2 | Uji testnet selesai: callback OutLayer (SP1a, sudah lulus), rahasia terikat hash (SP2, sudah lulus), panggilan NEAR AI dari worker (SP1b), rute Ref (SP8, sudah lulus) | Lead, partner siapkan harness | 3 Nov |
-| 3 | Vault dasar lulus tes di sandbox: deposit, redeem, cap, freeze | Lead | 4 Nov |
-| 4 | Satu siklus penuh di testnet pada vault latihan, lalu `redeem` | Lead, bot dari partner | 6 Nov |
+| 3 | Vault dasar lulus tes di sandbox atau testnet: deposit, redeem, cap, freeze (sudah lulus di testnet) | Lead | 4 Nov |
+| 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` | Lead, bot dari partner | 6 Nov |
 | 5 | Jalur macet dan pulih selesai, Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
 | 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di jaringan terpilih, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
 | 7 | `reveal` dan replay lulus di jaringan terpilih, `verify.py` lulus | Lead, Partner | 12 Nov |
