@@ -261,6 +261,8 @@ impl Vault {
             "v": DECISION_INPUT_VERSION,
             "vault": self.vault_id,
             "nonce": nonce,
+            // The strategy judges how old its sources are by this clock, so replay can too.
+            "now": now,
             "usdc_book": U128(self.usdc_book),
             "wnear_book": U128(self.wnear_book),
             "window_buy": U128(self.buy_window.used(now, epoch_len)),

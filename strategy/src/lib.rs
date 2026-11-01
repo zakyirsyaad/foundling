@@ -1,6 +1,6 @@
-//! The pure part of the strategy, shared with `verify replay`. Reading stdin, the secret
-//! and the price sources stays in `main.rs`, so every rule here can be re-run from what
-//! the Decision recorded on chain.
+//! The pure part of the strategy, shared with `verify replay`. `decide` reads only what the
+//! Decision and the vault's input record, so it can be re-run from chain. Stdin, the secret
+//! and the sockets stay in `main.rs`; raw replies of the price sources are read in `sources`.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -10,10 +10,18 @@ const DECISION_VERSION: u32 = 1;
 const INPUT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 32;
 const BPS: u128 = 10_000;
+/// Older than this, a source counts as dead. A quiet market can go two minutes without a trade.
+const MAX_SOURCE_AGE_SECONDS: u64 = 300;
 #[cfg(feature = "rehearsal")]
 const REHEARSAL_CHAIN: &str = "testnet";
 
+pub const AI_CLEAR: u8 = 0;
+pub const AI_FLAGGED: u8 = 1;
+/// The advisor gave no valid answer, which ends in a hold whatever the prices say.
+pub const AI_SILENT: u8 = 2;
+
 pub mod sizing;
+pub mod sources;
 
 pub use sizing::Limits;
 
@@ -77,6 +85,7 @@ pub struct Input {
     pub v: u32,
     pub vault: String,
     pub nonce: u64,
+    pub now: u64,
     #[serde(with = "decimal")]
     pub usdc_book: u128,
     #[serde(with = "decimal")]
@@ -89,7 +98,7 @@ pub struct Input {
 }
 
 /// Every market input of a decision, carried in the Decision so replay needs no archive.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Obs {
     #[serde(with = "decimal")]
@@ -103,6 +112,18 @@ pub struct Obs {
 }
 
 impl Obs {
+    /// What a run records when the market could not be read.
+    fn unread() -> Self {
+        Self {
+            pa: 0,
+            pb: 0,
+            ta: 0,
+            tb: 0,
+            ai_flag: AI_SILENT,
+            ai_conf: 0,
+        }
+    }
+
     pub fn canonical(&self) -> String {
         format!(
             r#"{{"ai_conf":{},"ai_flag":{},"pa":"{}","pb":"{}","ta":{},"tb":{}}}"#,
@@ -179,9 +200,9 @@ pub struct BadInput;
 /// A failure of any input is a hold, never a sell: otherwise whoever can make the two
 /// sources disagree could force churn that burns slippage every window.
 pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
-    let regime = regime_of(params, obs);
+    let regime = regime_of(params, input.now, obs);
     let (action, wanted, room) = match regime {
-        Regime::RiskOn if obs.ai_flag == 0 => (
+        Regime::RiskOn if obs.ai_flag == AI_CLEAR => (
             Action::BuyRisk,
             params.buy_usdc,
             sizing::buy_room(input, obs.pb),
@@ -206,8 +227,8 @@ pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
 }
 
 /// Thresholds read `pb` only: the pool price can be pushed by anyone with capital.
-fn regime_of(params: &Params, obs: &Obs) -> Regime {
-    if !sources_agree(obs, params.source_dev_bps) {
+fn regime_of(params: &Params, now: u64, obs: &Obs) -> Regime {
+    if obs.ai_flag > AI_FLAGGED || !sources_agree(obs, now, params.source_dev_bps) {
         return Regime::Undetermined;
     }
     if obs.pb >= params.risk_on_above {
@@ -219,8 +240,9 @@ fn regime_of(params: &Params, obs: &Obs) -> Regime {
     }
 }
 
-fn sources_agree(obs: &Obs, max_dev_bps: u128) -> bool {
-    if obs.pa == 0 || obs.pb == 0 {
+fn sources_agree(obs: &Obs, now: u64, max_dev_bps: u128) -> bool {
+    let is_fresh = |seen: u64| seen.abs_diff(now) <= MAX_SOURCE_AGE_SECONDS;
+    if obs.pa == 0 || obs.pb == 0 || !is_fresh(obs.ta) || !is_fresh(obs.tb) {
         return false;
     }
     let gap = obs.pa.abs_diff(obs.pb).checked_mul(BPS);
@@ -302,13 +324,19 @@ fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
 }
 
 /// A rehearsal binary reads prices from the secret, which are whatever the creator wrote,
-/// so it holds on every chain but testnet.
+/// so it holds on every chain but testnet. A secret is sealed once and cannot stay fresh,
+/// so the prices take the vault's clock.
 #[cfg(feature = "rehearsal")]
-pub fn rehearsal_observe(secret: &Secret) -> Option<Obs> {
+pub fn rehearsal_observe(secret: &Secret, input: &Input) -> Option<Obs> {
     if secret.chain != REHEARSAL_CHAIN {
         return None;
     }
-    secret.rehearsal_obs.clone()
+    let obs = secret.rehearsal_obs.clone()?;
+    Some(Obs {
+        ta: input.now,
+        tb: input.now,
+        ..obs
+    })
 }
 
 /// OutLayer runs a binary that has no secret row, just without the secret. This answer
@@ -325,7 +353,7 @@ fn answer_without_secret(input: &Input) -> Decision {
         ref_price: 0,
         commitment: String::new(),
         inputs_digest: String::new(),
-        obs: Obs::default(),
+        obs: Obs::unread(),
         ai_ref: AiRef::default(),
         wasm_hash: String::new(),
     }
@@ -335,7 +363,7 @@ fn answer_without_secret(input: &Input) -> Decision {
 pub fn respond(
     input_data: &str,
     secret: Option<&str>,
-    observe: impl FnOnce(&Secret) -> Option<Obs>,
+    observe: impl FnOnce(&Secret, &Input) -> Option<Obs>,
 ) -> Result<Decision, BadInput> {
     let input: Input = serde_json::from_str(input_data).map_err(|_| BadInput)?;
     if input.v != INPUT_VERSION {
@@ -344,13 +372,8 @@ pub fn respond(
     let Some((secret, salt)) = secret.and_then(open_secret) else {
         return Ok(answer_without_secret(&input));
     };
-    let (obs, verdict) = match observe(&secret) {
-        Some(obs) => {
-            let verdict = decide(&secret.params, &input, &obs);
-            (obs, verdict)
-        }
-        None => (Obs::default(), hold(Regime::Undetermined, 0)),
-    };
+    let obs = observe(&secret, &input).unwrap_or_else(Obs::unread);
+    let verdict = decide(&secret.params, &input, &obs);
     let ai_ref = AiRef::default();
     Ok(Decision {
         v: DECISION_VERSION,
@@ -375,5 +398,7 @@ pub fn respond(
     })
 }
 
+#[cfg(test)]
+mod sources_tests;
 #[cfg(test)]
 mod tests;

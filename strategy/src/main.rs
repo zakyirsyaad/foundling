@@ -4,11 +4,16 @@
 use std::io::{self, Read, Write};
 use std::process::exit;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
+mod http;
+
 #[cfg(feature = "rehearsal")]
 use foundling_strategy::rehearsal_observe as observe;
 use foundling_strategy::respond;
-#[cfg(not(feature = "rehearsal"))]
-use foundling_strategy::{Obs, Secret};
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "rehearsal")))]
+use foundling_strategy::{Input, Obs, Secret};
+#[cfg(all(target_arch = "wasm32", not(feature = "rehearsal")))]
+use http::observe;
 
 const SECRET_NAME: &str = "FOUNDLING_SECRET";
 
@@ -19,9 +24,9 @@ const SECRET_NAME: &str = "FOUNDLING_SECRET";
 static OUTLAYER_MANIFEST: [u8; include_bytes!("../manifest.json").len()] =
     *include_bytes!("../manifest.json");
 
-// The public price sources arrive with SP1b. Until then this build always holds.
-#[cfg(not(feature = "rehearsal"))]
-fn observe(_secret: &Secret) -> Option<Obs> {
+// The host build has no sockets, so it answers as if every source had failed.
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "rehearsal")))]
+fn observe(_secret: &Secret, _input: &Input) -> Option<Obs> {
     None
 }
 

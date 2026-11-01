@@ -12,6 +12,11 @@ const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
+const DECISION_TARGET_BYTES: usize = 600;
+const TIME_OF_OBS: u64 = 12;
+const MAX_ACCOUNT_BYTES: usize = 64;
+const HASH_HEX_BYTES: usize = 64;
+const FIXTURE_NOW: u64 = 1_800_000_000;
 
 fn params() -> Params {
     Params {
@@ -27,6 +32,7 @@ fn input() -> Input {
     let mut input: Input = serde_json::from_str(INPUT).unwrap();
     input.usdc_book = 100_000;
     input.wnear_book = 500;
+    input.now = TIME_OF_OBS;
     input
 }
 
@@ -103,8 +109,17 @@ fn secret_json() -> String {
     .to_string()
 }
 
-fn observed(pb: u128) -> impl FnOnce(&Secret) -> Option<Obs> {
-    move |_| Some(obs(pb, pb))
+/// A reading as fresh as the fixture's `now`.
+fn fresh_obs(price: u128) -> Obs {
+    Obs {
+        ta: FIXTURE_NOW,
+        tb: FIXTURE_NOW,
+        ..obs(price, price)
+    }
+}
+
+fn observed(pb: u128) -> impl FnOnce(&Secret, &Input) -> Option<Obs> {
+    move |_, _| Some(fresh_obs(pb))
 }
 
 #[test]
@@ -304,7 +319,7 @@ fn a_normal_build_refuses_a_secret_with_rehearsal_prices() {
     let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
     secret["rehearsal_obs"] = serde_json::to_value(obs(431_000_000, 431_000_000)).unwrap();
 
-    let decision = respond(INPUT, Some(&secret.to_string()), |_| None).unwrap();
+    let decision = respond(INPUT, Some(&secret.to_string()), |_, _| None).unwrap();
 
     assert_eq!(decision.commitment, "");
 }
@@ -329,13 +344,24 @@ fn rehearsal_prices_work_on_testnet() {
 
 #[cfg(feature = "rehearsal")]
 #[test]
+fn rehearsal_prices_take_the_clock_of_the_vault() {
+    let secret = secret_on_chain("testnet");
+
+    let decision = respond(INPUT, Some(&secret), rehearsal_observe).unwrap();
+
+    assert_eq!(decision.obs.ta, FIXTURE_NOW);
+    assert_eq!(decision.obs.tb, FIXTURE_NOW);
+}
+
+#[cfg(feature = "rehearsal")]
+#[test]
 fn rehearsal_prices_are_ignored_off_testnet() {
     let secret = secret_on_chain("mainnet");
 
     let decision = respond(INPUT, Some(&secret), rehearsal_observe).unwrap();
 
     assert_eq!(decision.action, Action::None);
-    assert_eq!(decision.obs, Obs::default());
+    assert_eq!(decision.obs, Obs::unread());
 }
 
 #[test]
@@ -421,6 +447,185 @@ fn an_ai_flag_cannot_stop_a_sell() {
 }
 
 #[test]
+fn a_silent_advisor_holds_a_buy() {
+    let mut silent = obs(430_000_000, 430_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_silent_advisor_holds_a_sell() {
+    let mut silent = obs(390_000_000, 390_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn an_unknown_ai_flag_holds() {
+    let mut unknown = obs(390_000_000, 390_000_000);
+    unknown.ai_flag = u8::MAX;
+
+    let verdict = decide(&params(), &input(), &unknown);
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+fn input_at(now: u64) -> Input {
+    Input { now, ..input() }
+}
+
+fn seen_at(ta: u64, tb: u64) -> Obs {
+    Obs {
+        ta,
+        tb,
+        ..obs(390_000_000, 390_000_000)
+    }
+}
+
+#[test]
+fn a_stale_trade_holds() {
+    let stale = seen_at(10_000, 10_000 - MAX_SOURCE_AGE_SECONDS - 1);
+
+    let verdict = decide(&params(), &input_at(10_000), &stale);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_stale_block_holds() {
+    let stale = seen_at(10_000 - MAX_SOURCE_AGE_SECONDS - 1, 10_000);
+
+    let verdict = decide(&params(), &input_at(10_000), &stale);
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn two_stale_sources_that_agree_still_hold() {
+    let stale = seen_at(1_000, 1_000);
+
+    let verdict = decide(&params(), &input_at(10_000), &stale);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+}
+
+#[test]
+fn a_time_from_the_future_holds() {
+    let ahead = seen_at(10_000, 10_000 + MAX_SOURCE_AGE_SECONDS + 1);
+
+    assert_eq!(
+        decide(&params(), &input_at(10_000), &ahead).action,
+        Action::None
+    );
+}
+
+#[test]
+fn an_absurd_time_holds() {
+    for seen in [0, u64::MAX] {
+        let verdict = decide(&params(), &input_at(10_000), &seen_at(10_000, seen));
+
+        assert_eq!(verdict.action, Action::None, "{seen}");
+    }
+}
+
+#[test]
+fn the_oldest_allowed_source_passes() {
+    let oldest = 10_000 - MAX_SOURCE_AGE_SECONDS;
+
+    let verdict = decide(&params(), &input_at(10_000), &seen_at(oldest, oldest));
+
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_market_that_cannot_be_read_records_a_silent_advisor() {
+    let decision = respond(INPUT, Some(&secret_json()), |_, _| None).unwrap();
+
+    assert_eq!(decision.obs.ai_flag, AI_SILENT);
+    assert_eq!(decision.obs.pb, 0);
+    assert_eq!(decision.regime, Regime::Undetermined);
+    assert_eq!(decision.action, Action::None);
+}
+
+#[test]
+fn a_run_without_a_secret_records_a_silent_advisor() {
+    let decision = respond(INPUT, None, observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.obs.ai_flag, AI_SILENT);
+}
+
+#[test]
+fn the_market_alone_cannot_trade_while_the_advisor_is_silent() {
+    let reply = |call: &sources::Call| {
+        Some(match &call.body {
+            None => br#"{"error":[],"result":{"NEARUSD":[["3.9","100.0",1800000000.0,"b","l","",1]]}}"#.to_vec(),
+            Some(body) if body.contains("\"block\"") => {
+                json!({"result": {"header": {"height": 7, "timestamp": FIXTURE_NOW * 1_000_000_000_u64}}})
+                    .to_string()
+                    .into_bytes()
+            }
+            Some(_) => {
+                // 39 USDC against 10 wNEAR: 3.9 USDC per wNEAR, below the sell threshold.
+                let pool = json!({
+                    "pool_kind": "SIMPLE_POOL",
+                    "token_account_ids": ["17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "wrap.near"],
+                    "amounts": ["39000000", "10000000000000000000000000"],
+                });
+                json!({"result": {"result": pool.to_string().as_bytes(), "block_height": 7}})
+                    .to_string()
+                    .into_bytes()
+            }
+        })
+    };
+
+    let decision = respond(INPUT, Some(&secret_json()), |_, _| {
+        sources::observe_market(reply)
+    })
+    .unwrap();
+
+    assert_eq!(decision.obs.pa, LOW);
+    assert_eq!(decision.obs.pb, LOW);
+    assert_eq!(decision.action, Action::None);
+}
+
+#[test]
+fn a_decision_with_market_prices_stays_under_the_target_size() {
+    let market = Obs {
+        pa: 439_164_602,
+        pb: 438_770_000,
+        ta: 1_793_541_593,
+        tb: 1_793_541_547,
+        ai_flag: AI_SILENT,
+        ai_conf: 0,
+    };
+    let longest_vault = "v".repeat(MAX_ACCOUNT_BYTES);
+    let input_data = INPUT.replace(
+        r#""vault":"vault.owner.near""#,
+        &format!(r#""vault":"{longest_vault}""#),
+    );
+    let secret = secret_json().replace(
+        r#""wasm_hash":"bb""#,
+        &format!(r#""wasm_hash":"{}""#, "b".repeat(HASH_HEX_BYTES)),
+    );
+
+    let decision = respond(&input_data, Some(&secret), |_, _| Some(market)).unwrap();
+
+    assert_eq!(decision.vault.len(), MAX_ACCOUNT_BYTES);
+    assert_eq!(decision.wasm_hash.len(), HASH_HEX_BYTES);
+    let size = serde_json::to_string(&decision).unwrap().len();
+    assert!(size <= DECISION_TARGET_BYTES, "{size}");
+}
+
+#[test]
 fn the_commitment_matches_an_independent_implementation() {
     let value = commitment("testnet", VAULT, "bb", &params(), &salt());
 
@@ -494,7 +699,7 @@ fn a_run_answers_for_its_own_cycle() {
     assert_eq!(decision.wasm_hash, "bb");
     assert_eq!(decision.action, Action::BuyRisk);
     assert_eq!(decision.commitment, KNOWN_COMMITMENT);
-    let expected = inputs_digest(INPUT, &obs(431_000_000, 431_000_000), "");
+    let expected = inputs_digest(INPUT, &fresh_obs(431_000_000), "");
     assert_eq!(decision.inputs_digest, expected);
 }
 
@@ -509,7 +714,7 @@ fn the_decision_has_the_wire_shape_the_vault_reads() {
     assert_eq!(wire["amount_in"], "1000");
     assert_eq!(wire["ref_price"], "431000000");
     assert_eq!(wire["obs"]["pa"], "431000000");
-    assert_eq!(wire["obs"]["ta"], 11);
+    assert_eq!(wire["obs"]["ta"], FIXTURE_NOW);
 }
 
 #[test]
@@ -591,7 +796,7 @@ fn a_salt_that_is_not_hex_is_no_secret() {
 
 #[test]
 fn no_observation_holds_but_still_proves_the_secret() {
-    let decision = respond(INPUT, Some(&secret_json()), |_| None).unwrap();
+    let decision = respond(INPUT, Some(&secret_json()), |_, _| None).unwrap();
 
     assert_eq!(decision.action, Action::None);
     assert_eq!(decision.regime, Regime::Undetermined);
@@ -612,10 +817,10 @@ fn a_secret_never_reaches_the_answer() {
 fn input_of_another_version_is_refused() {
     let input = INPUT.replace(r#""v":1"#, r#""v":2"#);
 
-    assert_eq!(respond(&input, None, |_| None), Err(BadInput));
+    assert_eq!(respond(&input, None, |_, _| None), Err(BadInput));
 }
 
 #[test]
 fn broken_input_is_refused() {
-    assert_eq!(respond("not json", None, |_| None), Err(BadInput));
+    assert_eq!(respond("not json", None, |_, _| None), Err(BadInput));
 }
