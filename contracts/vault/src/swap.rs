@@ -26,6 +26,7 @@ const ON_DEPOSITED_GAS: Gas = Gas::from_tgas(135);
 const ON_PRICE_GAS: Gas = Gas::from_tgas(205);
 const MIN_EXECUTE_GAS: Gas = Gas::from_tgas(240);
 const MAX_ORACLE_BYTES: usize = 2 * 1024;
+const ORACLE_RESULT: u64 = 0;
 const MAX_HOP_BYTES: usize = 128;
 const FIRST_ATTEMPT: u32 = 0;
 
@@ -101,11 +102,7 @@ impl Vault {
         let read = env::promise_create(
             self.oracle.account.clone(),
             "list_prices_no_older_than",
-            json!({
-                "price_ids": [self.oracle.near_id, self.oracle.usdc_id],
-                "age": self.policy.price_max_age,
-            })
-            .to_string(),
+            self.price_request().to_string(),
             NO_DEPOSIT,
             ORACLE_GAS,
         );
@@ -136,7 +133,7 @@ impl Vault {
             self.reject(nonce, code);
             return;
         }
-        let anchor = match self.read_oracle() {
+        let anchor = match self.read_oracle(ORACLE_RESULT) {
             Ok(anchor) => anchor,
             Err(PriceReject::Unavailable) => {
                 emit_rejected(nonce, PriceReject::Unavailable.code());
@@ -273,8 +270,15 @@ impl Vault {
 }
 
 impl Vault {
-    fn read_oracle(&self) -> Result<Anchor, PriceReject> {
-        let bytes = env::promise_result_checked(0, MAX_ORACLE_BYTES)
+    pub(crate) fn price_request(&self) -> serde_json::Value {
+        json!({
+            "price_ids": [self.oracle.near_id, self.oracle.usdc_id],
+            "age": self.policy.price_max_age,
+        })
+    }
+
+    pub(crate) fn read_oracle(&self, result_index: u64) -> Result<Anchor, PriceReject> {
+        let bytes = env::promise_result_checked(result_index, MAX_ORACLE_BYTES)
             .map_err(|_| PriceReject::Unavailable)?;
         read_anchor(
             &bytes,

@@ -1,0 +1,54 @@
+//! The WASM shell: stdin is the vault's `input_data`, the secret arrives as an environment
+//! variable, and stdout is Decision v1.
+
+use std::io::{self, Read, Write};
+use std::process::exit;
+
+use foundling_strategy::{respond, Obs, Secret};
+
+const SECRET_NAME: &str = "FOUNDLING_SECRET";
+
+// Covered by the WASM hash, so these door rules cannot change without a new hash.
+#[cfg(target_arch = "wasm32")]
+#[used]
+#[unsafe(link_section = "outlayer.manifest")]
+static OUTLAYER_MANIFEST: [u8; include_bytes!("../manifest.json").len()] =
+    *include_bytes!("../manifest.json");
+
+#[cfg(feature = "rehearsal")]
+fn observe(secret: &Secret) -> Option<Obs> {
+    secret.rehearsal_obs.clone()
+}
+
+// The public price sources arrive with SP1b. Until then this build always holds.
+#[cfg(not(feature = "rehearsal"))]
+fn observe(_secret: &Secret) -> Option<Obs> {
+    None
+}
+
+fn fail(message: &str) -> ! {
+    eprintln!("{message}");
+    exit(1);
+}
+
+fn main() {
+    let mut input_data = String::new();
+    if io::stdin().read_to_string(&mut input_data).is_err() {
+        fail("cannot read stdin");
+    }
+    let secret = std::env::var(SECRET_NAME).ok();
+    let Ok(decision) = respond(&input_data, secret.as_deref(), observe) else {
+        fail("bad input");
+    };
+    let Ok(answer) = serde_json::to_string(&decision) else {
+        fail("cannot encode the decision");
+    };
+    let mut stdout = io::stdout();
+    if stdout
+        .write_all(answer.as_bytes())
+        .and_then(|()| stdout.flush())
+        .is_err()
+    {
+        fail("cannot write stdout");
+    }
+}

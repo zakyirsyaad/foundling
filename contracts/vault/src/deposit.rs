@@ -50,6 +50,7 @@ impl Vault {
             && !self.frozen
             && !self.halted
             && self.is_setup_done()
+            && self.selftest_passed
             && self.has_near_floor(0)
             && self.allowlist.contains(sender)
             && amount >= self.policy.min_deposit.0
