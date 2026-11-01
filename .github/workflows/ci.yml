@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [vault, mock-ref, mock-oracle, mock-token]
+        crate: [vault, mock-ref, mock-oracle]
     defaults:
       run:
         working-directory: contracts/${{ matrix.crate }}
@@ -152,12 +152,12 @@ jobs:
           tool: cargo-audit@0.22.2
       - name: Audit every lockfile
         run: |
-          for crate in strategy contracts/vault contracts/mock-ref contracts/mock-oracle contracts/mock-token; do
+          for crate in strategy contracts/vault contracts/mock-ref contracts/mock-oracle; do
             cargo audit --file "$crate/Cargo.lock"
           done
       - name: Keep the ignored advisories out of every WASM
         run: |
-          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle contracts/mock-token; do
+          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle; do
             for package in crypto-bigint zstd zstd-safe; do
               if cargo tree --locked --manifest-path "$crate/Cargo.toml" \
                 --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -q "$package"; then
