@@ -14,6 +14,7 @@ pub mod math;
 pub mod policy;
 pub mod pricing;
 pub mod redeem;
+pub mod selftest;
 pub mod setup;
 pub mod swap;
 
@@ -54,6 +55,7 @@ pub struct Assets {
     pub wnear: AccountId,
     pub rhea: AccountId,
     pub pool_id: u64,
+    pub pool_fee_bps: u32,
     pub usdc_decimals: u8,
     pub wnear_decimals: u8,
 }
@@ -109,6 +111,7 @@ pub struct Vault {
     frozen: bool,
     halted: bool,
     setup: SetupState,
+    selftest_passed: bool,
     /// Change only from call return values, never from `ft_balance_of`, so a donation
     /// cannot move the share price.
     usdc_book: u128,
@@ -173,6 +176,10 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         "init: per_user_cap above tvl_cap"
     );
     require!(
+        config.assets.usdc != config.assets.wnear,
+        "init: the two tokens must differ"
+    );
+    require!(
         config.assets.usdc_decimals <= config.assets.wnear_decimals,
         "init: usdc_decimals above wnear_decimals"
     );
@@ -233,6 +240,7 @@ impl Vault {
             frozen: false,
             halted: false,
             setup: SetupState::default(),
+            selftest_passed: false,
             usdc_book: 0,
             wnear_book: 0,
             total_shares: 0,

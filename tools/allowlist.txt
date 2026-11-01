@@ -17,6 +17,7 @@ account_balance
 storage_usage
 storage_remove
 promise_create
+promise_and
 promise_then
 promise_result
 promise_return

@@ -248,6 +248,12 @@ fn minting_cannot_be_switched_off() {
 }
 
 #[test]
+#[should_panic(expected = "init: the two tokens must differ")]
+fn the_two_tokens_cannot_be_the_same() {
+    init_with(|config| config.assets.usdc = config.assets.wnear.clone());
+}
+
+#[test]
 #[should_panic(expected = "init: usdc_decimals above wnear_decimals")]
 fn usdc_cannot_have_more_decimals_than_wnear() {
     init_with(|config| config.assets.usdc_decimals = 25);

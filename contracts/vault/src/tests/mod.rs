@@ -6,5 +6,6 @@ mod limits;
 mod math;
 pub mod policy;
 mod pricing;
+mod selftest;
 pub mod support;
 mod swap;

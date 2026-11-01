@@ -1,5 +1,6 @@
 use near_sdk::json_types::U128;
 use near_sdk::mock::MockAction;
+use near_sdk::serde_json::json;
 use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
 use near_sdk::{
     serde_json, test_vm_config, testing_env, AccountId, Gas, NearToken, PromiseResult,
@@ -132,6 +133,7 @@ pub fn init_config() -> InitConfig {
             wnear: wnear(),
             rhea: rhea(),
             pool_id: 4512,
+            pool_fee_bps: 30,
             usdc_decimals: 6,
             wnear_decimals: 24,
         },
@@ -167,7 +169,7 @@ pub fn finish_setup(vault: &mut Vault, target: SetupTarget) {
     vault.on_setup(target);
 }
 
-pub fn ready_vault() -> Vault {
+pub fn set_up_vault() -> Vault {
     let mut vault = new_vault();
     for target in [
         SetupTarget::Usdc,
@@ -177,6 +179,29 @@ pub fn ready_vault() -> Vault {
     ] {
         finish_setup(&mut vault, target);
     }
+    vault
+}
+
+pub fn selftest_results() -> Vec<PromiseResult> {
+    let feed = |price: &str| json!({"price": price, "conf": "10000", "expo": -8, "publish_time": START_SECONDS - 30});
+    let replies = [
+        json!({"token_account_ids": [usdc(), wnear()], "total_fee": 30, "amounts": ["1", "1"]}),
+        json!({"near-id": feed("450000000"), "usdc-id": feed("100000000")}),
+        json!({"spec": "ft-1.0.0", "decimals": 6, "icon": null}),
+        json!({"spec": "ft-1.0.0", "decimals": 24, "icon": null}),
+    ];
+    replies
+        .iter()
+        .map(|reply| PromiseResult::Successful(reply.to_string().into_bytes()))
+        .collect()
+}
+
+pub fn ready_vault() -> Vault {
+    let mut vault = set_up_vault();
+    set_caller(alice());
+    vault.selftest();
+    set_callback(selftest_results());
+    vault.on_selftest();
     vault
 }
 

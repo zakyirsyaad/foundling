@@ -245,6 +245,19 @@ impl Vault {
             "wnear_book": U128(self.wnear_book),
             "window_buy": U128(self.buy_window.used(now, epoch_len)),
             "window_sell": U128(self.sell_window.used(now, epoch_len)),
+            // The vault rejects a breach whole, so the strategy has to size inside these.
+            "limits": {
+                "cap_bps": self.policy.cap_bps,
+                "epoch_cap_bps": self.policy.epoch_cap_bps,
+                "max_risk_bps": self.policy.max_risk_bps,
+                "cap_sell_bps": self.policy.cap_sell_bps,
+                "ref_dev_bps": self.policy.ref_dev_bps,
+                "cap_usdc": self.policy.cap_usdc,
+                "epoch_cap_usdc": self.policy.epoch_cap_usdc,
+                "cap_wnear": self.policy.cap_wnear,
+                "epoch_cap_wnear": self.policy.epoch_cap_wnear,
+                "decimal_scale": U128(self.decimal_scale()),
+            },
         });
         json!({
             "source": {

@@ -1,0 +1,27 @@
+[package]
+name = "foundling-strategy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "foundling_strategy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "foundling-strategy"
+path = "src/main.rs"
+
+[features]
+# Takes `obs` from the secret instead of the public sources, for testnet rehearsals.
+rehearsal = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = "debuginfo"
