@@ -342,6 +342,8 @@ Nama perintah adalah antarmuka yang direncanakan; nama final ditetapkan di M1. T
 
 **USDC 6 desimal lulus di testnet** (2026-11-02, token mock berlabel `usdc6.fdl-m6-4e50d1.testnet` yang sumbernya tersimpan bersama buktinya, sedangkan token mock repo adalah milik sandbox; Ref mock dengan skala 10^18, vault `af1a1b3b…`): `selftest` menerima desimal 6 dari `ft_metadata`, dan sebelas skenario jalur macet, siklus jual, `redeem`, serta `reveal` lulus 153 dari 153 cek, masing-masing mulai dengan debu donasi `[V]`. Ini menjawab catatan "token 6 desimal belum diuji" di atas. Rumus swapnya tetap milik Ref mock, jadi Ref asli dengan USDC 6 desimal baru teruji di mainnet. Bukti ada di `~/developer/foundling-spikes/m11/`.
 
+**Tahap yang habis timer dan `Failed` di deposit lulus di testnet** (2026-11-02, vault `af1a1b3b…`, `stuck_after` diturunkan ke 40 detik di burner, Ref mock yang menahan jawaban lewat yield, token spike yang panik di `ft_resolve_transfer`): lima tahap tanpa callback pulih lewat `advance` dan `Failed` di deposit dengan dana sudah di Ref kembali utuh, 115 cek tanpa gagal dalam dua run `[V]`. `advance` ditolak `NOT_STUCK` sebelum waktunya, dan jawaban yang tiba sesudah pulih tidak mengubah buku. Satu run berhenti karena skrip uji mengirim `advance` satu detik terlalu cepat; di sana jawaban terlambat menutup siklus lewat `on_withdrawn` tanpa selisih. Perilaku tertahan itu buatan mock, jadi ini bukti reaksi vault, bukan bukti bahwa Ref asli bisa begitu. Bukti ada di `~/developer/foundling-spikes/m12/`.
+
 ## 8. Pembayaran nyata
 
 | # | Pembayaran | Pembayar → penerima | Mata uang | Biaya per pakai | Receipt untuk pemeriksa |
