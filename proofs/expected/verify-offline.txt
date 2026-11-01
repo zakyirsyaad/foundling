@@ -1,0 +1,4 @@
+verify offline (tier 0a)
+PASS commitment: sha256 matches the committed fixture
+PASS keys: access key list is empty for vault.owner.near
+SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
