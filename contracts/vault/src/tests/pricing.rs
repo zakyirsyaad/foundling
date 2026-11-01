@@ -44,6 +44,24 @@ fn two_fresh_feeds_give_an_anchor() {
 }
 
 #[test]
+fn a_real_oracle_reply_parses() {
+    // One raw reply of aggregate-oracle.near, read from mainnet on 2026-11-01.
+    let raw = br#"{"eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a":{"price":"99981104","conf":"102229","expo":-8,"publish_time":1793525925},"c415de8d2eba7db216527dff4b60e8f3a5311c740dadb233e13e12547e226750":{"price":"437673488","conf":"171059","expo":-8,"publish_time":1793525925}}"#;
+    let limits = PriceLimits {
+        near_id: "c415de8d2eba7db216527dff4b60e8f3a5311c740dadb233e13e12547e226750",
+        usdc_id: "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+        now: 1_793_525_955,
+        max_age: 120,
+        max_conf_bps: 50,
+    };
+
+    let anchor = read_anchor(raw, &limits).unwrap();
+
+    assert_eq!(anchor.near, 437_673_488);
+    assert_eq!(anchor.usdc, 99_981_104);
+}
+
+#[test]
 fn a_null_feed_is_unavailable() {
     let mut value = body();
     value[NEAR_ID] = json!(null);

@@ -555,7 +555,7 @@ impl Vault {
         }
     }
 
-    fn decimal_scale(&self) -> u128 {
+    pub(crate) fn decimal_scale(&self) -> u128 {
         10u128.pow((self.assets.wnear_decimals - self.assets.usdc_decimals) as u32)
     }
 }

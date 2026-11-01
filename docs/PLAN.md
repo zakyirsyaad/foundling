@@ -39,9 +39,9 @@ Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian sele
 
 Urutan jaringan: sandbox → testnet. Mainnet baru dipertimbangkan di milestone 5. Bila lead memilih mainnet, SP1a diulang di mainnet sebelum kontrak beku. Eksekutor OutLayer testnet restart tiap 11–42 detik, jadi run strategi di testnet harus pendek. `aggregate-oracle.near` tidak ada di testnet, jadi testnet memakai oracle dan token mock yang diberi label.
 
-Build WASM strategi memakai `--remap-path-prefix`, supaya path lokal tidak masuk biner publik.
+WASM strategi dibangun hanya lewat `strategy/build.sh`, supaya path lokal tidak masuk biner publik dan hash bisa diulang.
 
-Syarat dari review siklus swap untuk milestone 5: `Stuck` membawa `attempt`; selisih `rhea_bal` masuk `Stuck`, bukan disembunyikan `saturating_sub`; `Failed` di langkah deposit diperiksa lewat `get_deposit` sebelum buku dikredit, karena dana bisa sudah di Rhea bila `ft_resolve_transfer` gagal.
+Syarat dari review: sebelum `reveal` selesai di milestone 7, vektor komitmen dari tes strategi dijalankan juga di crate vault. Untuk milestone 5: `Stuck` membawa `attempt`; selisih `rhea_bal` masuk `Stuck`, bukan disembunyikan `saturating_sub`; `Failed` di langkah deposit diperiksa lewat `get_deposit` sebelum buku dikredit, karena dana bisa sudah di Rhea bila `ft_resolve_transfer` gagal.
 
 ## Sebelum kode dimulai
 

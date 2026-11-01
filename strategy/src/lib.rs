@@ -10,9 +10,15 @@ const DECISION_VERSION: u32 = 1;
 const INPUT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 32;
 const BPS: u128 = 10_000;
+#[cfg(feature = "rehearsal")]
+const REHEARSAL_CHAIN: &str = "testnet";
+
+pub mod sizing;
+
+pub use sizing::Limits;
 
 /// u128 as a decimal string, the only safe form for JSON readers.
-mod decimal {
+pub(crate) mod decimal {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(value: &u128, serializer: S) -> Result<S::Ok, S::Error> {
@@ -41,6 +47,31 @@ pub struct Params {
     pub sell_wnear: u128,
 }
 
+// Canonical forms are fixed text, not serde output: any crate in a build can switch on
+// `serde_json/preserve_order`, near-sdk does, and that changes key order. The vault's
+// `reveal` has to produce these same bytes.
+impl Params {
+    pub fn canonical(&self) -> String {
+        format!(
+            r#"{{"buy_usdc":"{}","risk_off_below":"{}","risk_on_above":"{}","sell_wnear":"{}","source_dev_bps":"{}"}}"#,
+            self.buy_usdc,
+            self.risk_off_below,
+            self.risk_on_above,
+            self.sell_wnear,
+            self.source_dev_bps,
+        )
+    }
+
+    /// The secret cannot be changed once its owner's keys are gone, so a bad set is
+    /// refused here and the vault ends the cycle.
+    fn is_sound(&self) -> bool {
+        self.risk_off_below < self.risk_on_above
+            && self.buy_usdc > 0
+            && self.sell_wnear > 0
+            && (1..=BPS).contains(&self.source_dev_bps)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Input {
     pub v: u32,
@@ -54,6 +85,7 @@ pub struct Input {
     pub window_buy: u128,
     #[serde(with = "decimal")]
     pub window_sell: u128,
+    pub limits: Limits,
 }
 
 /// Every market input of a decision, carried in the Decision so replay needs no archive.
@@ -70,6 +102,15 @@ pub struct Obs {
     pub ai_conf: u8,
 }
 
+impl Obs {
+    pub fn canonical(&self) -> String {
+        format!(
+            r#"{{"ai_conf":{},"ai_flag":{},"pa":"{}","pb":"{}","ta":{},"tb":{}}}"#,
+            self.ai_conf, self.ai_flag, self.pa, self.pb, self.ta, self.tb,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Secret {
@@ -78,6 +119,7 @@ pub struct Secret {
     /// 32 bytes in hex.
     pub salt: String,
     pub params: Params,
+    #[cfg(feature = "rehearsal")]
     #[serde(default)]
     pub rehearsal_obs: Option<Obs>,
 }
@@ -138,12 +180,20 @@ pub struct BadInput;
 /// sources disagree could force churn that burns slippage every window.
 pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
     let regime = regime_of(params, obs);
-    let (action, wanted, book) = match regime {
-        Regime::RiskOn if obs.ai_flag == 0 => (Action::BuyRisk, params.buy_usdc, input.usdc_book),
-        Regime::RiskOff => (Action::SellRisk, params.sell_wnear, input.wnear_book),
+    let (action, wanted, room) = match regime {
+        Regime::RiskOn if obs.ai_flag == 0 => (
+            Action::BuyRisk,
+            params.buy_usdc,
+            sizing::buy_room(input, obs.pb),
+        ),
+        Regime::RiskOff => (
+            Action::SellRisk,
+            params.sell_wnear,
+            sizing::sell_room(input),
+        ),
         _ => return hold(regime, obs.pb),
     };
-    let amount_in = wanted.min(book);
+    let amount_in = wanted.min(room);
     if amount_in == 0 {
         return hold(regime, obs.pb);
     }
@@ -200,7 +250,7 @@ pub fn commitment(
             chain.as_bytes(),
             vault.as_bytes(),
             wasm_hash.as_bytes(),
-            canonical(params).as_bytes(),
+            params.canonical().as_bytes(),
             salt,
         ],
     )
@@ -211,7 +261,7 @@ pub fn inputs_digest(input_data: &str, obs: &Obs, resp_sig_hash: &str) -> String
         b"",
         &[
             input_data.as_bytes(),
-            canonical(obs).as_bytes(),
+            obs.canonical().as_bytes(),
             resp_sig_hash.as_bytes(),
         ],
     )
@@ -232,13 +282,6 @@ fn hash_fields(tag: &[u8], fields: &[&[u8]]) -> String {
         .collect()
 }
 
-/// Sorted keys, no spaces, big numbers already strings.
-fn canonical<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .map(|json| json.to_string())
-        .unwrap_or_default()
-}
-
 fn from_hex(text: &str) -> Option<Vec<u8>> {
     if !text.is_ascii() || !text.len().is_multiple_of(2) {
         return None;
@@ -251,8 +294,21 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
 
 fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
     let secret: Secret = serde_json::from_str(raw).ok()?;
+    if !secret.params.is_sound() {
+        return None;
+    }
     let salt = from_hex(&secret.salt).filter(|salt| salt.len() == SALT_BYTES)?;
     Some((secret, salt))
+}
+
+/// A rehearsal binary reads prices from the secret, which are whatever the creator wrote,
+/// so it holds on every chain but testnet.
+#[cfg(feature = "rehearsal")]
+pub fn rehearsal_observe(secret: &Secret) -> Option<Obs> {
+    if secret.chain != REHEARSAL_CHAIN {
+        return None;
+    }
+    secret.rehearsal_obs.clone()
 }
 
 /// OutLayer runs a binary that has no secret row, just without the secret. This answer

@@ -2,11 +2,16 @@ use serde_json::json;
 
 use super::*;
 
-const VAULT: &str = "vault.fdl.testnet";
-const INPUT: &str = r#"{"nonce":7,"usdc_book":"100000","v":1,"vault":"vault.fdl.testnet","window_buy":"0","window_sell":"0","wnear_book":"500"}"#;
+const VAULT: &str = "vault.owner.near";
+// The vault test `the_input_matches_the_fixture_the_strategy_reads` pins the same file.
+const INPUT: &str = include_str!("../fixtures/input.json");
 // Computed with Python hashlib, independently of this crate.
-const KNOWN_COMMITMENT: &str = "1fbbbf763f52be84f708e45cb8b7a0a5a61de4fcd69bccabc9b708d2befcc6d9";
+const KNOWN_COMMITMENT: &str = "496513afc2402651f0e0402133faf5c0f650395f6eae08d0561ec12825795396";
 const KNOWN_DIGEST: &str = "cc4937204b11b6ebf27d23913e8916cd3dac12c715f5a32abce503b9604ea41d";
+const USDC: u128 = 1_000_000;
+const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
+const HIGH: u128 = 450_000_000;
+const LOW: u128 = 390_000_000;
 
 fn params() -> Params {
     Params {
@@ -19,7 +24,48 @@ fn params() -> Params {
 }
 
 fn input() -> Input {
-    serde_json::from_str(INPUT).unwrap()
+    let mut input: Input = serde_json::from_str(INPUT).unwrap();
+    input.usdc_book = 100_000;
+    input.wnear_book = 500;
+    input
+}
+
+fn large_params() -> Params {
+    Params {
+        buy_usdc: 1_000 * USDC,
+        sell_wnear: 4 * WNEAR,
+        ..params()
+    }
+}
+
+fn sell_size(wnear_book: u128, window_sell: u128) -> u128 {
+    let mut input = input();
+    input.wnear_book = wnear_book;
+    input.window_sell = window_sell;
+    decide(&large_params(), &input, &obs(LOW, LOW)).amount_in
+}
+
+fn buy_size(usdc_book: u128, wnear_book: u128, window_buy: u128) -> u128 {
+    let mut input = input();
+    input.usdc_book = usdc_book;
+    input.wnear_book = wnear_book;
+    input.window_buy = window_buy;
+    decide(&large_params(), &input, &obs(HIGH, HIGH)).amount_in
+}
+
+fn secret_with_param(field: &str, value: &str) -> String {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["params"][field] = json!(value);
+    secret.to_string()
+}
+
+fn refuses_param(field: &str, value: &str) {
+    let secret = secret_with_param(field, value);
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, "");
+    assert_eq!(decision.action, Action::None);
 }
 
 fn obs(pa: u128, pb: u128) -> Obs {
@@ -105,10 +151,191 @@ fn a_price_between_the_thresholds_holds() {
 fn a_buy_never_asks_for_more_than_the_book() {
     let mut input = input();
     input.usdc_book = 300;
+    input.limits.cap_bps = 10_000;
+    input.limits.epoch_cap_bps = 10_000;
+    input.limits.max_risk_bps = 10_000;
 
     let verdict = decide(&params(), &input, &obs(430_000_000, 430_000_000));
 
     assert_eq!(verdict.amount_in, 300);
+}
+
+#[test]
+fn a_sell_stays_inside_half_of_a_large_book() {
+    assert_eq!(sell_size(5 * WNEAR, 0), 5 * WNEAR / 2);
+    assert_eq!(sell_size(6 * WNEAR, 0), 3 * WNEAR);
+    assert_eq!(sell_size(7 * WNEAR, 0), 7 * WNEAR / 2);
+    assert_eq!(sell_size(8 * WNEAR, 0), 4 * WNEAR);
+}
+
+#[test]
+fn a_sell_never_passes_the_absolute_cap() {
+    assert_eq!(sell_size(20 * WNEAR, 0), 4 * WNEAR);
+}
+
+#[test]
+fn a_book_under_the_cap_can_be_swept_whole() {
+    assert_eq!(sell_size(3 * WNEAR, 0), 3 * WNEAR);
+    assert_eq!(sell_size(4 * WNEAR, 0), 4 * WNEAR);
+}
+
+#[test]
+fn a_sell_stays_inside_the_window() {
+    assert_eq!(sell_size(8 * WNEAR, 6 * WNEAR), 2 * WNEAR);
+}
+
+#[test]
+fn a_spent_sell_window_holds() {
+    let mut input = input();
+    input.wnear_book = 8 * WNEAR;
+    input.window_sell = 8 * WNEAR;
+
+    let verdict = decide(&large_params(), &input, &obs(LOW, LOW));
+
+    assert_eq!(verdict.action, Action::None);
+    assert_eq!(verdict.amount_in, 0);
+}
+
+#[test]
+fn a_buy_stays_inside_its_share_of_nav() {
+    assert_eq!(buy_size(100 * USDC, 0, 0), 10 * USDC);
+}
+
+#[test]
+fn a_buy_never_passes_the_absolute_cap() {
+    assert_eq!(buy_size(1_000 * USDC, 0, 0), 15 * USDC);
+}
+
+#[test]
+fn a_buy_stays_inside_the_window() {
+    assert_eq!(buy_size(1_000 * USDC, 0, 20 * USDC), 10 * USDC);
+}
+
+#[test]
+fn a_spent_buy_window_holds() {
+    assert_eq!(buy_size(1_000 * USDC, 0, 30 * USDC), 0);
+}
+
+#[test]
+fn a_buy_counts_wnear_at_the_low_edge_of_the_price_band() {
+    // 2 wNEAR at 4.5 is 9 USDC, valued at 8.82 inside the 200 bps band.
+    assert_eq!(buy_size(100 * USDC, 2 * WNEAR, 0), 10_882_000);
+}
+
+#[test]
+fn a_buy_stops_at_the_exposure_limit() {
+    // 10 wNEAR is 45 USDC: NAV 94.1 at the low edge, exposure 45.9 at the high edge.
+    assert_eq!(buy_size(50 * USDC, 10 * WNEAR, 0), 1_150_000);
+}
+
+#[test]
+fn full_exposure_holds() {
+    assert_eq!(buy_size(40 * USDC, 10 * WNEAR, 0), 0);
+}
+
+#[test]
+fn a_price_too_large_to_value_holds() {
+    let mut input = input();
+    input.wnear_book = 10 * WNEAR;
+    let huge = 10u128.pow(30);
+
+    let verdict = decide(&large_params(), &input, &obs(huge, huge));
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_zero_scale_holds() {
+    let mut input = input();
+    input.limits.decimal_scale = 0;
+
+    let verdict = decide(&large_params(), &input, &obs(HIGH, HIGH));
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn canonical_params_are_fixed_text() {
+    let expected = r#"{"buy_usdc":"1000","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
+
+    assert_eq!(params().canonical(), expected);
+}
+
+#[test]
+fn canonical_obs_are_fixed_text() {
+    let expected = r#"{"ai_conf":0,"ai_flag":0,"pa":"430000000","pb":"431000000","ta":11,"tb":12}"#;
+
+    assert_eq!(obs(430_000_000, 431_000_000).canonical(), expected);
+}
+
+#[test]
+fn thresholds_that_touch_are_refused() {
+    refuses_param("risk_off_below", "420000000");
+}
+
+#[test]
+fn thresholds_in_the_wrong_order_are_refused() {
+    refuses_param("risk_on_above", "300000000");
+}
+
+#[test]
+fn a_zero_buy_size_is_refused() {
+    refuses_param("buy_usdc", "0");
+}
+
+#[test]
+fn a_zero_sell_size_is_refused() {
+    refuses_param("sell_wnear", "0");
+}
+
+#[test]
+fn a_zero_source_gap_is_refused() {
+    refuses_param("source_dev_bps", "0");
+}
+
+#[test]
+fn a_source_gap_above_everything_is_refused() {
+    refuses_param("source_dev_bps", "10001");
+}
+
+#[cfg(not(feature = "rehearsal"))]
+#[test]
+fn a_normal_build_refuses_a_secret_with_rehearsal_prices() {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["rehearsal_obs"] = serde_json::to_value(obs(431_000_000, 431_000_000)).unwrap();
+
+    let decision = respond(INPUT, Some(&secret.to_string()), |_| None).unwrap();
+
+    assert_eq!(decision.commitment, "");
+}
+
+#[cfg(feature = "rehearsal")]
+fn secret_on_chain(chain: &str) -> String {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["chain"] = json!(chain);
+    secret["rehearsal_obs"] = serde_json::to_value(obs(431_000_000, 431_000_000)).unwrap();
+    secret.to_string()
+}
+
+#[cfg(feature = "rehearsal")]
+#[test]
+fn rehearsal_prices_work_on_testnet() {
+    let secret = secret_on_chain("testnet");
+
+    let decision = respond(INPUT, Some(&secret), rehearsal_observe).unwrap();
+
+    assert_eq!(decision.action, Action::BuyRisk);
+}
+
+#[cfg(feature = "rehearsal")]
+#[test]
+fn rehearsal_prices_are_ignored_off_testnet() {
+    let secret = secret_on_chain("mainnet");
+
+    let decision = respond(INPUT, Some(&secret), rehearsal_observe).unwrap();
+
+    assert_eq!(decision.action, Action::None);
+    assert_eq!(decision.obs, Obs::default());
 }
 
 #[test]
@@ -243,7 +470,7 @@ fn a_run_answers_for_its_own_cycle() {
 
     assert_eq!(decision.v, 1);
     assert_eq!(decision.vault, VAULT);
-    assert_eq!(decision.nonce, 7);
+    assert_eq!(decision.nonce, 1);
     assert_eq!(decision.chain, "testnet");
     assert_eq!(decision.wasm_hash, "bb");
     assert_eq!(decision.action, Action::BuyRisk);
@@ -286,7 +513,7 @@ fn no_secret_gives_a_hold_the_vault_will_refuse() {
     assert_eq!(decision.amount_in, 0);
     assert_eq!(decision.commitment, "");
     assert_eq!(decision.wasm_hash, "");
-    assert_eq!(decision.nonce, 7);
+    assert_eq!(decision.nonce, 1);
 }
 
 #[test]

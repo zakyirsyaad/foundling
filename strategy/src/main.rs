@@ -4,7 +4,11 @@
 use std::io::{self, Read, Write};
 use std::process::exit;
 
-use foundling_strategy::{respond, Obs, Secret};
+#[cfg(feature = "rehearsal")]
+use foundling_strategy::rehearsal_observe as observe;
+use foundling_strategy::respond;
+#[cfg(not(feature = "rehearsal"))]
+use foundling_strategy::{Obs, Secret};
 
 const SECRET_NAME: &str = "FOUNDLING_SECRET";
 
@@ -14,11 +18,6 @@ const SECRET_NAME: &str = "FOUNDLING_SECRET";
 #[unsafe(link_section = "outlayer.manifest")]
 static OUTLAYER_MANIFEST: [u8; include_bytes!("../manifest.json").len()] =
     *include_bytes!("../manifest.json");
-
-#[cfg(feature = "rehearsal")]
-fn observe(secret: &Secret) -> Option<Obs> {
-    secret.rehearsal_obs.clone()
-}
 
 // The public price sources arrive with SP1b. Until then this build always holds.
 #[cfg(not(feature = "rehearsal"))]

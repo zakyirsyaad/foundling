@@ -45,6 +45,10 @@ pub struct MockOracle {
 impl MockOracle {
     #[init]
     pub fn init(owner: AccountId) -> Self {
+        require!(
+            env::predecessor_account_id() == env::current_account_id(),
+            "init: only the oracle account"
+        );
         Self {
             owner,
             feeds: LookupMap::new(StorageKey::Feeds),
@@ -98,14 +102,16 @@ mod tests {
         let account: AccountId = account.parse().unwrap();
         let mut context = VMContextBuilder::new();
         context
+            .current_account_id("oracle.testnet".parse().unwrap())
             .predecessor_account_id(account)
             .block_timestamp(NOW * NANOS_PER_SECOND);
         testing_env!(context.build());
     }
 
     fn oracle_with_lag(lag_seconds: u64) -> MockOracle {
-        call_from("owner.testnet");
+        call_from("oracle.testnet");
         let mut oracle = MockOracle::init("owner.testnet".parse().unwrap());
+        call_from("owner.testnet");
         oracle.set_feed(
             "near".to_string(),
             Feed {
@@ -159,6 +165,14 @@ mod tests {
         let answer = oracle.list_prices_no_older_than(vec!["usdc".to_string()], 120);
 
         assert_eq!(answer["usdc"], None);
+    }
+
+    #[test]
+    #[should_panic(expected = "init: only the oracle account")]
+    fn a_stranger_cannot_initialise_the_oracle() {
+        call_from("stranger.testnet");
+
+        MockOracle::init("stranger.testnet".parse().unwrap());
     }
 
     #[test]

@@ -93,6 +93,18 @@ fn the_input_carries_the_nonce_and_the_books() {
 }
 
 #[test]
+fn the_input_matches_the_fixture_the_strategy_reads() {
+    triggered_vault();
+
+    let (_, args, _) = call_to(&outlayer());
+    let input: serde_json::Value =
+        serde_json::from_str(args["input_data"].as_str().unwrap()).unwrap();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../strategy/fixtures/input.json")).unwrap();
+    assert_eq!(input, fixture);
+}
+
+#[test]
 fn the_nonce_is_stored_before_the_answer() {
     let vault = triggered_vault();
 
