@@ -1,0 +1,26 @@
+# Keys and secrets
+keys/
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+*credentials*.json
+
+# Build output
+target/
+*.wasm
+*.cwasm
+node_modules/
+__pycache__/
+
+# Logs
+*.log
+
+# Internal notes and local agent config
+IDEAS*.md
+HACKATHON*.md
+.remember/
+.claude/
+spikes/
+.DS_Store
