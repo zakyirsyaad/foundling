@@ -79,6 +79,8 @@ pub struct MockRef {
     total_fee: u32,
     /// wNEAR in USDC with eight decimals.
     price: u128,
+    /// 10^(wNEAR decimals - USDC decimals).
+    decimal_scale: u128,
     fault: Fault,
     deposits: LookupMap<(AccountId, AccountId), u128>,
 }
@@ -93,6 +95,7 @@ impl MockRef {
         pool_id: u64,
         total_fee: u32,
         price: U128,
+        decimal_scale: U128,
     ) -> Self {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
@@ -105,6 +108,7 @@ impl MockRef {
             pool_id,
             total_fee,
             price: price.0,
+            decimal_scale: decimal_scale.0,
             fault: Fault::None,
             deposits: LookupMap::new(StorageKey::Deposits),
         }
@@ -271,9 +275,9 @@ impl MockRef {
 
     fn quote(&self, token_in: &AccountId, amount_in: u128) -> u128 {
         if *token_in == self.usdc {
-            amount_in * PRICE_ONE / self.price
+            amount_in * self.decimal_scale * PRICE_ONE / self.price
         } else {
-            amount_in * self.price / PRICE_ONE
+            amount_in * self.price / PRICE_ONE / self.decimal_scale
         }
     }
 
@@ -313,6 +317,7 @@ mod tests {
     const PRICE: u128 = 200_000_000;
     const UNIT: u128 = 1_000_000_000_000_000_000_000_000;
     const POOL: u64 = 1103;
+    const MAINNET_SCALE: u128 = 1_000_000_000_000_000_000;
 
     fn account(name: &str) -> AccountId {
         name.parse().unwrap()
@@ -348,7 +353,7 @@ mod tests {
 
     fn set_up() -> MockRef {
         call_from(mock_ref());
-        let contract = MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE));
+        let contract = MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE), U128(1));
         call_from(owner());
         contract
     }
@@ -399,7 +404,7 @@ mod tests {
     fn a_stranger_cannot_initialise_it() {
         call_from(account("stranger.testnet"));
 
-        MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE));
+        MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE), U128(1));
     }
 
     #[test]
@@ -465,6 +470,36 @@ mod tests {
         buy(&mut contract, 2 * UNIT, 1);
 
         assert_eq!(balances(&contract), (0, UNIT));
+    }
+
+    fn real_scale() -> MockRef {
+        call_from(mock_ref());
+        let contract = MockRef::init(
+            owner(),
+            usdc(),
+            wnear(),
+            POOL,
+            30,
+            U128(PRICE),
+            U128(MAINNET_SCALE),
+        );
+        call_from(owner());
+        contract
+    }
+
+    #[test]
+    fn a_buy_bridges_the_decimals_of_the_two_tokens() {
+        let contract = real_scale();
+
+        // Two USDC at 6 decimals buy one wNEAR at 24, at a price of 2.
+        assert_eq!(contract.quote(&usdc(), 2_000_000), UNIT);
+    }
+
+    #[test]
+    fn a_sell_bridges_the_decimals_of_the_two_tokens() {
+        let contract = real_scale();
+
+        assert_eq!(contract.quote(&wnear(), UNIT), 2_000_000);
     }
 
     #[test]
