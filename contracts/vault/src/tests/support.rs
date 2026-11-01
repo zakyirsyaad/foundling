@@ -150,6 +150,7 @@ pub fn init_config() -> InitConfig {
             outlayer_deposit: U128(50_000_000_000_000_000_000_000),
             chain: "testnet".to_string(),
             commitment: "aa".to_string(),
+            reveal_after: START_SECONDS + 3_600,
         },
         oracle: OracleConfig {
             account: oracle(),

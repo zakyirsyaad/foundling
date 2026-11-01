@@ -458,6 +458,25 @@ fn field_boundaries_cannot_be_shifted() {
 }
 
 #[test]
+fn the_shared_fixture_matches_this_crate() {
+    // The vault's `reveal` tests open the same commitment.
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/commitment.json")).unwrap();
+    let text = |field: &str| fixture[field].as_str().unwrap().to_string();
+
+    assert_eq!(params().canonical(), text("params"));
+    assert_eq!(text("salt"), salt_hex());
+    let value = commitment(
+        &text("chain"),
+        &text("vault"),
+        &text("wasm_hash"),
+        &params(),
+        &salt(),
+    );
+    assert_eq!(value, text("commitment"));
+}
+
+#[test]
 fn the_inputs_digest_matches_an_independent_implementation() {
     let digest = inputs_digest(r#"{"v":1}"#, &obs(430_000_000, 431_000_000), "sig");
 

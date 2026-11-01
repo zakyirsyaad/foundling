@@ -260,6 +260,12 @@ fn the_halt_timer_must_pass_the_stuck_timer() {
 }
 
 #[test]
+#[should_panic(expected = "init: reveal_after must be in the future")]
+fn the_reveal_time_cannot_have_passed() {
+    init_with(|config| config.agent.reveal_after = START_SECONDS);
+}
+
+#[test]
 #[should_panic(expected = "init: the two tokens must differ")]
 fn the_two_tokens_cannot_be_the_same() {
     init_with(|config| config.assets.usdc = config.assets.wnear.clone());

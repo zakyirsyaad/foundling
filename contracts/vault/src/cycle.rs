@@ -81,6 +81,8 @@ pub struct AgentConfig {
     pub outlayer_deposit: U128,
     pub chain: String,
     pub commitment: String,
+    /// Seconds. Before this the parameters stay secret, after it anyone may open them.
+    pub reveal_after: u64,
 }
 
 #[near]

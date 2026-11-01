@@ -15,6 +15,7 @@ pub mod policy;
 pub mod pricing;
 pub mod recovery;
 pub mod redeem;
+pub mod reveal;
 pub mod selftest;
 pub mod setup;
 pub mod swap;
@@ -140,9 +141,11 @@ pub struct Vault {
     buy_window: Window,
     sell_window: Window,
     args_hash: String,
+    /// The committed parameters, exactly as opened by `reveal`.
+    revealed: Option<String>,
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -209,6 +212,10 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         !config.agent.commitment.is_empty(),
         "init: commitment must be set"
     );
+    require!(
+        config.agent.reveal_after > now_seconds(),
+        "init: reveal_after must be in the future"
+    );
 }
 
 pub(crate) fn now_seconds() -> u64 {
@@ -269,6 +276,7 @@ impl Vault {
             buy_window: Window::default(),
             sell_window: Window::default(),
             args_hash,
+            revealed: None,
         }
     }
 
