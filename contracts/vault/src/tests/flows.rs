@@ -169,6 +169,47 @@ fn cancelling_needs_one_yocto() {
 }
 
 #[test]
+fn cancelling_after_redeeming_every_share_still_works() {
+    let mut vault = vault_with_shares();
+    deposit(&mut vault, alice(), 10 * USDC_UNIT);
+    let shares = vault.shares_of(alice());
+    set_caller_with_yocto(alice());
+    vault.redeem(shares);
+
+    set_caller_with_yocto(alice());
+    vault.cancel_deposit();
+
+    assert_eq!(vault.pending_of(alice()), U128(0));
+    assert_eq!(vault.net_deposit_of(alice()), U128(0));
+}
+
+#[test]
+fn redeeming_does_not_free_the_cap_held_by_the_queue() {
+    let mut vault = vault_with_shares();
+    deposit(&mut vault, alice(), 40 * USDC_UNIT);
+    let shares = vault.shares_of(alice());
+    set_caller_with_yocto(alice());
+    vault.redeem(shares);
+
+    assert_eq!(vault.net_deposit_of(alice()), U128(40 * USDC_UNIT));
+    assert_eq!(
+        deposit(&mut vault, alice(), 10 * USDC_UNIT + 1),
+        U128(10 * USDC_UNIT + 1)
+    );
+    assert_eq!(deposit(&mut vault, alice(), 10 * USDC_UNIT), U128(0));
+}
+
+#[test]
+fn a_vault_under_its_near_reserve_hands_a_deposit_back() {
+    let mut vault = ready_vault();
+    set_caller_with_balance(usdc(), NearToken::from_millinear(100));
+
+    let unused = vault.ft_on_transfer(alice(), U128(USDC_UNIT), "deposit".to_string());
+
+    assert_eq!(unused, U128(USDC_UNIT));
+}
+
+#[test]
 fn a_flat_vault_mints_the_queue_at_the_book_price() {
     let vault = vault_with_shares();
 

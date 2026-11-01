@@ -55,12 +55,12 @@ pub fn check_buy(policy: &Policy, buy: &BuyContext) -> Result<(), Reject> {
     if buy.window_used + buy.amount_in > epoch_cap {
         return Err(Reject::OverEpochCap);
     }
-    if buy.amount_in > buy.usdc_book {
-        return Err(Reject::OverBook);
-    }
     let max_exposure = of_bps(buy.nav_usdc, policy.max_risk_bps);
     if buy.wnear_value_usdc + buy.amount_in > max_exposure {
         return Err(Reject::ExposureLimit);
+    }
+    if buy.amount_in > buy.usdc_book {
+        return Err(Reject::OverBook);
     }
     Ok(())
 }

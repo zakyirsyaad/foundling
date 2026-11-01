@@ -31,8 +31,10 @@ impl Vault {
         let wnear_out = payout(self.wnear_book, shares.0, self.total_shares);
         require!(usdc_out > 0 || wnear_out > 0, "nothing to pay");
 
+        // Queued money is not behind these shares, so it stays counted until minted or cancelled.
         let net = self.net_deposit(&account);
-        let net_out = mul_div(net, shares.0, held);
+        let queued = self.pending.get(&account).copied().unwrap_or(0);
+        let net_out = mul_div(net - queued, shares.0, held);
         self.net_deposits.insert(account.clone(), net - net_out);
         self.total_net -= net_out;
         self.shares.insert(account.clone(), held - shares.0);

@@ -95,6 +95,20 @@ fn a_buy_exactly_at_the_exposure_limit_passes() {
 }
 
 #[test]
+fn exposure_is_checked_before_the_book() {
+    let context = BuyContext {
+        wnear_value_usdc: 49 * USDC,
+        usdc_book: 5 * USDC,
+        ..buy(6 * USDC)
+    };
+
+    assert_eq!(
+        check_buy(&demo_policy(), &context),
+        Err(Reject::ExposureLimit)
+    );
+}
+
+#[test]
 fn a_sell_inside_every_limit_passes() {
     assert_eq!(check_sell(&demo_policy(), &sell(4 * WNEAR)), Ok(()));
 }

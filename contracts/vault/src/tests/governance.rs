@@ -1,9 +1,10 @@
 use near_sdk::json_types::U128;
 use near_sdk::test_utils::accounts;
+use near_sdk::NearToken;
 
 use crate::policy::PolicyChange;
 use crate::tests::support::*;
-use crate::Vault;
+use crate::{InitConfig, Vault};
 
 #[test]
 fn init_from_the_parent_sets_roles_and_emits_the_hash() {
@@ -169,6 +170,87 @@ fn the_guardian_cannot_clear_a_halt() {
     vault.set_halted_for_tests(true);
     set_caller(guardian());
     vault.clear_halt();
+}
+
+#[test]
+#[should_panic(expected = "NEAR_RESERVE")]
+fn adding_a_depositor_respects_the_near_reserve() {
+    let mut vault = new_vault();
+    set_caller_with_balance(governor(), NearToken::from_millinear(100));
+    vault.add_depositor(accounts(5));
+}
+
+#[test]
+fn a_scheduled_change_names_the_new_account() {
+    let mut vault = new_vault();
+    set_caller(governor());
+
+    vault.schedule_keeper_change(accounts(2));
+
+    assert!(logs_contain(accounts(2).as_str()));
+    assert!(logs_contain("apply_after"));
+}
+
+#[test]
+fn a_tightened_policy_logs_what_changed() {
+    let mut vault = new_vault();
+    set_caller(governor());
+
+    vault.tighten_policy(PolicyChange {
+        cap_usdc: Some(U128(10_000_000)),
+        ..Default::default()
+    });
+
+    assert!(logs_contain("10000000"));
+}
+
+fn init_with(change: impl FnOnce(&mut InitConfig)) {
+    let mut config = init_config();
+    change(&mut config);
+    set_caller(parent());
+    Vault::init(config);
+}
+
+#[test]
+#[should_panic(expected = "init: keeper must differ from the vault")]
+fn the_keeper_cannot_be_the_vault() {
+    init_with(|config| config.roles.keeper = vault_id());
+}
+
+#[test]
+#[should_panic(expected = "init: governor must differ from the parent")]
+fn the_governor_cannot_be_the_parent() {
+    init_with(|config| config.roles.governor = parent());
+}
+
+#[test]
+#[should_panic(expected = "init: keeper must differ from the guardian")]
+fn the_keeper_cannot_be_the_guardian() {
+    init_with(|config| config.roles.guardian = keeper());
+}
+
+#[test]
+#[should_panic(expected = "init: timelock must be set")]
+fn the_timelock_cannot_be_zero() {
+    init_with(|config| config.policy.timelock = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: cooldown must be set")]
+fn the_cooldown_cannot_be_zero() {
+    init_with(|config| config.policy.cooldown = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: max_mint_per_cycle must be set")]
+fn minting_cannot_be_switched_off() {
+    init_with(|config| config.policy.max_mint_per_cycle = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: per_user_cap above tvl_cap")]
+fn the_user_cap_cannot_pass_the_tvl_cap() {
+    init_with(|config| config.policy.per_user_cap = U128(config.policy.tvl_cap.0 + 1));
 }
 
 #[test]

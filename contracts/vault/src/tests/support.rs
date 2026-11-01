@@ -81,6 +81,12 @@ pub fn set_caller_with_yocto(who: AccountId) {
     testing_env!(ctx.build());
 }
 
+pub fn set_caller_with_balance(who: AccountId, balance: NearToken) {
+    let mut ctx = context(who, 0);
+    ctx.account_balance(balance);
+    testing_env!(ctx.build());
+}
+
 pub fn set_callback(results: Vec<PromiseResult>) {
     let ctx = context(vault_id(), 0).build();
     testing_env!(

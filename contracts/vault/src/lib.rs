@@ -107,6 +107,34 @@ fn parent_of(account: &AccountId) -> Option<&str> {
     account.as_str().split_once('.').map(|(_, parent)| parent)
 }
 
+/// The vault is permanent, so a config mistake caught here is the only one that is free.
+fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &AccountId) {
+    let roles = &config.roles;
+    let policy = &config.policy;
+    require!(
+        roles.keeper != *vault,
+        "init: keeper must differ from the vault"
+    );
+    require!(
+        roles.governor != *parent,
+        "init: governor must differ from the parent"
+    );
+    require!(
+        roles.keeper != roles.guardian,
+        "init: keeper must differ from the guardian"
+    );
+    require!(policy.timelock > 0, "init: timelock must be set");
+    require!(policy.cooldown > 0, "init: cooldown must be set");
+    require!(
+        policy.max_mint_per_cycle > 0,
+        "init: max_mint_per_cycle must be set"
+    );
+    require!(
+        policy.per_user_cap.0 <= policy.tvl_cap.0,
+        "init: per_user_cap above tvl_cap"
+    );
+}
+
 pub(crate) fn now_seconds() -> u64 {
     env::block_timestamp_ms() / MILLIS_PER_SECOND
 }
@@ -123,6 +151,7 @@ impl Vault {
             parent_of(&me) == Some(caller.as_str()),
             "init: only the parent account"
         );
+        require_sound_config(&config, &me, &caller);
         let args_hash = to_hex(&env::sha256(&env::input().unwrap_or_default()));
         emit("initialized", &format!(r#"{{"args_hash":"{args_hash}"}}"#));
 

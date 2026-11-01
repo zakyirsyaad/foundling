@@ -84,7 +84,7 @@ impl Vault {
             "Ref storage first"
         );
         let (receiver, method, args, deposit) = self.setup_call(target);
-        self.require_near_floor(deposit);
+        self.require_near_floor(deposit.as_yoctonear());
         self.setup = self.setup.with_step(target, SetupStep::InFlight);
 
         let call = env::promise_create(receiver, method, args, deposit, SETUP_CALL_GAS);
@@ -139,13 +139,13 @@ impl Vault {
     }
 
     /// I11: state writes, `redeem` included, must not fail for lack of NEAR.
-    fn require_near_floor(&self, spend: NearToken) {
+    pub(crate) fn has_near_floor(&self, spend: u128) -> bool {
         let stake = env::storage_byte_cost().as_yoctonear() * env::storage_usage() as u128;
-        let needed = stake + self.policy.near_reserve.0 + spend.as_yoctonear();
-        require!(
-            env::account_balance().as_yoctonear() >= needed,
-            "NEAR_RESERVE"
-        );
+        env::account_balance().as_yoctonear() >= stake + self.policy.near_reserve.0 + spend
+    }
+
+    pub(crate) fn require_near_floor(&self, spend: u128) {
+        require!(self.has_near_floor(spend), "NEAR_RESERVE");
     }
 }
 
