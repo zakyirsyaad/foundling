@@ -51,6 +51,10 @@ pub struct Inflight {
     pub shares_snapshot: U128,
     /// Shares redeemed while this swap ran. Their part of the result goes to the bucket.
     pub shares_burned: U128,
+    /// Already back in the vault's wallet, counted when the swap settles.
+    pub recovered: U128,
+    /// When this swap first stalled. A failed retry must not restart the halt clock.
+    pub stuck_since: Option<u64>,
 }
 
 #[near(serializers = [json, borsh])]
@@ -173,10 +177,12 @@ impl Vault {
                     self.start_ref_swap(&inflight, attempt);
                 }
             }
-            Hop::Failed | Hop::Amount(0) => {
+            Hop::Amount(0) => {
                 self.settle_swap(nonce, inflight.token_in, inflight.amount_in.0, true);
             }
-            _ => self.mark_stuck(nonce, SwapStep::Deposit),
+            // `Failed` proves nothing: the token's resolve step can fail after the funds
+            // reached Ref, so only a probe may credit the book.
+            _ => self.mark_stuck(nonce, attempt, SwapStep::Deposit),
         }
     }
 
@@ -191,10 +197,13 @@ impl Vault {
         };
         match read_hop() {
             // Ref never returns 0 here, and `withdraw` would read it as "take everything".
-            Hop::Amount(0) | Hop::Unreadable => self.mark_stuck(nonce, SwapStep::Swap),
+            Hop::Amount(0) | Hop::Unreadable => self.mark_stuck(nonce, attempt, SwapStep::Swap),
             Hop::Amount(amount_out) => {
+                if !self.take_rhea(inflight.token_in, inflight.amount_in.0) {
+                    self.mark_stuck(nonce, attempt, SwapStep::Swap);
+                    return;
+                }
                 inflight.amount_out = Some(U128(amount_out));
-                self.remove_rhea(inflight.token_in, inflight.amount_in.0);
                 self.add_rhea(inflight.token_out, amount_out);
                 self.inflight = Some(inflight.clone());
                 self.start_withdraw(nonce, attempt, inflight.token_out, amount_out, false);
@@ -226,13 +235,13 @@ impl Vault {
             return;
         }
         match read_hop() {
-            Hop::Amount(delivered) if delivered == amount.0 => {
-                self.remove_rhea(token, delivered);
-                self.settle_swap(nonce, token, delivered, unwinding);
+            Hop::Amount(delivered) if delivered == amount.0 && self.take_rhea(token, delivered) => {
+                let recovered = self.inflight.as_ref().map_or(0, |swap| swap.recovered.0);
+                self.settle_swap(nonce, token, delivered + recovered, unwinding);
             }
             // A partial delivery waits for the probe, which can see what actually arrived
             // and split it with the bucket. Crediting it here would skip that split.
-            _ => self.mark_stuck(nonce, SwapStep::Withdraw),
+            _ => self.mark_stuck(nonce, attempt, SwapStep::Withdraw),
         }
     }
 
@@ -364,6 +373,8 @@ impl Vault {
             amount_out: None,
             shares_snapshot: U128(self.total_shares),
             shares_burned: U128(0),
+            recovered: U128(0),
+            stuck_since: None,
         });
         self.stage = Stage::Depositing {
             nonce,
@@ -423,7 +434,7 @@ impl Vault {
         );
     }
 
-    fn start_withdraw(
+    pub(crate) fn start_withdraw(
         &mut self,
         nonce: u64,
         attempt: u32,
@@ -462,7 +473,7 @@ impl Vault {
 
     /// Credits the book net of what holders who redeemed mid-swap are owed, so a mint at
     /// the next flat point cannot be priced on money that already has an owner.
-    fn settle_swap(&mut self, nonce: u64, token: Token, result: u128, unwinding: bool) {
+    pub(crate) fn settle_swap(&mut self, nonce: u64, token: Token, result: u128, unwinding: bool) {
         let Some(inflight) = self.inflight.take() else {
             return;
         };
@@ -498,11 +509,17 @@ impl Vault {
         }
     }
 
-    fn mark_stuck(&mut self, nonce: u64, step: SwapStep) {
+    fn mark_stuck(&mut self, nonce: u64, attempt: u32, step: SwapStep) {
+        let now = now_seconds();
+        let since = self
+            .inflight
+            .as_mut()
+            .map_or(now, |swap| *swap.stuck_since.get_or_insert(now));
         self.stage = Stage::Stuck {
             nonce,
             step,
-            since: now_seconds(),
+            attempt,
+            since,
         };
         emit(
             "stuck",
@@ -541,10 +558,26 @@ impl Vault {
         }
     }
 
-    fn remove_rhea(&mut self, token: Token, amount: u128) {
+    /// False when the ledger holds less: a gap only the probe can explain.
+    fn take_rhea(&mut self, token: Token, amount: u128) -> bool {
+        let Some(rest) = self.rhea_of(token).checked_sub(amount) else {
+            return false;
+        };
+        self.set_rhea(token, rest);
+        true
+    }
+
+    pub(crate) fn rhea_of(&self, token: Token) -> u128 {
         match token {
-            Token::Usdc => self.rhea_usdc = self.rhea_usdc.saturating_sub(amount),
-            Token::Wnear => self.rhea_wnear = self.rhea_wnear.saturating_sub(amount),
+            Token::Usdc => self.rhea_usdc,
+            Token::Wnear => self.rhea_wnear,
+        }
+    }
+
+    pub(crate) fn set_rhea(&mut self, token: Token, amount: u128) {
+        match token {
+            Token::Usdc => self.rhea_usdc = amount,
+            Token::Wnear => self.rhea_wnear = amount,
         }
     }
 
@@ -567,7 +600,7 @@ fn emit_rejected(nonce: u64, code: &str) {
     );
 }
 
-fn return_callback(
+pub(crate) fn return_callback(
     promise: near_sdk::PromiseIndex,
     method: &str,
     args: serde_json::Value,

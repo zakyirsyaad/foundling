@@ -41,7 +41,7 @@ Urutan jaringan: sandbox → testnet. Mainnet baru dipertimbangkan di milestone 
 
 WASM strategi dibangun hanya lewat `strategy/build.sh`, supaya path lokal tidak masuk biner publik dan hash bisa diulang.
 
-Syarat dari review: sebelum `reveal` selesai di milestone 7, vektor komitmen dari tes strategi dijalankan juga di crate vault. Untuk milestone 5: `Stuck` membawa `attempt`; selisih `rhea_bal` masuk `Stuck`, bukan disembunyikan `saturating_sub`; `Failed` di langkah deposit diperiksa lewat `get_deposit` sebelum buku dikredit, karena dana bisa sudah di Rhea bila `ft_resolve_transfer` gagal.
+Syarat dari review: sebelum `reveal` selesai di milestone 7, vektor komitmen dari tes strategi dijalankan juga di crate vault.
 
 ## Sebelum kode dimulai
 

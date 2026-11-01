@@ -57,7 +57,16 @@ pub enum Stage {
     Stuck {
         nonce: u64,
         step: SwapStep,
+        attempt: u32,
         since: u64,
+    },
+    /// A lock: a second `advance` in the same block must not send a second probe.
+    Probing {
+        nonce: u64,
+        step: SwapStep,
+        attempt: u32,
+        stuck_since: u64,
+        entered_at: u64,
     },
 }
 

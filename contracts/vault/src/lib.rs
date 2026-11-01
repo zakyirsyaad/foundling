@@ -13,6 +13,7 @@ pub mod limits;
 pub mod math;
 pub mod policy;
 pub mod pricing;
+pub mod recovery;
 pub mod redeem;
 pub mod selftest;
 pub mod setup;
@@ -131,7 +132,7 @@ pub struct Vault {
     buckets: LookupMap<u64, Bucket>,
     bucket_claims: LookupMap<(u64, AccountId), u128>,
     /// What this vault holds in its internal Ref account. Only the vault can change it,
-    /// so comparing it with `get_deposit` is immune to donations.
+    /// so comparing it with `get_deposits` is immune to donations.
     rhea_usdc: u128,
     rhea_wnear: u128,
     last_trigger: u64,
@@ -174,6 +175,11 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
     require!(
         policy.per_user_cap.0 <= policy.tvl_cap.0,
         "init: per_user_cap above tvl_cap"
+    );
+    require!(policy.stuck_after > 0, "init: stuck_after must be set");
+    require!(
+        policy.halt_after > policy.stuck_after,
+        "init: halt_after must pass stuck_after"
     );
     require!(
         config.assets.usdc != config.assets.wnear,
@@ -335,6 +341,13 @@ impl Vault {
 impl Vault {
     pub fn set_halted_for_tests(&mut self, halted: bool) {
         self.halted = halted;
+    }
+
+    pub fn set_rhea_for_tests(&mut self, token: Token, amount: u128) {
+        match token {
+            Token::Usdc => self.rhea_usdc = amount,
+            Token::Wnear => self.rhea_wnear = amount,
+        }
     }
 
     pub fn set_books_for_tests(&mut self, usdc: u128, wnear: u128) {

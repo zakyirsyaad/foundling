@@ -8,8 +8,8 @@ use crate::swap::SwapStep;
 use crate::tests::support::*;
 use crate::{Token, Vault};
 
-const USDC_UNIT: u128 = 1_000_000;
-const WNEAR_UNIT: u128 = 1_000_000_000_000_000_000_000_000;
+pub const USDC_UNIT: u128 = 1_000_000;
+pub const WNEAR_UNIT: u128 = 1_000_000_000_000_000_000_000_000;
 const NEAR_ID: &str = "near-id";
 const USDC_ID: &str = "usdc-id";
 const REF_PRICE: u128 = 450_000_000;
@@ -62,14 +62,14 @@ fn prices(near: &str, usdc: &str) -> Vec<PromiseResult> {
     vec![PromiseResult::Successful(body.to_string().into_bytes())]
 }
 
-fn priced(action: &str, amount: u128) -> Vault {
+pub fn priced(action: &str, amount: u128) -> Vault {
     let mut vault = executing(action, amount);
     set_callback(prices("450000000", "100000000"));
     vault.on_price(1);
     vault
 }
 
-fn deposited(amount: u128) -> Vault {
+pub fn deposited(amount: u128) -> Vault {
     let mut vault = priced("buy_risk", amount);
     set_callback(vec![PromiseResult::Successful(
         format!("\"{amount}\"").into_bytes(),
@@ -78,7 +78,7 @@ fn deposited(amount: u128) -> Vault {
     vault
 }
 
-fn swapped(amount: u128, out: u128) -> Vault {
+pub fn swapped(amount: u128, out: u128) -> Vault {
     let mut vault = deposited(amount);
     set_callback(vec![PromiseResult::Successful(
         format!("\"{out}\"").into_bytes(),
@@ -303,16 +303,6 @@ fn an_unused_deposit_returns_to_the_book() {
 }
 
 #[test]
-fn a_failed_deposit_returns_to_the_book() {
-    let mut vault = priced("buy_risk", 8 * USDC_UNIT);
-    set_callback(vec![PromiseResult::Failed]);
-
-    vault.on_deposited(1, 0);
-
-    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
-}
-
-#[test]
 fn a_partial_deposit_is_stuck() {
     let mut vault = priced("buy_risk", 8 * USDC_UNIT);
     set_callback(vec![PromiseResult::Successful(b"\"5\"".to_vec())]);
@@ -476,11 +466,6 @@ fn redeem_then_deposit_returns(result: PromiseResult) {
     set_caller_with_yocto(alice());
     vault.claim_bucket(1);
     assert_eq!(call_to(&usdc()).1["amount"], (4 * USDC_UNIT).to_string());
-}
-
-#[test]
-fn a_holder_who_redeems_before_a_failed_deposit_keeps_a_claim() {
-    redeem_then_deposit_returns(PromiseResult::Failed);
 }
 
 #[test]
