@@ -19,7 +19,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | Deploy mainnet dan vault final | Lead |
 | Bot keeper dan skrip deploy | Partner |
 | `verify.py` dan halaman bukti | Partner |
-| Sandbox dan Attack Lab: harness, mock OutLayer, token mock untuk testnet, tes serangan (oracle mock sudah ada di `contracts/mock-oracle`) | Partner |
+| Sandbox dan Attack Lab: harness, mock OutLayer, token mock untuk testnet, tes serangan (oracle dan Ref mock sudah ada di `contracts/`) | Partner |
 | CI, README, video demo | Partner |
 
 ## Milestone
@@ -30,7 +30,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | 2 | Uji testnet selesai: callback OutLayer (SP1a, sudah lulus), rahasia terikat hash (SP2, sudah lulus), panggilan NEAR AI dari worker (SP1b), rute Ref (SP8, sudah lulus) | Lead, partner siapkan harness | 3 Nov |
 | 3 | Vault dasar lulus tes di sandbox atau testnet: deposit, redeem, cap, freeze (sudah lulus di testnet) | Lead | 4 Nov |
 | 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` (sudah lulus di testnet lewat skrip; bot keeper belum) | Lead, bot dari partner | 6 Nov |
-| 5 | Jalur macet dan pulih selesai, Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
+| 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
 | 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di jaringan terpilih, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
 | 7 | `reveal` dan replay lulus di jaringan terpilih, `verify.py` lulus | Lead, Partner | 12 Nov |
 | 8 | LICENSE, video, README, post X, repo publik, submit oleh lead | Partner, Lead | 13 Nov |
