@@ -11,3 +11,15 @@ panic_utf8
 attached_deposit
 current_account_id
 predecessor_account_id
+prepaid_gas
+block_timestamp
+account_balance
+storage_usage
+storage_remove
+promise_create
+promise_and
+promise_then
+promise_result
+promise_return
+promise_results_count
+block_index
