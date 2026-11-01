@@ -53,6 +53,8 @@ pub struct Inflight {
     pub shares_burned: U128,
     /// Already back in the vault's wallet, counted when the swap settles.
     pub recovered: U128,
+    /// When this swap first stalled. A failed retry must not restart the halt clock.
+    pub stuck_since: Option<u64>,
 }
 
 #[near(serializers = [json, borsh])]
@@ -372,6 +374,7 @@ impl Vault {
             shares_snapshot: U128(self.total_shares),
             shares_burned: U128(0),
             recovered: U128(0),
+            stuck_since: None,
         });
         self.stage = Stage::Depositing {
             nonce,
@@ -507,11 +510,16 @@ impl Vault {
     }
 
     fn mark_stuck(&mut self, nonce: u64, attempt: u32, step: SwapStep) {
+        let now = now_seconds();
+        let since = self
+            .inflight
+            .as_mut()
+            .map_or(now, |swap| *swap.stuck_since.get_or_insert(now));
         self.stage = Stage::Stuck {
             nonce,
             step,
             attempt,
-            since: now_seconds(),
+            since,
         };
         emit(
             "stuck",

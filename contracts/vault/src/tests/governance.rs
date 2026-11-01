@@ -248,6 +248,18 @@ fn minting_cannot_be_switched_off() {
 }
 
 #[test]
+#[should_panic(expected = "init: stuck_after must be set")]
+fn the_stuck_timer_cannot_be_zero() {
+    init_with(|config| config.policy.stuck_after = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: halt_after must pass stuck_after")]
+fn the_halt_timer_must_pass_the_stuck_timer() {
+    init_with(|config| config.policy.halt_after = config.policy.stuck_after);
+}
+
+#[test]
 #[should_panic(expected = "init: the two tokens must differ")]
 fn the_two_tokens_cannot_be_the_same() {
     init_with(|config| config.assets.usdc = config.assets.wnear.clone());

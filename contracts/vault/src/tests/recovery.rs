@@ -632,3 +632,78 @@ fn a_finished_swap_leaves_the_ledger_empty() {
 
     assert_clean_idle(&vault);
 }
+
+#[test]
+fn a_swap_that_lands_after_the_unwind_began_collects_its_output() {
+    let mut vault = deposited(AMOUNT);
+    set_caller_at(alice(), START_SECONDS + STUCK_AFTER);
+    vault.advance(1);
+    set_callback(held(AMOUNT, 0));
+    vault.on_probe(1, 1);
+    set_callback(vec![PromiseResult::Failed]);
+    vault.on_withdrawn(1, 1);
+    assert!(stage_is_stuck(&vault, SwapStep::Withdraw));
+
+    probe(&mut vault, 2, held(0, OUT));
+
+    assert_eq!(call_to(&rhea()).1["token_id"], wnear().as_str());
+    assert!(matches!(
+        vault.stage(),
+        Stage::Withdrawing {
+            unwinding: false,
+            ..
+        }
+    ));
+    withdraw_returns(&mut vault, 2, OUT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().wnear, U128(OUT));
+    assert_eq!(vault.book().usdc, U128(72 * USDC_UNIT));
+    assert!(logs_contain("executed"));
+}
+
+#[test]
+fn a_swap_landing_after_part_of_the_input_came_back_stays_stuck() {
+    let mut vault = deposited(AMOUNT);
+    set_callback(vec![PromiseResult::Failed]);
+    vault.on_swapped(1, 0);
+    withdraw_returns(&mut vault, 0, 5);
+    probe(&mut vault, 1, held(AMOUNT - 5, 0));
+    withdraw_returns(&mut vault, 1, 0);
+
+    probe(&mut vault, 2, held(0, OUT));
+
+    assert!(stage_is_stuck(&vault, SwapStep::Withdraw));
+}
+
+#[test]
+fn repeated_failures_do_not_restart_the_halt_clock() {
+    let mut vault = stuck_on_withdraw(0);
+    let later = START_SECONDS + 3_000;
+    set_caller_at(alice(), later);
+    vault.advance(1);
+    set_callback_at(held(0, OUT), later);
+    vault.on_probe(1, 1);
+    set_callback_at(vec![PromiseResult::Successful(b"\"0\"".to_vec())], later);
+    vault.on_withdrawn(1, 1);
+    assert!(!vault.is_halted());
+    set_caller_at(alice(), START_SECONDS + HALT_AFTER);
+
+    vault.advance(1);
+
+    assert!(vault.is_halted());
+}
+
+#[test]
+fn a_timed_out_retry_does_not_restart_the_halt_clock() {
+    let mut vault = stuck_on_withdraw(0);
+    let later = START_SECONDS + 3_000;
+    set_caller_at(alice(), later);
+    vault.advance(1);
+    set_callback_at(held(0, OUT), later);
+    vault.on_probe(1, 1);
+    set_caller_at(alice(), START_SECONDS + HALT_AFTER);
+
+    vault.advance(1);
+
+    assert!(vault.is_halted());
+}

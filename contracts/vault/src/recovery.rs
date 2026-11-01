@@ -55,6 +55,9 @@ impl Vault {
             self.halted = true;
             emit("halted", &format!(r#"{{"nonce":{nonce}}}"#));
         }
+        if let Some(swap) = self.inflight.as_mut() {
+            swap.stuck_since = Some(stuck.since);
+        }
         let attempt = stuck.attempt + 1;
         self.stage = Stage::Probing {
             nonce,
@@ -127,6 +130,8 @@ impl Vault {
 impl Vault {
     fn stuck_swap(&self, now: u64) -> Option<StuckSwap> {
         let timed_out = |entered_at: u64| now >= entered_at + self.policy.stuck_after;
+        // A retry that times out is the same stall, so the first time it began still counts.
+        let first_stuck = self.inflight.as_ref().and_then(|swap| swap.stuck_since);
         let (nonce, step, attempt, since) = match self.stage {
             Stage::Stuck {
                 nonce,
@@ -138,18 +143,33 @@ impl Vault {
                 nonce,
                 attempt,
                 entered_at,
-            } if timed_out(entered_at) => (nonce, SwapStep::Deposit, attempt, entered_at),
+            } if timed_out(entered_at) => (
+                nonce,
+                SwapStep::Deposit,
+                attempt,
+                first_stuck.unwrap_or(entered_at),
+            ),
             Stage::Swapping {
                 nonce,
                 attempt,
                 entered_at,
-            } if timed_out(entered_at) => (nonce, SwapStep::Swap, attempt, entered_at),
+            } if timed_out(entered_at) => (
+                nonce,
+                SwapStep::Swap,
+                attempt,
+                first_stuck.unwrap_or(entered_at),
+            ),
             Stage::Withdrawing {
                 nonce,
                 attempt,
                 entered_at,
                 ..
-            } if timed_out(entered_at) => (nonce, SwapStep::Withdraw, attempt, entered_at),
+            } if timed_out(entered_at) => (
+                nonce,
+                SwapStep::Withdraw,
+                attempt,
+                first_stuck.unwrap_or(entered_at),
+            ),
             Stage::Probing {
                 nonce,
                 step,
@@ -213,6 +233,15 @@ impl Vault {
             SwapStep::Withdraw if inflight.amount_out.is_some() && held.token_in == 0 => {
                 let ledger = self.rhea_of(inflight.token_out);
                 Some(forward(held.token_out, ledger.checked_sub(held.token_out)?))
+            }
+            // The swap landed late, after the unwind began, and took the whole input.
+            SwapStep::Withdraw
+                if inflight.amount_out.is_none()
+                    && inflight.recovered.0 == 0
+                    && held.token_in == 0
+                    && held.token_out > 0 =>
+            {
+                Some(forward(held.token_out, 0))
             }
             SwapStep::Withdraw if inflight.amount_out.is_none() && held.token_out == 0 => {
                 let ledger = self.rhea_of(inflight.token_in);

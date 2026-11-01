@@ -176,6 +176,11 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         policy.per_user_cap.0 <= policy.tvl_cap.0,
         "init: per_user_cap above tvl_cap"
     );
+    require!(policy.stuck_after > 0, "init: stuck_after must be set");
+    require!(
+        policy.halt_after > policy.stuck_after,
+        "init: halt_after must pass stuck_after"
+    );
     require!(
         config.assets.usdc != config.assets.wnear,
         "init: the two tokens must differ"

@@ -111,7 +111,11 @@ pub fn set_caller_at_block(who: AccountId, block: u64) {
 }
 
 pub fn set_callback(results: Vec<PromiseResult>) {
-    let ctx = context(vault_id(), 0).build();
+    set_callback_at(results, START_SECONDS);
+}
+
+pub fn set_callback_at(results: Vec<PromiseResult>, at: u64) {
+    let ctx = context(vault_id(), at - START_SECONDS).build();
     testing_env!(
         ctx,
         test_vm_config(),
