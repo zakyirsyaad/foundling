@@ -14,9 +14,29 @@ pub fn mul_div(a: u128, b: u128, denominator: u128) -> u128 {
     (U256::from(a) * U256::from(b) / U256::from(denominator)).as_u128()
 }
 
-pub fn mul_div_ceil(a: u128, b: u128, denominator: u128) -> u128 {
-    let denominator = U256::from(denominator);
-    ((U256::from(a) * U256::from(b) + denominator - U256::one()) / denominator).as_u128()
+/// Like `mul_div`, for values a feed controls: `None` instead of a panic in a callback.
+pub fn try_mul_div(a: u128, b: u128, denominator: u128) -> Option<u128> {
+    fit(U256::from(a) * U256::from(b) / U256::from(denominator))
+}
+
+/// The product of the `numerators` over the product of the `denominators`, rounded up.
+pub fn try_ratio_ceil(numerators: &[u128], denominators: &[u128]) -> Option<u128> {
+    let top = product(numerators)?;
+    let bottom = product(denominators)?;
+    if bottom.is_zero() {
+        return None;
+    }
+    fit(top.checked_add(bottom - U256::one())? / bottom)
+}
+
+fn product(factors: &[u128]) -> Option<U256> {
+    factors.iter().try_fold(U256::one(), |value, factor| {
+        value.checked_mul(U256::from(*factor))
+    })
+}
+
+fn fit(value: U256) -> Option<u128> {
+    (value.bits() <= 128).then(|| value.as_u128())
 }
 
 /// `a·b ≤ c·d` for any u128, so comparing two ratios cannot overflow.

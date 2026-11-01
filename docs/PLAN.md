@@ -41,6 +41,8 @@ Urutan jaringan: sandbox → testnet. Mainnet baru dipertimbangkan di milestone 
 
 WASM strategi dibangun hanya lewat `strategy/build.sh`, supaya path lokal tidak masuk biner publik dan hash bisa diulang.
 
+Vault latihan memakai parameter dan salt yang berbeda dari vault final, karena `reveal` menerbitkan keduanya, dan `reveal` yang gagal pun menerbitkan argumennya.
+
 ## Sebelum kode dimulai
 
 1. Partner diundang ke repo dan milestone 1 lulus.

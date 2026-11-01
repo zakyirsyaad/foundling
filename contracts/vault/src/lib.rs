@@ -34,6 +34,8 @@ use crate::swap::{Bucket, Inflight};
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 const FULL_BPS: u32 = 10_000;
+const MAX_REVEAL_DELAY: u64 = 365 * 24 * 60 * 60;
+const SHA256_HEX_CHARS: usize = 64;
 
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -132,8 +134,8 @@ pub struct Vault {
     inflight: Option<Inflight>,
     buckets: LookupMap<u64, Bucket>,
     bucket_claims: LookupMap<(u64, AccountId), u128>,
-    /// What this vault holds in its internal Ref account. Only the vault can change it,
-    /// so comparing it with `get_deposits` is immune to donations.
+    /// What this vault put in its internal Ref account. Anyone can add to that account
+    /// with `mft_transfer`, so the ledger is what counts, not the balance Ref reports.
     rhea_usdc: u128,
     rhea_wnear: u128,
     last_trigger: u64,
@@ -179,6 +181,19 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         policy.per_user_cap.0 <= policy.tvl_cap.0,
         "init: per_user_cap above tvl_cap"
     );
+    require!(
+        policy.epoch_len >= 2 * policy.cooldown,
+        "init: epoch_len must hold two cooldowns"
+    );
+    require!(policy.decision_ttl > 0, "init: decision_ttl must be set");
+    require!(
+        policy.abort_after_blocks > 0,
+        "init: abort_after_blocks must be set"
+    );
+    require!(
+        policy.max_execution_seconds > 0,
+        "init: max_execution_seconds must be set"
+    );
     require!(policy.stuck_after > 0, "init: stuck_after must be set");
     require!(
         policy.halt_after > policy.stuck_after,
@@ -209,13 +224,36 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         "init: wasm_hash must be set"
     );
     require!(
-        !config.agent.commitment.is_empty(),
-        "init: commitment must be set"
+        config.agent.max_instructions > 0,
+        "init: max_instructions must be set"
+    );
+    require!(
+        config.agent.max_memory_mb > 0,
+        "init: max_memory_mb must be set"
+    );
+    require!(
+        !config.agent.build_target.is_empty(),
+        "init: build_target must be set"
+    );
+    require!(
+        is_sha256_hex(&config.agent.commitment),
+        "init: commitment must be 64 lowercase hex"
     );
     require!(
         config.agent.reveal_after > now_seconds(),
         "init: reveal_after must be in the future"
     );
+    require!(
+        config.agent.reveal_after <= now_seconds() + MAX_REVEAL_DELAY,
+        "init: reveal_after is more than a year away"
+    );
+}
+
+fn is_sha256_hex(text: &str) -> bool {
+    text.len() == SHA256_HEX_CHARS
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(crate) fn now_seconds() -> u64 {
@@ -286,6 +324,26 @@ impl Vault {
 
     pub fn policy(&self) -> Policy {
         self.policy.clone()
+    }
+
+    pub fn agent(&self) -> AgentConfig {
+        self.agent.clone()
+    }
+
+    pub fn assets(&self) -> Assets {
+        self.assets.clone()
+    }
+
+    pub fn oracle(&self) -> OracleConfig {
+        self.oracle.clone()
+    }
+
+    pub fn keeper_change(&self) -> Option<RoleChange> {
+        self.keeper_change.clone()
+    }
+
+    pub fn guardian_change(&self) -> Option<RoleChange> {
+        self.guardian_change.clone()
     }
 
     pub fn book(&self) -> Book {

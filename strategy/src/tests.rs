@@ -572,6 +572,15 @@ fn a_short_salt_is_no_secret() {
 }
 
 #[test]
+fn a_salt_with_sign_characters_is_no_secret() {
+    let secret = secret_json().replace(&salt_hex(), &"+0".repeat(32));
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, "");
+}
+
+#[test]
 fn a_salt_that_is_not_hex_is_no_secret() {
     let secret = secret_json().replace(&salt_hex(), &"zz".repeat(32));
 

@@ -283,7 +283,7 @@ fn hash_fields(tag: &[u8], fields: &[&[u8]]) -> String {
 }
 
 fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.is_ascii() || !text.len().is_multiple_of(2) {
+    if !text.bytes().all(|byte| byte.is_ascii_hexdigit()) || !text.len().is_multiple_of(2) {
         return None;
     }
     (0..text.len())

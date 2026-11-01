@@ -25,10 +25,8 @@ impl Vault {
             self.commitment_of(params.as_bytes(), &salt_bytes) == self.agent.commitment,
             "BAD_REVEAL"
         );
-        emit(
-            "revealed",
-            &json!({ "params": params, "salt": salt }).to_string(),
-        );
+        // The text can outgrow the log limit, so it is read from `revealed`.
+        emit("revealed", &json!({ "salt": salt }).to_string());
         self.revealed = Some(params);
     }
 
@@ -61,7 +59,7 @@ impl Vault {
 }
 
 fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.is_ascii() || !text.len().is_multiple_of(2) {
+    if !text.bytes().all(|byte| byte.is_ascii_hexdigit()) || !text.len().is_multiple_of(2) {
         return None;
     }
     (0..text.len())

@@ -200,6 +200,24 @@ impl MockRef {
         env::value_return(amount_reply(amount.0, garbage));
     }
 
+    /// Real Ref lets any account credit another one this way, so a vault's Ref balance
+    /// can grow without the vault doing anything.
+    #[payable]
+    pub fn mft_transfer(
+        &mut self,
+        token_id: String,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+    ) {
+        let _ = memo;
+        let token: AccountId = token_id
+            .parse()
+            .unwrap_or_else(|_| env::panic_str("bad token"));
+        self.debit(&env::predecessor_account_id(), &token, amount.0);
+        self.credit(&receiver_id, &token, amount.0);
+    }
+
     #[payable]
     pub fn storage_deposit(
         &mut self,
@@ -559,6 +577,32 @@ mod tests {
         let _ = withdraw_usdc(&mut contract, 2 * UNIT);
 
         assert_eq!(balances(&contract), (0, 0));
+    }
+
+    #[test]
+    fn anyone_can_credit_another_account_like_ref() {
+        let mut contract = funded(2 * UNIT);
+        let stranger = account("stranger.testnet");
+        call_from(vault());
+
+        contract.mft_transfer(usdc().to_string(), stranger.clone(), U128(UNIT), None);
+
+        assert_eq!(contract.get_deposits(stranger)[&usdc()], U128(UNIT));
+        assert_eq!(balances(&contract), (UNIT, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "E22: not enough tokens in deposit")]
+    fn a_transfer_above_the_balance_fails() {
+        let mut contract = funded(UNIT);
+        call_from(vault());
+
+        contract.mft_transfer(
+            usdc().to_string(),
+            account("stranger.testnet"),
+            U128(2 * UNIT),
+            None,
+        );
     }
 
     #[test]

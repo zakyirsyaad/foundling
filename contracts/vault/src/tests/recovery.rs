@@ -8,7 +8,7 @@ use crate::tests::swap::{deposited, priced, swapped, USDC_UNIT, WNEAR_UNIT};
 use crate::{Token, Vault};
 
 const AMOUNT: u128 = 8 * USDC_UNIT;
-const OUT: u128 = 17 * WNEAR_UNIT / 10;
+const OUT: u128 = 18 * WNEAR_UNIT / 10;
 const STUCK_AFTER: u64 = 600;
 const HALT_AFTER: u64 = 3_600;
 
@@ -313,22 +313,36 @@ fn a_partial_deposit_withdraws_the_part_at_ref_and_counts_the_refund() {
 }
 
 #[test]
-fn ref_holding_more_than_was_sent_stays_stuck() {
+fn a_donation_on_a_deposit_takes_only_what_was_sent() {
     let mut vault = stuck_on_deposit();
 
     probe(&mut vault, 1, held(AMOUNT + 1, 0));
 
-    assert!(stage_is_stuck(&vault, SwapStep::Deposit));
-    assert_eq!(vault.book().usdc, U128(72 * USDC_UNIT));
+    assert_eq!(call_to(&rhea()).1["amount"], AMOUNT.to_string());
+    withdraw_returns(&mut vault, 1, AMOUNT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
 }
 
 #[test]
-fn the_other_token_at_ref_during_a_deposit_stays_stuck() {
+fn the_other_token_is_ignored_during_a_deposit() {
     let mut vault = stuck_on_deposit();
 
     probe(&mut vault, 1, held(0, 1));
 
-    assert!(stage_is_stuck(&vault, SwapStep::Deposit));
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
+}
+
+#[test]
+fn dust_cannot_block_a_deposit_that_never_arrived() {
+    let mut vault = stuck_on_deposit();
+
+    probe(&mut vault, 1, held(1, 1));
+    withdraw_returns(&mut vault, 1, 1);
+
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
 }
 
 #[test]
@@ -370,10 +384,64 @@ fn a_swap_that_ran_collects_its_output() {
 }
 
 #[test]
-fn both_tokens_at_ref_stay_stuck() {
+fn input_dust_does_not_hide_a_finished_swap() {
     let mut vault = stuck_on_swap();
 
     probe(&mut vault, 1, held(1, OUT));
+
+    assert_eq!(call_to(&rhea()).1["token_id"], wnear().as_str());
+    withdraw_returns(&mut vault, 1, OUT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().wnear, U128(OUT));
+}
+
+#[test]
+fn output_dust_joins_a_swap_whose_reply_was_lost() {
+    let mut vault = stuck_on_swap();
+
+    probe(&mut vault, 1, held(0, OUT + 1));
+
+    assert_eq!(call_to(&rhea()).1["amount"], (OUT + 1).to_string());
+    withdraw_returns(&mut vault, 1, OUT + 1);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().wnear, U128(OUT + 1));
+}
+
+#[test]
+fn a_donated_input_unwinds_a_swap_that_did_run() {
+    let mut vault = stuck_on_swap();
+
+    probe(&mut vault, 1, held(AMOUNT, OUT));
+
+    let (_, args, _) = call_to(&rhea());
+    assert_eq!(args["token_id"], usdc().as_str());
+    assert_eq!(args["amount"], AMOUNT.to_string());
+    withdraw_returns(&mut vault, 1, AMOUNT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
+    assert_eq!(vault.book().wnear, U128(0));
+}
+
+#[test]
+fn output_dust_does_not_hide_a_swap_that_never_ran() {
+    let mut vault = stuck_on_swap();
+
+    probe(&mut vault, 1, held(AMOUNT + 1, 1));
+
+    let (_, args, _) = call_to(&rhea());
+    assert_eq!(args["token_id"], usdc().as_str());
+    assert_eq!(args["amount"], AMOUNT.to_string());
+    withdraw_returns(&mut vault, 1, AMOUNT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
+}
+
+#[test]
+fn output_under_the_minimum_is_not_a_finished_swap() {
+    let mut vault = stuck_on_swap();
+    let minimum = vault.inflight().unwrap().min_amount_out.0;
+
+    probe(&mut vault, 1, held(0, minimum - 1));
 
     assert!(stage_is_stuck(&vault, SwapStep::Swap));
 }
@@ -489,22 +557,27 @@ fn a_redeem_while_stuck_keeps_its_claim() {
 }
 
 #[test]
-fn more_at_ref_than_the_ledger_stays_stuck() {
+fn a_donation_on_a_withdraw_takes_only_the_ledger() {
     let mut vault = stuck_on_withdraw(0);
 
     probe(&mut vault, 1, held(0, OUT + 1));
 
-    assert!(stage_is_stuck(&vault, SwapStep::Withdraw));
-    assert_eq!(vault.book().wnear, U128(0));
+    assert_eq!(call_to(&rhea()).1["amount"], OUT.to_string());
+    withdraw_returns(&mut vault, 1, OUT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().wnear, U128(OUT));
 }
 
 #[test]
-fn the_other_token_at_ref_during_a_withdraw_stays_stuck() {
+fn the_other_token_is_ignored_during_a_withdraw() {
     let mut vault = stuck_on_withdraw(0);
 
     probe(&mut vault, 1, held(1, OUT));
 
-    assert!(stage_is_stuck(&vault, SwapStep::Withdraw));
+    assert_eq!(call_to(&rhea()).1["token_id"], wnear().as_str());
+    withdraw_returns(&mut vault, 1, OUT);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().wnear, U128(OUT));
 }
 
 #[test]
@@ -662,7 +735,7 @@ fn a_swap_that_lands_after_the_unwind_began_collects_its_output() {
 }
 
 #[test]
-fn a_swap_landing_after_part_of_the_input_came_back_stays_stuck() {
+fn a_partial_unwind_ignores_the_other_token() {
     let mut vault = deposited(AMOUNT);
     set_callback(vec![PromiseResult::Failed]);
     vault.on_swapped(1, 0);
@@ -670,9 +743,12 @@ fn a_swap_landing_after_part_of_the_input_came_back_stays_stuck() {
     probe(&mut vault, 1, held(AMOUNT - 5, 0));
     withdraw_returns(&mut vault, 1, 0);
 
-    probe(&mut vault, 2, held(0, OUT));
+    probe(&mut vault, 2, held(AMOUNT - 5, OUT));
 
-    assert!(stage_is_stuck(&vault, SwapStep::Withdraw));
+    assert_eq!(call_to(&rhea()).1["token_id"], usdc().as_str());
+    withdraw_returns(&mut vault, 2, AMOUNT - 5);
+    assert_clean_idle(&vault);
+    assert_eq!(vault.book().usdc, U128(80 * USDC_UNIT));
 }
 
 #[test]

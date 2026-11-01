@@ -1,3 +1,4 @@
+use near_sdk::env;
 use near_sdk::serde_json::{self, Value};
 
 use crate::tests::support::*;
@@ -75,14 +76,47 @@ fn anyone_can_reveal() {
 }
 
 #[test]
-fn the_event_publishes_params_and_salt() {
+fn the_event_publishes_the_salt_and_the_view_the_params() {
     let mut vault = committed_vault();
 
     reveal_at_open(&mut vault);
 
     assert!(logs_contain("revealed"));
-    assert!(logs_contain("risk_on_above"));
     assert!(logs_contain(&text("salt")));
+    assert_eq!(vault.revealed(), Some(text("params")));
+}
+
+fn commitment_of_params(params: &str) -> String {
+    let salt: Vec<u8> = (0..32).collect();
+    let fields = [
+        text("chain").into_bytes(),
+        text("vault").into_bytes(),
+        text("wasm_hash").into_bytes(),
+        params.as_bytes().to_vec(),
+        salt,
+    ];
+    let mut preimage = b"foundling/v1/commitment".to_vec();
+    for field in fields {
+        preimage.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        preimage.extend_from_slice(&field);
+    }
+    env::sha256(&preimage)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn a_long_parameter_text_still_opens() {
+    set_caller(parent());
+    let params = "x".repeat(20_000);
+    let commitment = commitment_of_params(&params);
+    let mut vault = vault_with(|config| config.agent.commitment = commitment);
+    set_caller_at(alice(), OPENS_AT);
+
+    vault.reveal(params.clone(), text("salt"));
+
+    assert_eq!(vault.revealed(), Some(params));
 }
 
 #[test]
@@ -132,6 +166,15 @@ fn a_salt_that_is_not_hex_is_refused() {
     set_caller_at(alice(), OPENS_AT);
 
     vault.reveal(text("params"), "zz".repeat(32));
+}
+
+#[test]
+#[should_panic(expected = "BAD_SALT")]
+fn a_salt_with_sign_characters_is_refused() {
+    let mut vault = committed_vault();
+    set_caller_at(alice(), OPENS_AT);
+
+    vault.reveal(text("params"), "+0".repeat(32));
 }
 
 #[test]

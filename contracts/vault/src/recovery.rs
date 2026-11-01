@@ -1,7 +1,6 @@
-//! Moving a stuck swap again, from what Ref says it holds. Only the vault can change its
-//! internal Ref balance, so a gap from the ledger means a hop finished without its
-//! callback. A swap is never repeated, its `min_amount_out` is stale by then, and no loss
-//! is ever written: whatever the reading cannot explain stays `Stuck`.
+//! Moving a stuck swap again, from what Ref says it holds. A balance under the ledger means
+//! a hop finished without its callback. A swap is never repeated, its `min_amount_out` is
+//! stale by then, and no loss is ever written: what cannot be explained stays `Stuck`.
 
 use std::collections::BTreeMap;
 
@@ -106,16 +105,16 @@ impl Vault {
             self.stay_stuck(nonce, step, attempt, stuck_since);
             return;
         };
-        let reading = self.read_deposits(&inflight);
-        let plan = reading
-            .as_ref()
-            .and_then(|held| self.plan(step, &inflight, held));
-        let (Some(held), Some(recovery)) = (reading, plan) else {
+        let plan = self
+            .read_deposits(&inflight)
+            .and_then(|held| self.plan(step, &inflight, &held));
+        let Some(recovery) = plan else {
             self.stay_stuck(nonce, step, attempt, stuck_since);
             return;
         };
-        self.set_rhea(inflight.token_in, held.token_in);
-        self.set_rhea(inflight.token_out, held.token_out);
+        self.set_rhea(inflight.token_in, 0);
+        self.set_rhea(inflight.token_out, 0);
+        self.set_rhea(recovery.token, recovery.at_ref);
         self.apply(nonce, attempt, inflight, recovery);
     }
 
@@ -204,9 +203,13 @@ impl Vault {
         })
     }
 
-    /// `None` when the reading cannot be explained by the step that was running.
+    /// Anyone can credit the vault's Ref account with `mft_transfer`, so a balance above
+    /// what the vault expects is a donation: it never changes a decision, and only what
+    /// the vault put there is withdrawn. `None` when nothing explains the reading.
     fn plan(&self, step: SwapStep, inflight: &Inflight, held: &Held) -> Option<Recovery> {
         let amount_in = inflight.amount_in.0;
+        let min_out = inflight.min_amount_out.0;
+        let ledger_in = self.rhea_of(inflight.token_in);
         let unwind = |at_ref, arrived| Recovery {
             token: inflight.token_in,
             unwinding: true,
@@ -220,34 +223,30 @@ impl Vault {
             arrived,
         };
         match step {
-            SwapStep::Deposit if held.token_out == 0 => {
-                let refunded = amount_in.checked_sub(held.token_in)?;
-                Some(unwind(held.token_in, refunded))
+            SwapStep::Deposit => {
+                let at_ref = held.token_in.min(amount_in);
+                Some(unwind(at_ref, amount_in - at_ref))
             }
-            SwapStep::Swap if held.token_out == 0 && held.token_in == amount_in => {
-                Some(unwind(held.token_in, 0))
-            }
-            SwapStep::Swap if held.token_in == 0 && held.token_out > 0 => {
-                Some(forward(held.token_out, 0))
-            }
-            SwapStep::Withdraw if inflight.amount_out.is_some() && held.token_in == 0 => {
+            SwapStep::Swap if held.token_in >= amount_in => Some(unwind(amount_in, 0)),
+            SwapStep::Swap if held.token_out >= min_out => Some(forward(held.token_out, 0)),
+            SwapStep::Swap => None,
+            SwapStep::Withdraw if inflight.amount_out.is_some() => {
                 let ledger = self.rhea_of(inflight.token_out);
-                Some(forward(held.token_out, ledger.checked_sub(held.token_out)?))
+                let at_ref = held.token_out.min(ledger);
+                Some(forward(at_ref, ledger - at_ref))
             }
             // The swap landed late, after the unwind began, and took the whole input.
             SwapStep::Withdraw
-                if inflight.amount_out.is_none()
-                    && inflight.recovered.0 == 0
-                    && held.token_in == 0
-                    && held.token_out > 0 =>
+                if inflight.recovered.0 == 0
+                    && held.token_in < ledger_in
+                    && held.token_out >= min_out =>
             {
                 Some(forward(held.token_out, 0))
             }
-            SwapStep::Withdraw if inflight.amount_out.is_none() && held.token_out == 0 => {
-                let ledger = self.rhea_of(inflight.token_in);
-                Some(unwind(held.token_in, ledger.checked_sub(held.token_in)?))
+            SwapStep::Withdraw => {
+                let at_ref = held.token_in.min(ledger_in);
+                Some(unwind(at_ref, ledger_in - at_ref))
             }
-            _ => None,
         }
     }
 
