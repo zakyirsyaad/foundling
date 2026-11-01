@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use near_sdk::json_types::U128;
 use near_sdk::{near, serde_json};
 
-use crate::math::{mul_div, mul_div_ceil, product_at_most};
+use crate::math::{mul_div, product_at_most, try_mul_div, try_ratio_ceil};
 
 const BPS: u128 = 10_000;
 /// `ref_price` is wNEAR in USDC with eight decimals.
@@ -100,24 +100,19 @@ impl Anchor {
         product_at_most(anchor.abs_diff(ref_price), BPS, anchor, max_dev_bps as u128)
     }
 
-    /// `scale` is 10^(wNEAR decimals - USDC decimals).
-    pub fn wnear_value(&self, wnear: u128, scale: u128) -> u128 {
-        mul_div(wnear, self.near, self.usdc) / scale
+    /// `scale` is 10^(wNEAR decimals - USDC decimals). The three below answer `None` when
+    /// a feed's precision takes them out of range, so `on_price` can reject, not panic.
+    pub fn wnear_value(&self, wnear: u128, scale: u128) -> Option<u128> {
+        Some(try_mul_div(wnear, self.near, self.usdc)? / scale)
     }
 
-    pub fn min_out_buy(&self, amount_in: u128, slippage_bps: u32, scale: u128) -> u128 {
-        mul_div_ceil(
-            amount_in * scale,
-            self.usdc * (BPS - slippage_bps as u128),
-            self.near * BPS,
-        )
+    pub fn min_out_buy(&self, amount_in: u128, slippage_bps: u32, scale: u128) -> Option<u128> {
+        let kept = BPS - slippage_bps as u128;
+        try_ratio_ceil(&[amount_in, scale, self.usdc, kept], &[self.near, BPS])
     }
 
-    pub fn min_out_sell(&self, amount_in: u128, slippage_bps: u32, scale: u128) -> u128 {
-        mul_div_ceil(
-            amount_in,
-            self.near * (BPS - slippage_bps as u128),
-            self.usdc * scale * BPS,
-        )
+    pub fn min_out_sell(&self, amount_in: u128, slippage_bps: u32, scale: u128) -> Option<u128> {
+        let kept = BPS - slippage_bps as u128;
+        try_ratio_ceil(&[amount_in, self.near, kept], &[self.usdc, scale, BPS])
     }
 }

@@ -32,7 +32,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` (sudah lulus di testnet lewat skrip; bot keeper belum) | Lead, bot dari partner | 6 Nov |
 | 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
 | 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di jaringan terpilih, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
-| 7 | `reveal` dan replay lulus di jaringan terpilih, `verify.py` lulus | Lead, Partner | 12 Nov |
+| 7 | `reveal` (kontraknya sudah lulus di testnet) dan replay lulus di jaringan terpilih, `verify.py` lulus | Lead, Partner | 12 Nov |
 | 8 | LICENSE, video, README, post X, repo publik, submit oleh lead | Partner, Lead | 13 Nov |
 
 Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian selesai 18 Nov. Bila bot berjalan di Mac, Mac harus tersambung listrik.
@@ -41,7 +41,7 @@ Urutan jaringan: sandbox → testnet. Mainnet baru dipertimbangkan di milestone 
 
 WASM strategi dibangun hanya lewat `strategy/build.sh`, supaya path lokal tidak masuk biner publik dan hash bisa diulang.
 
-Syarat dari review: sebelum `reveal` selesai di milestone 7, vektor komitmen dari tes strategi dijalankan juga di crate vault.
+Vault latihan memakai parameter dan salt yang berbeda dari vault final, karena `reveal` menerbitkan keduanya, dan `reveal` yang gagal pun menerbitkan argumennya.
 
 ## Sebelum kode dimulai
 

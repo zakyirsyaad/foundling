@@ -26,7 +26,7 @@ fn decision(action: &str, amount: u128, ref_price: u128) -> Vec<u8> {
     json!({
         "v": 1, "vault": vault_id(), "chain": "testnet", "nonce": 1, "regime": "risk_on",
         "action": action, "amount_in": amount.to_string(), "ref_price": ref_price.to_string(),
-        "commitment": "aa", "inputs_digest": "cc", "obs": {}, "ai_ref": {}, "wasm_hash": "bb",
+        "commitment": COMMITMENT, "inputs_digest": "cc", "obs": {}, "ai_ref": {}, "wasm_hash": "bb",
     })
     .to_string()
     .into_bytes()
@@ -273,6 +273,56 @@ fn a_sell_uses_the_wnear_side() {
     assert_eq!(vault.book().wnear, U128(6 * WNEAR_UNIT));
     assert_eq!(call_to(&wnear()).0, "ft_transfer_call");
     assert_eq!(vault.inflight().unwrap().min_amount_out, U128(17_730_000));
+}
+
+#[test]
+fn the_swap_start_says_what_was_sold() {
+    priced("buy_risk", 8 * USDC_UNIT);
+
+    assert!(logs_contain(r#""token_in":"Usdc""#));
+    assert!(logs_contain(r#""amount_in":"8000000""#));
+    assert!(logs_contain("min_amount_out"));
+}
+
+fn high_precision_prices(near: &str, usdc: &str) -> Vec<PromiseResult> {
+    let feed = |price: &str| json!({"price": price, "conf": "1000000", "expo": -18, "publish_time": START_SECONDS - 30});
+    let body = json!({ NEAR_ID: feed(near), USDC_ID: feed(usdc) });
+    vec![PromiseResult::Successful(body.to_string().into_bytes())]
+}
+
+#[test]
+fn a_high_precision_feed_still_prices_a_sell() {
+    let mut vault = ready("sell_risk", 4 * WNEAR_UNIT);
+    vault.set_books_for_tests(80 * USDC_UNIT, 10 * WNEAR_UNIT);
+    set_caller(keeper());
+    vault.execute_decision(1);
+    set_callback(high_precision_prices(
+        "4500000000000000000",
+        "1000000000000000000",
+    ));
+
+    vault.on_price(1);
+
+    assert_eq!(vault.inflight().unwrap().min_amount_out, U128(17_730_000));
+}
+
+#[test]
+fn a_price_too_large_to_value_is_rejected_without_a_panic() {
+    let huge = (i64::MAX as u128) * 100_000_000;
+    let mut vault = ready_at("buy_risk", 8 * USDC_UNIT, huge);
+    vault.set_books_for_tests(80 * USDC_UNIT, 10 * WNEAR_UNIT);
+    set_caller(keeper());
+    vault.execute_decision(1);
+    let feed = |price: String| json!({"price": price, "conf": "0", "expo": -8, "publish_time": START_SECONDS - 30});
+    let body = json!({ NEAR_ID: feed(i64::MAX.to_string()), USDC_ID: feed("1".to_string()) });
+    set_callback(vec![PromiseResult::Successful(
+        body.to_string().into_bytes(),
+    )]);
+
+    vault.on_price(1);
+
+    assert_eq!(vault.stage(), Stage::Idle);
+    assert!(logs_contain("PRICE_DEVIATION"));
 }
 
 #[test]
@@ -561,6 +611,22 @@ fn a_holder_who_redeems_mid_swap_keeps_a_claim_on_the_result() {
     set_caller_with_yocto(alice());
     vault.claim_bucket(1);
     assert_eq!(call_to(&wnear()).1["amount"], (out / 2).to_string());
+}
+
+#[test]
+fn a_bucket_and_a_claim_can_be_read() {
+    let out = 16 * WNEAR_UNIT / 10;
+    let mut vault = swapped(8 * USDC_UNIT, out);
+    let shares = vault.shares_of(alice());
+    assert_eq!(vault.bucket(1), None);
+    set_caller_with_yocto(alice());
+    vault.redeem(shares);
+
+    withdrawn(&mut vault, &out.to_string());
+
+    assert_eq!(vault.bucket(1).unwrap().result, U128(out));
+    assert_eq!(vault.bucket_claim(1, alice()), shares);
+    assert_eq!(vault.bucket_claim(1, bob()), U128(0));
 }
 
 #[test]

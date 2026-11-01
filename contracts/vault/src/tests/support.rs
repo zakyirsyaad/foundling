@@ -13,6 +13,7 @@ use crate::tests::policy::demo_policy;
 use crate::{Assets, InitConfig, OracleConfig, Roles, Vault};
 
 pub const START_SECONDS: u64 = 1_800_000_000;
+pub const COMMITMENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 fn account(name: &str) -> AccountId {
@@ -149,7 +150,11 @@ pub fn init_config() -> InitConfig {
             secrets_owner: account("owner-secrets.near"),
             outlayer_deposit: U128(50_000_000_000_000_000_000_000),
             chain: "testnet".to_string(),
-            commitment: "aa".to_string(),
+            commitment: COMMITMENT.to_string(),
+            reveal_after: START_SECONDS + 3_600,
+            max_instructions: 2_000_000_000,
+            max_memory_mb: 256,
+            build_target: "wasm32-wasip2".to_string(),
         },
         oracle: OracleConfig {
             account: oracle(),

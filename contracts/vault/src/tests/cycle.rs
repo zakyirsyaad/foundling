@@ -34,7 +34,7 @@ fn decision(nonce: u64, action: &str) -> Vec<u8> {
         "action": action,
         "amount_in": "1000000",
         "ref_price": "450000000",
-        "commitment": "aa",
+        "commitment": COMMITMENT,
         "inputs_digest": "cc",
         "obs": {},
         "ai_ref": {},
@@ -75,6 +75,18 @@ fn a_trigger_asks_outlayer_from_the_vault_balance() {
 }
 
 #[test]
+fn the_resource_limits_come_from_the_sealed_config() {
+    triggered_vault();
+
+    let (_, args, _) = call_to(&outlayer());
+    assert_eq!(
+        args["resource_limits"]["max_instructions"],
+        2_000_000_000u64
+    );
+    assert_eq!(args["resource_limits"]["max_memory_mb"], 256);
+}
+
+#[test]
 fn the_input_carries_the_nonce_and_the_books() {
     let mut vault = ready_vault();
     deposit(&mut vault, alice(), 10 * USDC_UNIT);
@@ -102,6 +114,47 @@ fn the_input_matches_the_fixture_the_strategy_reads() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../../strategy/fixtures/input.json")).unwrap();
     assert_eq!(input, fixture);
+}
+
+#[test]
+fn an_accepted_decision_is_published_whole() {
+    let mut vault = triggered_vault();
+
+    answer(
+        &mut vault,
+        1,
+        PromiseResult::Successful(decision(1, "buy_risk")),
+    );
+
+    assert!(logs_contain(r#""event":"decision""#));
+    assert!(logs_contain("inputs_digest"));
+}
+
+#[test]
+fn a_hold_is_published_whole() {
+    let mut vault = triggered_vault();
+
+    answer(
+        &mut vault,
+        1,
+        PromiseResult::Successful(decision(1, "none")),
+    );
+
+    assert!(logs_contain(r#""event":"decision""#));
+    assert!(logs_contain("inputs_digest"));
+}
+
+#[test]
+fn a_refused_answer_is_not_published() {
+    let mut vault = triggered_vault();
+
+    answer(
+        &mut vault,
+        1,
+        PromiseResult::Successful(decision(9, "none")),
+    );
+
+    assert!(!logs_contain(r#""event":"decision""#));
 }
 
 #[test]

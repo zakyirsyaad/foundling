@@ -55,6 +55,7 @@ impl Vault {
 
     pub fn schedule_keeper_change(&mut self, account: AccountId) {
         self.only(&self.roles.governor.clone(), "governor");
+        self.require_separate_roles(&account, &self.roles.guardian);
         let change = self.role_change(account);
         emit("keeper_change_scheduled", &change_data(&change));
         self.keeper_change = Some(change);
@@ -62,6 +63,7 @@ impl Vault {
 
     pub fn schedule_guardian_change(&mut self, account: AccountId) {
         self.only(&self.roles.governor.clone(), "governor");
+        self.require_separate_roles(&self.roles.keeper, &account);
         let change = self.role_change(account);
         emit("guardian_change_scheduled", &change_data(&change));
         self.guardian_change = Some(change);
@@ -75,18 +77,29 @@ impl Vault {
 
     pub fn apply_keeper_change(&mut self) {
         let keeper = ready_account(self.keeper_change.take());
+        self.require_separate_roles(&keeper, &self.roles.guardian);
         emit("keeper_change_applied", &account_data(&keeper));
         self.roles.keeper = keeper;
     }
 
     pub fn apply_guardian_change(&mut self) {
         let guardian = ready_account(self.guardian_change.take());
+        self.require_separate_roles(&self.roles.keeper, &guardian);
         emit("guardian_change_applied", &account_data(&guardian));
         self.roles.guardian = guardian;
     }
 }
 
 impl Vault {
+    /// The two `init` guards, checked again because a rotation can meet the other role.
+    fn require_separate_roles(&self, keeper: &AccountId, guardian: &AccountId) {
+        require!(
+            *keeper != self.vault_id,
+            "keeper must differ from the vault"
+        );
+        require!(keeper != guardian, "keeper must differ from the guardian");
+    }
+
     fn only(&self, role_account: &AccountId, role: &str) {
         require!(
             env::predecessor_account_id() == *role_account,

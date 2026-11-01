@@ -248,6 +248,136 @@ fn minting_cannot_be_switched_off() {
 }
 
 #[test]
+#[should_panic(expected = "init: epoch_len must hold two cooldowns")]
+fn a_zero_window_is_refused() {
+    init_with(|config| config.policy.epoch_len = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: epoch_len must hold two cooldowns")]
+fn a_window_under_two_cooldowns_is_refused() {
+    init_with(|config| config.policy.epoch_len = 2 * config.policy.cooldown - 1);
+}
+
+#[test]
+#[should_panic(expected = "init: decision_ttl must be set")]
+fn a_decision_must_live_for_some_time() {
+    init_with(|config| config.policy.decision_ttl = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: abort_after_blocks must be set")]
+fn the_abort_timer_cannot_be_zero() {
+    init_with(|config| config.policy.abort_after_blocks = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: max_execution_seconds must be set")]
+fn a_run_must_have_some_time() {
+    init_with(|config| config.policy.max_execution_seconds = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: commitment must be 64 lowercase hex")]
+fn a_commitment_in_the_wrong_form_is_refused() {
+    init_with(|config| config.agent.commitment = "0xABC".to_string());
+}
+
+#[test]
+#[should_panic(expected = "init: commitment must be 64 lowercase hex")]
+fn an_uppercase_commitment_is_refused() {
+    init_with(|config| config.agent.commitment = "AA".repeat(32));
+}
+
+#[test]
+#[should_panic(expected = "init: reveal_after is more than a year away")]
+fn a_reveal_time_in_milliseconds_is_refused() {
+    init_with(|config| config.agent.reveal_after = START_SECONDS * 1_000);
+}
+
+#[test]
+#[should_panic(expected = "keeper must differ from the vault")]
+fn a_keeper_rotation_cannot_pick_the_vault() {
+    let mut vault = new_vault();
+    set_caller(governor());
+
+    vault.schedule_keeper_change(vault_id());
+}
+
+#[test]
+#[should_panic(expected = "keeper must differ from the guardian")]
+fn a_keeper_rotation_cannot_pick_the_guardian() {
+    let mut vault = new_vault();
+    set_caller(governor());
+
+    vault.schedule_keeper_change(guardian());
+}
+
+#[test]
+#[should_panic(expected = "keeper must differ from the guardian")]
+fn a_guardian_rotation_cannot_pick_the_keeper() {
+    let mut vault = new_vault();
+    set_caller(governor());
+
+    vault.schedule_guardian_change(keeper());
+}
+
+#[test]
+#[should_panic(expected = "keeper must differ from the guardian")]
+fn two_rotations_cannot_meet_on_one_account() {
+    let mut vault = new_vault();
+    set_caller(governor());
+    vault.schedule_keeper_change(alice());
+    vault.schedule_guardian_change(alice());
+    let later = START_SECONDS + vault.policy().timelock;
+    set_caller_at(bob(), later);
+    vault.apply_keeper_change();
+
+    vault.apply_guardian_change();
+}
+
+#[test]
+#[should_panic(expected = "init: max_instructions must be set")]
+fn a_run_must_have_some_instructions() {
+    init_with(|config| config.agent.max_instructions = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: max_memory_mb must be set")]
+fn a_run_must_have_some_memory() {
+    init_with(|config| config.agent.max_memory_mb = 0);
+}
+
+#[test]
+#[should_panic(expected = "init: build_target must be set")]
+fn a_run_must_name_its_build_target() {
+    init_with(|config| config.agent.build_target = String::new());
+}
+
+#[test]
+fn the_sealed_config_can_be_read() {
+    let vault = new_vault();
+
+    assert_eq!(vault.agent(), init_config().agent);
+    assert_eq!(vault.assets(), init_config().assets);
+    assert_eq!(vault.oracle(), init_config().oracle);
+}
+
+#[test]
+fn a_pending_rotation_can_be_read() {
+    let mut vault = new_vault();
+    assert_eq!(vault.keeper_change(), None);
+    assert_eq!(vault.guardian_change(), None);
+    set_caller(governor());
+
+    vault.schedule_keeper_change(alice());
+    vault.schedule_guardian_change(bob());
+
+    assert_eq!(vault.keeper_change().unwrap().account, alice());
+    assert_eq!(vault.guardian_change().unwrap().account, bob());
+}
+
+#[test]
 #[should_panic(expected = "init: stuck_after must be set")]
 fn the_stuck_timer_cannot_be_zero() {
     init_with(|config| config.policy.stuck_after = 0);
@@ -257,6 +387,12 @@ fn the_stuck_timer_cannot_be_zero() {
 #[should_panic(expected = "init: halt_after must pass stuck_after")]
 fn the_halt_timer_must_pass_the_stuck_timer() {
     init_with(|config| config.policy.halt_after = config.policy.stuck_after);
+}
+
+#[test]
+#[should_panic(expected = "init: reveal_after must be in the future")]
+fn the_reveal_time_cannot_have_passed() {
+    init_with(|config| config.agent.reveal_after = START_SECONDS);
 }
 
 #[test]
@@ -296,7 +432,7 @@ fn the_wasm_hash_cannot_be_empty() {
 }
 
 #[test]
-#[should_panic(expected = "init: commitment must be set")]
+#[should_panic(expected = "init: commitment must be 64 lowercase hex")]
 fn the_commitment_cannot_be_empty() {
     init_with(|config| config.agent.commitment = String::new());
 }

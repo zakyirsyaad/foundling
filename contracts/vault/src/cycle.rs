@@ -11,9 +11,6 @@ use crate::swap::SwapStep;
 use crate::{now_seconds, Token, Vault, VaultExt};
 
 const DECISION_INPUT_VERSION: u32 = 1;
-const BUILD_TARGET: &str = "wasm32-wasip2";
-const MAX_INSTRUCTIONS: u64 = 1_000_000_000;
-const MAX_MEMORY_MB: u32 = 128;
 const REQUEST_GAS: Gas = Gas::from_tgas(200);
 const ON_DECISION_GAS: Gas = Gas::from_tgas(30);
 const MIN_TRIGGER_GAS: Gas = Gas::from_tgas(250);
@@ -81,6 +78,12 @@ pub struct AgentConfig {
     pub outlayer_deposit: U128,
     pub chain: String,
     pub commitment: String,
+    /// Seconds. Before this the parameters stay secret, after it anyone may open them.
+    pub reveal_after: u64,
+    // Sealed with the vault, and sized for the strategy binary this vault pins.
+    pub max_instructions: u64,
+    pub max_memory_mb: u32,
+    pub build_target: String,
 }
 
 #[near]
@@ -149,6 +152,14 @@ impl Vault {
         let result = read_result();
         let expected = self.expected_decision(nonce);
         let outcome = decode(&result, &expected);
+        if let (Ok(_), Ok(bytes)) = (&outcome, &result) {
+            // A hold leaves nothing else behind, and replay needs what the run observed.
+            let decision = String::from_utf8_lossy(bytes).to_string();
+            emit(
+                "decision",
+                &json!({ "nonce": nonce, "decision": decision }).to_string(),
+            );
+        }
         self.settle_decision(nonce, outcome);
     }
 
@@ -273,12 +284,12 @@ impl Vault {
                 "WasmUrl": {
                     "url": self.agent.wasm_url,
                     "hash": self.agent.wasm_hash,
-                    "build_target": BUILD_TARGET,
+                    "build_target": self.agent.build_target,
                 }
             },
             "resource_limits": {
-                "max_instructions": MAX_INSTRUCTIONS,
-                "max_memory_mb": MAX_MEMORY_MB,
+                "max_instructions": self.agent.max_instructions,
+                "max_memory_mb": self.agent.max_memory_mb,
                 "max_execution_seconds": self.policy.max_execution_seconds,
             },
             "input_data": input.to_string(),

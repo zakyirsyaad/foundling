@@ -207,24 +207,24 @@ fn a_huge_reference_price_is_outside_the_band() {
 
 #[test]
 fn wnear_is_valued_in_usdc() {
-    assert_eq!(anchor().wnear_value(2 * WNEAR, SCALE), 9 * USDC);
+    assert_eq!(anchor().wnear_value(2 * WNEAR, SCALE), Some(9 * USDC));
 }
 
 #[test]
 fn a_buy_gets_a_minimum_in_wnear() {
     let expected = (USDC * SCALE * 100_000_000 * 9_850).div_ceil(450_000_000 * 10_000);
 
-    assert_eq!(anchor().min_out_buy(USDC, 150, SCALE), expected);
+    assert_eq!(anchor().min_out_buy(USDC, 150, SCALE), Some(expected));
 }
 
 #[test]
 fn a_sell_gets_a_minimum_in_usdc() {
-    assert_eq!(anchor().min_out_sell(WNEAR, 150, SCALE), 4_432_500);
+    assert_eq!(anchor().min_out_sell(WNEAR, 150, SCALE), Some(4_432_500));
 }
 
 #[test]
 fn the_minimum_rounds_up() {
-    assert_eq!(anchor().min_out_sell(1, 150, SCALE), 1);
+    assert_eq!(anchor().min_out_sell(1, 150, SCALE), Some(1));
 }
 
 #[test]

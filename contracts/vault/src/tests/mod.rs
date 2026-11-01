@@ -7,6 +7,7 @@ mod math;
 pub mod policy;
 mod pricing;
 mod recovery;
+mod reveal;
 mod selftest;
 pub mod support;
 pub mod swap;

@@ -29,6 +29,7 @@ const MAX_ORACLE_BYTES: usize = 2 * 1024;
 const ORACLE_RESULT: u64 = 0;
 const MAX_HOP_BYTES: usize = 128;
 const FIRST_ATTEMPT: u32 = 0;
+const BAD_PRICE: &str = "PRICE_DEVIATION";
 
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -266,6 +267,19 @@ impl Vault {
         }
     }
 
+    pub fn bucket(&self, nonce: u64) -> Option<Bucket> {
+        self.buckets.get(&nonce).cloned()
+    }
+
+    pub fn bucket_claim(&self, nonce: u64, account: AccountId) -> U128 {
+        U128(
+            self.bucket_claims
+                .get(&(nonce, account))
+                .copied()
+                .unwrap_or(0),
+        )
+    }
+
     pub fn inflight(&self) -> Option<Inflight> {
         self.inflight.clone()
     }
@@ -312,10 +326,13 @@ impl Vault {
         let epoch_len = self.policy.epoch_len;
         match decision.action {
             Action::BuyRisk => {
-                let wnear_value = anchor.wnear_value(self.wnear_book, scale);
+                let wnear_value = anchor
+                    .wnear_value(self.wnear_book, scale)
+                    .ok_or(BAD_PRICE)?;
+                let nav_usdc = self.usdc_book.checked_add(wnear_value).ok_or(BAD_PRICE)?;
                 let buy = BuyContext {
                     amount_in,
-                    nav_usdc: self.usdc_book + wnear_value,
+                    nav_usdc,
                     usdc_book: self.usdc_book,
                     wnear_value_usdc: wnear_value,
                     window_used: self.buy_window.used(now, epoch_len),
@@ -325,7 +342,9 @@ impl Vault {
                     token_in: Token::Usdc,
                     token_out: Token::Wnear,
                     amount_in,
-                    min_amount_out: anchor.min_out_buy(amount_in, slippage, scale),
+                    min_amount_out: anchor
+                        .min_out_buy(amount_in, slippage, scale)
+                        .ok_or(BAD_PRICE)?,
                 })
             }
             Action::SellRisk => {
@@ -339,7 +358,9 @@ impl Vault {
                     token_in: Token::Wnear,
                     token_out: Token::Usdc,
                     amount_in,
-                    min_amount_out: anchor.min_out_sell(amount_in, slippage, scale),
+                    min_amount_out: anchor
+                        .min_out_sell(amount_in, slippage, scale)
+                        .ok_or(BAD_PRICE)?,
                 })
             }
             Action::None => Err("BAD_DECISION"),
@@ -381,7 +402,13 @@ impl Vault {
             attempt: FIRST_ATTEMPT,
             entered_at: now,
         };
-        emit("swap_started", &format!(r#"{{"nonce":{nonce}}}"#));
+        emit(
+            "swap_started",
+            &format!(
+                r#"{{"nonce":{nonce},"token_in":"{:?}","amount_in":"{}","min_amount_out":"{}"}}"#,
+                trade.token_in, trade.amount_in, trade.min_amount_out
+            ),
+        );
 
         let transfer = env::promise_create(
             self.token_account(trade.token_in),
