@@ -26,8 +26,8 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 
 | # | Selesai bila | Pemilik | Target |
 | --- | --- | --- | --- |
-| 1 | Partner bisa clone repo dan build `contracts/vault`; akun guardian testnet dan mainnet dibuat | Partner | Sebelum mulai |
-| 2 | Uji mainnet kecil selesai: callback OutLayer (SP1a), rahasia terikat hash (SP1b, SP2), rute Rhea (SP8), dan keputusan mode NEAR atau fallback A | Lead, partner siapkan WASM uji dan harness | 3 Nov |
+| 1 | Partner bisa clone repo dan build `contracts/vault`; mesin partner bisa build amd64 (Linux x86-64 atau Docker `--platform linux/amd64`); akun guardian testnet dan mainnet dibuat | Partner | Sebelum mulai |
+| 2 | Uji mainnet kecil selesai: callback OutLayer (SP1a, keputusan mode NEAR atau fallback A paling lambat 2 Nov 21:00 WIB), rahasia terikat hash (SP1b, SP2), rute Rhea (SP8) | Lead, partner siapkan harness | 3 Nov |
 | 3 | Vault dasar lulus tes di sandbox: deposit, redeem, cap, freeze | Lead | 4 Nov |
 | 4 | Satu siklus penuh di mainnet pada vault latihan, lalu `redeem` nyata | Lead, bot dari partner | 6 Nov |
 | 5 | Jalur macet dan pulih selesai, Attack Lab lulus, soak semalam lulus, kontrak beku | Lead, Partner | 9 Nov |
@@ -37,7 +37,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 
 Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian selesai 18 Nov. Bila bot berjalan di Mac, Mac harus tersambung listrik.
 
-Urutan jaringan: sandbox → testnet → mainnet kecil → mainnet final. OutLayer hanya diuji di mainnet karena eksekutor testnet terus restart.
+Urutan jaringan: sandbox → testnet → mainnet kecil → mainnet final. Eksekutor OutLayer testnet restart tiap 11–42 detik, jadi testnet cukup untuk gladi run pendek, sedangkan keputusan diambil dari hasil mainnet.
 
 ## Sebelum kode dimulai
 
