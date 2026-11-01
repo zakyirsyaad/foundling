@@ -15,6 +15,13 @@ uint = { version = "0.9", default-features = false }
 near-sdk = { version = "5.30.0", features = ["unit-testing"] }
 proptest = "1"
 
+# Two fire inside the `construct_uint!` expansion. The third asks to move a value, and
+# overflow checks embed line numbers, so editing the source would change the WASM for nothing.
+[lints.clippy]
+assign_op_pattern = "allow"
+manual_div_ceil = "allow"
+needless_borrows_for_generic_args = "allow"
+
 [profile.release]
 codegen-units = 1
 opt-level = "z"
