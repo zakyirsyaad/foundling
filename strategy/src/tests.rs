@@ -12,6 +12,7 @@ const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
+const DECISION_TARGET_BYTES: usize = 600;
 
 fn params() -> Params {
     Params {
@@ -418,6 +419,88 @@ fn an_ai_flag_cannot_stop_a_sell() {
     let verdict = decide(&params(), &input(), &flagged);
 
     assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_silent_advisor_holds_a_buy() {
+    let mut silent = obs(430_000_000, 430_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_silent_advisor_holds_a_sell() {
+    let mut silent = obs(390_000_000, 390_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn an_unknown_ai_flag_holds() {
+    let mut unknown = obs(390_000_000, 390_000_000);
+    unknown.ai_flag = u8::MAX;
+
+    let verdict = decide(&params(), &input(), &unknown);
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn sources_too_far_apart_in_time_hold() {
+    let mut stale = obs(390_000_000, 390_000_000);
+    stale.tb = stale.ta + MAX_SOURCE_SKEW_SECONDS + 1;
+
+    let verdict = decide(&params(), &input(), &stale);
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_trade_older_than_the_block_counts_the_same() {
+    let mut stale = obs(390_000_000, 390_000_000);
+    stale.ta = 10_000;
+    stale.tb = stale.ta - MAX_SOURCE_SKEW_SECONDS - 1;
+
+    assert_eq!(
+        decide(&params(), &input(), &stale).regime,
+        Regime::Undetermined
+    );
+}
+
+#[test]
+fn the_widest_allowed_gap_in_time_passes() {
+    let mut spaced = obs(390_000_000, 390_000_000);
+    spaced.tb = spaced.ta + MAX_SOURCE_SKEW_SECONDS;
+
+    let verdict = decide(&params(), &input(), &spaced);
+
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_decision_with_market_prices_stays_under_the_target_size() {
+    let market = Obs {
+        pa: 439_164_602,
+        pb: 438_770_000,
+        ta: 1_793_541_593,
+        tb: 1_793_541_547,
+        ai_flag: AI_SILENT,
+        ai_conf: 0,
+    };
+
+    let decision = respond(INPUT, Some(&secret_json()), |_| Some(market)).unwrap();
+
+    let size = serde_json::to_string(&decision).unwrap().len();
+    assert!(size <= DECISION_TARGET_BYTES, "{size}");
 }
 
 #[test]

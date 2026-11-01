@@ -10,10 +10,18 @@ const DECISION_VERSION: u32 = 1;
 const INPUT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 32;
 const BPS: u128 = 10_000;
+/// A quiet market can go a minute or two without a trade; this is a dead source.
+const MAX_SOURCE_SKEW_SECONDS: u64 = 300;
 #[cfg(feature = "rehearsal")]
 const REHEARSAL_CHAIN: &str = "testnet";
 
+pub const AI_CLEAR: u8 = 0;
+pub const AI_FLAGGED: u8 = 1;
+/// The advisor gave no valid answer, which ends in a hold whatever the prices say.
+pub const AI_SILENT: u8 = 2;
+
 pub mod sizing;
+pub mod sources;
 
 pub use sizing::Limits;
 
@@ -181,7 +189,7 @@ pub struct BadInput;
 pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
     let regime = regime_of(params, obs);
     let (action, wanted, room) = match regime {
-        Regime::RiskOn if obs.ai_flag == 0 => (
+        Regime::RiskOn if obs.ai_flag == AI_CLEAR => (
             Action::BuyRisk,
             params.buy_usdc,
             sizing::buy_room(input, obs.pb),
@@ -207,7 +215,7 @@ pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
 
 /// Thresholds read `pb` only: the pool price can be pushed by anyone with capital.
 fn regime_of(params: &Params, obs: &Obs) -> Regime {
-    if !sources_agree(obs, params.source_dev_bps) {
+    if obs.ai_flag > AI_FLAGGED || !sources_agree(obs, params.source_dev_bps) {
         return Regime::Undetermined;
     }
     if obs.pb >= params.risk_on_above {
@@ -220,7 +228,7 @@ fn regime_of(params: &Params, obs: &Obs) -> Regime {
 }
 
 fn sources_agree(obs: &Obs, max_dev_bps: u128) -> bool {
-    if obs.pa == 0 || obs.pb == 0 {
+    if obs.pa == 0 || obs.pb == 0 || obs.ta.abs_diff(obs.tb) > MAX_SOURCE_SKEW_SECONDS {
         return false;
     }
     let gap = obs.pa.abs_diff(obs.pb).checked_mul(BPS);
@@ -375,5 +383,7 @@ pub fn respond(
     })
 }
 
+#[cfg(test)]
+mod sources_tests;
 #[cfg(test)]
 mod tests;

@@ -25,3 +25,6 @@ sha2 = "0.10"
 opt-level = "z"
 lto = true
 strip = "debuginfo"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasi-http-client = "0.2.1"
