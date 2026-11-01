@@ -2,8 +2,8 @@
 //! process, so every crate left out is one that cannot read it, and a ready-made client has
 //! neither the deadline nor the size cap below.
 
-use foundling_strategy::sources::{observe_market, Call};
-use foundling_strategy::{Input, Obs, Secret};
+use foundling_strategy::sources::Call;
+use foundling_strategy::{advisor, Input, Observed, Secret};
 use wasip2::clocks::monotonic_clock;
 use wasip2::http::outgoing_handler;
 use wasip2::http::types::{
@@ -14,17 +14,22 @@ use wasip2::io::streams::StreamError;
 
 const STATUS_OK: u16 = 200;
 const JSON_HEADER: (&str, &[u8]) = ("content-type", b"application/json");
+/// Without this the gateway may swap the model, and the reply would not be signed by it.
+const NO_ALIASING_HEADER: (&str, &[u8]) = ("x-no-aliasing", b"true");
+const AUTHORIZATION: &str = "authorization";
+/// The most `blocking_write_and_flush` takes in one call.
+const WRITE_CHUNK_BYTES: usize = 4096;
 /// A block reply is about 20 KB and grows with the shard count.
 const MAX_REPLY_BYTES: usize = 256 * 1024;
 const READ_CHUNK_BYTES: u64 = 16 * 1024;
-/// All three reads together, on the WASM's own clock: a host timeout starts over at each
-/// stage, so a slow drip could outlast it. A healthy run takes a second or two, and running
-/// out ends in a hold, well before the vault's execution limit would turn the run into a `null`.
-const RUN_BUDGET_NANOS: u64 = 15_000_000_000;
+/// Every read of a run together, on the WASM's own clock: a host timeout starts over at each
+/// stage, so a slow drip could outlast it. Running out ends in a hold, well before the
+/// vault's execution limit would turn the run into a `null`.
+const RUN_BUDGET_NANOS: u64 = 30_000_000_000;
 
-pub fn observe(_secret: &Secret, _input: &Input) -> Option<Obs> {
+pub fn observe(secret: &Secret, _input: &Input) -> Option<Observed> {
     let deadline = monotonic_clock::now() + RUN_BUDGET_NANOS;
-    observe_market(|call| send(call, deadline))
+    advisor::observe(secret, |call| send(call, deadline))
 }
 
 fn send(call: &Call, deadline: u64) -> Option<Vec<u8>> {
@@ -40,6 +45,13 @@ fn request(call: &Call, deadline: u64) -> Option<IncomingResponse> {
     if call.body.is_some() {
         let (name, value) = JSON_HEADER;
         headers.append(name, value).ok()?;
+    }
+    if let Some(key) = call.bearer {
+        let (name, value) = NO_ALIASING_HEADER;
+        headers.append(name, value).ok()?;
+        headers
+            .append(AUTHORIZATION, format!("Bearer {key}").as_bytes())
+            .ok()?;
     }
     let outgoing = OutgoingRequest::new(headers);
     let method = match call.body {
@@ -60,7 +72,9 @@ fn write_body(outgoing: &OutgoingRequest, body: Option<&str>) -> Option<()> {
     let writer = outgoing.body().ok()?;
     if let Some(body) = body {
         let stream = writer.write().ok()?;
-        stream.blocking_write_and_flush(body.as_bytes()).ok()?;
+        for chunk in body.as_bytes().chunks(WRITE_CHUNK_BYTES) {
+            stream.blocking_write_and_flush(chunk).ok()?;
+        }
     }
     OutgoingBody::finish(writer, None).ok()
 }

@@ -27,10 +27,11 @@ const PRICE_ONE: u128 = 100_000_000;
 const WNEAR_UNITS_PER_USDC_UNIT: u128 = 1_000_000_000_000_000_000;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
-pub struct Call {
+pub struct Call<'a> {
     pub host: &'static str,
     pub path: &'static str,
     pub body: Option<String>,
+    pub bearer: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -67,8 +68,8 @@ struct Pool {
     amounts: Vec<String>,
 }
 
-/// A source that fails ends the reading, and the strategy holds. The advisor is not wired
-/// in yet, so this reading can record prices but cannot trade.
+/// A source that fails ends the reading, and the strategy holds. The advisor stays silent
+/// here; `advisor::observe` fills it in.
 pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<Obs> {
     let (height, ta) = read_block(&send(&block_call())?)?;
     let pa = pool_spot(&send(&pool_call(height))?, height)?;
@@ -83,21 +84,22 @@ pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<
     })
 }
 
-fn rpc_call(method: &str, params: Value) -> Call {
+fn rpc_call(method: &str, params: Value) -> Call<'static> {
     let body = json!({ "jsonrpc": "2.0", "id": "foundling", "method": method, "params": params });
     Call {
         host: RPC_HOST,
         path: RPC_PATH,
         body: Some(body.to_string()),
+        bearer: None,
     }
 }
 
-fn block_call() -> Call {
+fn block_call() -> Call<'static> {
     rpc_call("block", json!({ "finality": "final" }))
 }
 
 /// Pinned to a height, and `pool_spot` checks the reply, so `ta` is the time of this price.
-fn pool_call(height: u64) -> Call {
+fn pool_call(height: u64) -> Call<'static> {
     rpc_call(
         "query",
         json!({
@@ -110,11 +112,12 @@ fn pool_call(height: u64) -> Call {
     )
 }
 
-fn trades_call() -> Call {
+fn trades_call() -> Call<'static> {
     Call {
         host: TRADE_HOST,
         path: TRADE_PATH,
         body: None,
+        bearer: None,
     }
 }
 

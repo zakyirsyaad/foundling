@@ -6,16 +6,18 @@ const VAULT: &str = "vault.owner.near";
 // The vault test `the_input_matches_the_fixture_the_strategy_reads` pins the same file.
 const INPUT: &str = include_str!("../fixtures/input.json");
 // Computed with Python hashlib, independently of this crate.
-const KNOWN_COMMITMENT: &str = "496513afc2402651f0e0402133faf5c0f650395f6eae08d0561ec12825795396";
+const KNOWN_COMMITMENT: &str = "8838dc3c07993aa1f1488bbe99b5c55aafcc86de7445eaf35639f1dd21a4c2f4";
 const KNOWN_DIGEST: &str = "cc4937204b11b6ebf27d23913e8916cd3dac12c715f5a32abce503b9604ea41d";
 const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
-const DECISION_TARGET_BYTES: usize = 600;
+const DECISION_TARGET_BYTES: usize = 720;
+const PROMPT: &str = "Classify the headlines.";
 const TIME_OF_OBS: u64 = 12;
 const MAX_ACCOUNT_BYTES: usize = 64;
 const HASH_HEX_BYTES: usize = 64;
+const MAX_CHAT_ID_BYTES: usize = 64;
 const FIXTURE_NOW: u64 = 1_800_000_000;
 
 fn params() -> Params {
@@ -25,6 +27,7 @@ fn params() -> Params {
         source_dev_bps: 100,
         buy_usdc: 1_000,
         sell_wnear: 2_000,
+        prompt: PROMPT.into(),
     }
 }
 
@@ -104,6 +107,7 @@ fn secret_json() -> String {
             "source_dev_bps": "100",
             "buy_usdc": "1000",
             "sell_wnear": "2000",
+            "prompt": PROMPT,
         },
     })
     .to_string()
@@ -118,8 +122,8 @@ fn fresh_obs(price: u128) -> Obs {
     }
 }
 
-fn observed(pb: u128) -> impl FnOnce(&Secret, &Input) -> Option<Obs> {
-    move |_, _| Some(fresh_obs(pb))
+fn observed(pb: u128) -> impl FnOnce(&Secret, &Input) -> Option<Observed> {
+    move |_, _| Some(fresh_obs(pb).into())
 }
 
 #[test]
@@ -271,7 +275,7 @@ fn a_zero_scale_holds() {
 
 #[test]
 fn canonical_params_are_fixed_text() {
-    let expected = r#"{"buy_usdc":"1000","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
+    let expected = r#"{"buy_usdc":"1000","prompt":"Classify the headlines.","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
 
     assert_eq!(params().canonical(), expected);
 }
@@ -588,7 +592,7 @@ fn the_market_alone_cannot_trade_while_the_advisor_is_silent() {
     };
 
     let decision = respond(INPUT, Some(&secret_json()), |_, _| {
-        sources::observe_market(reply)
+        sources::observe_market(reply).map(Into::into)
     })
     .unwrap();
 
@@ -617,7 +621,15 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
         &format!(r#""wasm_hash":"{}""#, "b".repeat(HASH_HEX_BYTES)),
     );
 
-    let decision = respond(&input_data, Some(&secret), |_, _| Some(market)).unwrap();
+    let reading = Observed {
+        obs: market,
+        ai_ref: AiRef {
+            chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
+            resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+        },
+    };
+
+    let decision = respond(&input_data, Some(&secret), |_, _| Some(reading)).unwrap();
 
     assert_eq!(decision.vault.len(), MAX_ACCOUNT_BYTES);
     assert_eq!(decision.wasm_hash.len(), HASH_HEX_BYTES);
@@ -718,6 +730,74 @@ fn the_decision_has_the_wire_shape_the_vault_reads() {
 }
 
 #[test]
+fn the_reference_of_a_reading_reaches_the_decision() {
+    let reading = Observed {
+        obs: fresh_obs(431_000_000),
+        ai_ref: AiRef {
+            chat_id: "chat".into(),
+            resp_sig_hash: "abc".into(),
+        },
+    };
+    let expected = inputs_digest(INPUT, &reading.obs, "abc");
+
+    let decision = respond(INPUT, Some(&secret_json()), |_, _| Some(reading)).unwrap();
+
+    assert_eq!(decision.ai_ref.chat_id, "chat");
+    assert_eq!(decision.inputs_digest, expected);
+}
+
+#[test]
+fn the_key_stays_out_of_the_decision() {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["ai_key"] = json!("the-key");
+
+    let decision = respond(INPUT, Some(&secret.to_string()), observed(431_000_000)).unwrap();
+
+    assert!(!serde_json::to_string(&decision)
+        .unwrap()
+        .contains("the-key"));
+}
+
+#[test]
+fn a_secret_without_a_key_still_answers() {
+    let decision = respond(INPUT, Some(&secret_json()), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, KNOWN_COMMITMENT);
+}
+
+#[test]
+fn a_prompt_is_required() {
+    refuses_param("prompt", "");
+}
+
+#[test]
+fn a_prompt_too_long_for_reveal_is_refused() {
+    refuses_param("prompt", &"p".repeat(MAX_PROMPT_BYTES + 1));
+}
+
+#[test]
+fn the_longest_prompt_passes() {
+    let secret = secret_with_param("prompt", &"p".repeat(MAX_PROMPT_BYTES));
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_ne!(decision.commitment, "");
+}
+
+#[test]
+fn a_prompt_with_quotes_stays_canonical_json() {
+    let quoted = Params {
+        prompt: "Say \"yes\".\nThen stop.".into(),
+        ..params()
+    };
+
+    let text = quoted.canonical();
+
+    let parsed: Params = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed, quoted);
+}
+
+#[test]
 fn a_decision_fits_the_target_size() {
     let long_vault = format!("{}.fdl-m3-738321.testnet", "v".repeat(20));
     let input = INPUT.replace(VAULT, &long_vault);
@@ -726,7 +806,7 @@ fn a_decision_fits_the_target_size() {
 
     let decision = respond(&input, Some(&secret), observed(431_000_000)).unwrap();
 
-    assert!(serde_json::to_vec(&decision).unwrap().len() <= 600);
+    assert!(serde_json::to_vec(&decision).unwrap().len() <= DECISION_TARGET_BYTES);
 }
 
 #[test]

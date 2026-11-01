@@ -134,9 +134,10 @@ fn the_same_params_in_another_order_are_refused() {
     let mut vault = committed_vault();
     set_caller_at(alice(), OPENS_AT);
     let reordered = text("params").replace(
-        r#""buy_usdc":"1000","risk_off_below""#,
-        r#""risk_off_below""#,
+        r#""buy_usdc":"1000","prompt":"Classify the headlines.""#,
+        r#""prompt":"Classify the headlines.","buy_usdc":"1000""#,
     );
+    assert_ne!(reordered, text("params"));
 
     vault.reveal(reordered, text("salt"));
 }
