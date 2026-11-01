@@ -1,0 +1,9 @@
+# These reach only the test runner behind near-sdk's `unit-testing` feature, never a WASM.
+# CI fails if one of these crates ever appears in the wasm32 dependency tree of a contract.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0387", # crypto-bigint 0.5.5, through near-vm-runner
+    "RUSTSEC-2026-0391", # zstd 0.13.3, through near-primitives
+    "RUSTSEC-2026-0398", # zstd-safe 7.3.0, through near-primitives
+    "RUSTSEC-2026-0403", # zstd-safe 7.3.0, through near-primitives
+]
