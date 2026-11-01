@@ -39,6 +39,7 @@ impl Vault {
         self.total_net -= net_out;
         self.shares.insert(account.clone(), held - shares.0);
         self.total_shares -= shares.0;
+        self.note_burn_during_swap(&account, shares.0);
         self.usdc_book -= usdc_out;
         self.wnear_book -= wnear_out;
 

@@ -248,6 +248,42 @@ fn minting_cannot_be_switched_off() {
 }
 
 #[test]
+#[should_panic(expected = "init: usdc_decimals above wnear_decimals")]
+fn usdc_cannot_have_more_decimals_than_wnear() {
+    init_with(|config| config.assets.usdc_decimals = 25);
+}
+
+#[test]
+#[should_panic(expected = "init: slippage_bps must stay below 100%")]
+fn the_slippage_cannot_reach_the_whole_trade() {
+    init_with(|config| config.policy.slippage_bps = 10_000);
+}
+
+#[test]
+#[should_panic(expected = "init: outlayer_deposit above ops_budget")]
+fn one_run_must_fit_the_ops_budget() {
+    init_with(|config| config.agent.outlayer_deposit = U128(config.policy.ops_budget.0 + 1));
+}
+
+#[test]
+#[should_panic(expected = "init: the two price feeds must differ")]
+fn the_price_feeds_cannot_be_the_same() {
+    init_with(|config| config.oracle.usdc_id = config.oracle.near_id.clone());
+}
+
+#[test]
+#[should_panic(expected = "init: wasm_hash must be set")]
+fn the_wasm_hash_cannot_be_empty() {
+    init_with(|config| config.agent.wasm_hash = String::new());
+}
+
+#[test]
+#[should_panic(expected = "init: commitment must be set")]
+fn the_commitment_cannot_be_empty() {
+    init_with(|config| config.agent.commitment = String::new());
+}
+
+#[test]
 #[should_panic(expected = "init: per_user_cap above tvl_cap")]
 fn the_user_cap_cannot_pass_the_tvl_cap() {
     init_with(|config| config.policy.per_user_cap = U128(config.policy.tvl_cap.0 + 1));

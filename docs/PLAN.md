@@ -39,6 +39,8 @@ Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian sele
 
 Urutan jaringan: sandbox → testnet. Mainnet baru dipertimbangkan di milestone 5. Bila lead memilih mainnet, SP1a diulang di mainnet sebelum kontrak beku. Eksekutor OutLayer testnet restart tiap 11–42 detik, jadi run strategi di testnet harus pendek. `aggregate-oracle.near` tidak ada di testnet, jadi testnet memakai oracle dan token mock yang diberi label.
 
+Syarat dari review siklus swap. Milestone 4: ukur gas tiap callback di testnet, karena sisa untuk kerja callback sendiri 10 TGas per hop. Milestone 5: `Stuck` membawa `attempt`; selisih `rhea_bal` masuk `Stuck`, bukan disembunyikan `saturating_sub`; `Failed` di langkah deposit diperiksa lewat `get_deposit` sebelum buku dikredit, karena dana bisa sudah di Rhea bila `ft_resolve_transfer` gagal.
+
 ## Sebelum kode dimulai
 
 1. Partner diundang ke repo dan milestone 1 lulus.

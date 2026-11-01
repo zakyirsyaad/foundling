@@ -13,6 +13,11 @@ fn deposit(vault: &mut crate::Vault, who: near_sdk::AccountId, amount: u128) -> 
     vault.ft_on_transfer(who, U128(amount), "deposit".to_string())
 }
 
+fn answer_with_null(vault: &mut crate::Vault) {
+    set_callback(vec![PromiseResult::Successful(b"null".to_vec())]);
+    vault.on_decision(vault.last_nonce());
+}
+
 fn vault_with_shares() -> crate::Vault {
     let mut vault = ready_vault();
     assert_eq!(deposit(&mut vault, alice(), 10 * USDC_UNIT), U128(0));
@@ -278,6 +283,7 @@ fn triggers_respect_the_cooldown() {
     let mut vault = ready_vault();
     set_caller(keeper());
     vault.trigger_cycle();
+    answer_with_null(&mut vault);
     set_caller_at(keeper(), START_SECONDS + 1_799);
     vault.trigger_cycle();
 }
@@ -287,6 +293,7 @@ fn a_trigger_after_the_cooldown_passes() {
     let mut vault = ready_vault();
     set_caller(keeper());
     vault.trigger_cycle();
+    answer_with_null(&mut vault);
     set_caller_at(keeper(), START_SECONDS + 1_800);
     vault.trigger_cycle();
 }
