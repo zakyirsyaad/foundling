@@ -1,11 +1,11 @@
 //! The deposit queue. Shares are minted only while the vault is flat, so no price is needed.
 
 use near_sdk::json_types::U128;
-use near_sdk::{assert_one_yocto, env, near, require, AccountId};
+use near_sdk::{assert_one_yocto, env, near, AccountId};
 
 use crate::events::emit;
 use crate::math::shares_for_deposit;
-use crate::{now_seconds, Token, Vault, VaultExt};
+use crate::{Token, Vault, VaultExt};
 
 const DEPOSIT_MSG: &str = "deposit";
 
@@ -41,22 +41,6 @@ impl Vault {
         self.total_net -= amount;
         self.send_token(account, Token::Usdc, amount);
     }
-
-    pub fn trigger_cycle(&mut self) {
-        require!(
-            env::predecessor_account_id() == self.roles.keeper,
-            "NOT_KEEPER"
-        );
-        require!(!self.frozen, "FROZEN");
-        require!(!self.halted, "HALTED");
-        let now = now_seconds();
-        require!(
-            self.last_trigger == 0 || now >= self.last_trigger + self.policy.cooldown,
-            "COOLDOWN"
-        );
-        self.last_trigger = now;
-        self.mint_pending();
-    }
 }
 
 impl Vault {
@@ -74,7 +58,7 @@ impl Vault {
     }
 
     /// Book NAV is the USDC book here: wNEAR at or under dust is valued at zero.
-    fn mint_pending(&mut self) {
+    pub(crate) fn mint_pending(&mut self) {
         if self.wnear_book > self.policy.dust_wnear.0 {
             return;
         }

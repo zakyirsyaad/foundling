@@ -1,3 +1,4 @@
+use near_sdk::json_types::U128;
 use near_sdk::mock::MockAction;
 use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
 use near_sdk::{
@@ -5,9 +6,10 @@ use near_sdk::{
     RuntimeFeesConfig,
 };
 
+use crate::cycle::AgentConfig;
 use crate::setup::SetupTarget;
 use crate::tests::policy::demo_policy;
-use crate::{Assets, InitConfig, Roles, Vault};
+use crate::{Assets, InitConfig, OracleConfig, Roles, Vault};
 
 pub const START_SECONDS: u64 = 1_800_000_000;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
@@ -46,6 +48,14 @@ pub fn wnear() -> AccountId {
 
 pub fn rhea() -> AccountId {
     account("rhea.near")
+}
+
+pub fn outlayer() -> AccountId {
+    account("outlayer.near")
+}
+
+pub fn oracle() -> AccountId {
+    account("oracle.near")
 }
 
 pub fn alice() -> AccountId {
@@ -87,6 +97,18 @@ pub fn set_caller_with_balance(who: AccountId, balance: NearToken) {
     testing_env!(ctx.build());
 }
 
+pub fn set_caller_with_gas(who: AccountId, gas: Gas) {
+    let mut ctx = context(who, 0);
+    ctx.prepaid_gas(gas);
+    testing_env!(ctx.build());
+}
+
+pub fn set_caller_at_block(who: AccountId, block: u64) {
+    let mut ctx = context(who, 0);
+    ctx.block_height(block);
+    testing_env!(ctx.build());
+}
+
 pub fn set_callback(results: Vec<PromiseResult>) {
     let ctx = context(vault_id(), 0).build();
     testing_env!(
@@ -110,6 +132,23 @@ pub fn init_config() -> InitConfig {
             wnear: wnear(),
             rhea: rhea(),
             pool_id: 4512,
+            usdc_decimals: 6,
+            wnear_decimals: 24,
+        },
+        agent: AgentConfig {
+            outlayer: outlayer(),
+            wasm_url: "https://example.com/strategy.wasm".to_string(),
+            wasm_hash: "bb".to_string(),
+            secrets_profile: "sp2".to_string(),
+            secrets_owner: account("owner-secrets.near"),
+            outlayer_deposit: U128(50_000_000_000_000_000_000_000),
+            chain: "testnet".to_string(),
+            commitment: "aa".to_string(),
+        },
+        oracle: OracleConfig {
+            account: oracle(),
+            near_id: "near-id".to_string(),
+            usdc_id: "usdc-id".to_string(),
         },
         policy: demo_policy(),
         allowlist: vec![alice(), bob()],

@@ -19,3 +19,6 @@ storage_remove
 promise_create
 promise_then
 promise_result
+promise_return
+promise_results_count
+block_index

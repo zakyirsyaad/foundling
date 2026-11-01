@@ -4,22 +4,30 @@ use near_sdk::json_types::U128;
 use near_sdk::store::{IterableMap, LookupMap, LookupSet};
 use near_sdk::{env, near, require, AccountId, BorshStorageKey, PanicOnDefault};
 
+pub mod cycle;
+pub mod decision;
 pub mod deposit;
 pub mod events;
 pub mod governance;
 pub mod limits;
 pub mod math;
 pub mod policy;
+pub mod pricing;
 pub mod redeem;
 pub mod setup;
+pub mod swap;
 
 #[cfg(test)]
 mod tests;
 
+use crate::cycle::{AgentConfig, Stage};
+use crate::decision::Decision;
 use crate::events::emit;
 use crate::governance::RoleChange;
+use crate::limits::Window;
 use crate::policy::Policy;
 use crate::setup::SetupState;
+use crate::swap::{Bucket, Inflight};
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 
@@ -45,12 +53,24 @@ pub struct Assets {
     pub wnear: AccountId,
     pub rhea: AccountId,
     pub pool_id: u64,
+    pub usdc_decimals: u8,
+    pub wnear_decimals: u8,
+}
+
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleConfig {
+    pub account: AccountId,
+    pub near_id: String,
+    pub usdc_id: String,
 }
 
 #[near(serializers = [json])]
 pub struct InitConfig {
     pub roles: Roles,
     pub assets: Assets,
+    pub agent: AgentConfig,
+    pub oracle: OracleConfig,
     pub policy: Policy,
     pub allowlist: Vec<AccountId>,
 }
@@ -69,15 +89,20 @@ enum StorageKey {
     Pending,
     Claimable,
     Allowlist,
+    Buckets,
+    BucketClaims,
 }
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Vault {
+    vault_id: AccountId,
     roles: Roles,
     keeper_change: Option<RoleChange>,
     guardian_change: Option<RoleChange>,
     assets: Assets,
+    agent: AgentConfig,
+    oracle: OracleConfig,
     policy: Policy,
     initial_policy: Policy,
     frozen: bool,
@@ -95,7 +120,20 @@ pub struct Vault {
     pending: IterableMap<AccountId, u128>,
     claimable: LookupMap<(AccountId, Token), u128>,
     allowlist: LookupSet<AccountId>,
+    stage: Stage,
+    last_nonce: u64,
+    decision: Option<Decision>,
+    inflight: Option<Inflight>,
+    buckets: LookupMap<u64, Bucket>,
+    bucket_claims: LookupMap<(u64, AccountId), u128>,
+    /// What this vault holds in its internal Ref account. Only the vault can change it,
+    /// so comparing it with `get_deposit` is immune to donations.
+    rhea_usdc: u128,
+    rhea_wnear: u128,
     last_trigger: u64,
+    ops_window: Window,
+    buy_window: Window,
+    sell_window: Window,
     args_hash: String,
 }
 
@@ -158,10 +196,13 @@ impl Vault {
         let mut allowlist = LookupSet::new(StorageKey::Allowlist);
         allowlist.extend(config.allowlist);
         Self {
+            vault_id: me,
             roles: config.roles,
             keeper_change: None,
             guardian_change: None,
             assets: config.assets,
+            agent: config.agent,
+            oracle: config.oracle,
             initial_policy: config.policy.clone(),
             policy: config.policy,
             frozen: false,
@@ -176,7 +217,18 @@ impl Vault {
             pending: IterableMap::new(StorageKey::Pending),
             claimable: LookupMap::new(StorageKey::Claimable),
             allowlist,
+            stage: Stage::Idle,
+            last_nonce: 0,
+            decision: None,
+            inflight: None,
+            buckets: LookupMap::new(StorageKey::Buckets),
+            bucket_claims: LookupMap::new(StorageKey::BucketClaims),
+            rhea_usdc: 0,
+            rhea_wnear: 0,
             last_trigger: 0,
+            ops_window: Window::default(),
+            buy_window: Window::default(),
+            sell_window: Window::default(),
             args_hash,
         }
     }
@@ -255,6 +307,10 @@ impl Vault {
     pub fn set_books_for_tests(&mut self, usdc: u128, wnear: u128) {
         self.usdc_book = usdc;
         self.wnear_book = wnear;
+    }
+
+    pub fn set_ops_spent_for_tests(&mut self, amount: u128) {
+        self.ops_window = self.ops_window.recorded(now_seconds(), amount);
     }
 
     pub fn set_max_mint_for_tests(&mut self, limit: u32) {
