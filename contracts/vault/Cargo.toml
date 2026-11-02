@@ -3,6 +3,22 @@ name = "foundling-vault"
 version = "0.1.0"
 edition = "2021"
 publish = false
+repository = "https://github.com/zakyirsyaad/foundling"
+
+# The image carries the same Rust as rust-toolchain.toml, and the digest pins it. --no-embed-abi
+# matches the builds CI audits and the sandbox deploys.
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.97.1"
+image_digest = "sha256:7467038bdddc86484b73b416eeadce926ff59013e128e53dec5a19e1cb4b2234"
+passed_env = []
+container_build_command = [
+    "cargo",
+    "near",
+    "build",
+    "non-reproducible-wasm",
+    "--locked",
+    "--no-embed-abi",
+]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
