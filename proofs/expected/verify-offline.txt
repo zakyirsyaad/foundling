@@ -1,0 +1,5 @@
+verify offline (tier 0a)
+PASS commitment [synthetic]: sha256 matches the committed fixture
+PASS keys [synthetic]: access key list is empty for vault.owner.near at block 1000
+NOTE synthetic fixtures: no real vault was checked
+SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
