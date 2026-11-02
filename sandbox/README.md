@@ -5,11 +5,13 @@ Harness tes integrasi untuk vault Foundling. Ia menjalankan node sandbox lokal, 
 ## Menjalankan
 
 ```
-make quick     # unit test semua kontrak, tanpa sandbox dan tanpa build wasm
+make quick     # unit test semua kontrak dan strategy, tanpa sandbox dan tanpa build wasm
 make sandbox   # build wasm semua kontrak, lalu cargo test di sandbox/
 ```
 
 - Run pertama mengunduh biner neard (versi dari `near-sandbox`), jadi butuh jaringan.
+- Semua `cargo test` memakai `--locked`, seperti CI: `Cargo.lock` yang usang membuat tes gagal, bukan diam-diam ditulis ulang.
+- `make wasm` memakai `--no-embed-abi`, sama dengan build vault yang diaudit CI, jadi sandbox menguji biner yang sama.
 - `make wasm` menutup stdin untuk `cargo near build`, karena cargo-near bisa menggantung tanpa terminal.
 - `cargo test` langsung di `sandbox/` hanya aman bila wasm sudah dibangun. Bila belum, `wasm()` berhenti dengan pesan yang menyebut `make sandbox`.
 
@@ -21,7 +23,7 @@ Satu sandbox per tes, dengan:
 - mock `usdc` dan `wnear` (`mock-token`), `rhea` (`mock-ref`), `oracle` (`mock-oracle`, harga sudah diisi), `outlayer` (`mock-outlayer`);
 - `vault.owner.test.near`, dibuat dalam satu transaksi dari `owner`: CreateAccount, Transfer, DeployContract, `init`, tanpa AddKey. Jadi vault lahir tanpa access key.
 
-`start()` gagal bila `init` gagal. `start_with(Setup { .. })` mengubah dunia di sekitar vault, misalnya fee pool di Ref yang berbeda dari konfigurasi vault.
+`start()` gagal bila `init` gagal. `start_with(Setup { .. })` mengubah dunia di sekitar vault, misalnya fee pool di Ref yang berbeda dari konfigurasi vault. `launch(Setup { .. })` sama, tetapi tidak memeriksa `init`, untuk tes yang ingin melihat `init` gagal lewat `env.init_result`.
 
 ## Helper
 
@@ -43,7 +45,7 @@ Satu sandbox per tes, dengan:
 
 ```
 json!("Null")                                          // eksekusi gagal atau timeout: OutLayer menjawab null
-json!("Failed")                                        // request_execution sendiri panik
+json!("Failed")                                        // request gagal: callback vault melihat hasil gagal, deposit kembali penuh
 json!({"Raw": {"payload": "..."}})                     // byte apa adanya: JSON rusak, bentuk salah, atau >1024 byte
 json!({"Decision": {"template": {                      // Decision v1 yang terikat ke vault dan nonce peminta
     "chain": CHAIN, "commitment": COMMITMENT, "wasm_hash": WASM_HASH,
@@ -51,12 +53,14 @@ json!({"Decision": {"template": {                      // Decision v1 yang terik
     "nonce": null, "vault": null }}})
 ```
 
-`nonce` dan `vault` di template, bila diisi, menimpa nilai dari `input_data`. Pakai itu untuk mementaskan replay atau Decision dari vault lain. View `last_request`, `request_count`, dan `queued` membaca apa yang diterima mock.
+`nonce` dan `vault` di template, bila diisi, menimpa nilai dari `input_data`. Pakai itu untuk mementaskan replay atau Decision dari vault lain. Bila template tidak mengisinya dan `input_data` juga tidak memuatnya, mock gagal dengan pesan yang jelas, supaya bentuk `input_data` yang berubah tidak tampak sebagai serangan replay. View `last_request`, `request_count`, `queued`, dan `run_fee` membaca keadaan mock.
 
-Batasan:
+Perilaku yang perlu diketahui:
 
+- `Failed` tidak panik di dalam `request_execution`, karena panik membatalkan pengambilan entri dari antrean dan entri yang sama akan muncul di setiap request berikutnya. Mock mengembalikan promise ke method yang panik, jadi antrean tetap berkurang dan antrean `[Failed, Raw]` berjalan berurutan.
+- Mock menahan biaya tetap `run_fee` (0,002 NEAR, di dalam kisaran 0,0012-0,0025 di SPEC) dan mengembalikan sisa deposit ke `payer_account_id`, seperti OutLayer asli. Saldo vault turun sekitar biaya itu per siklus, bukan sebesar `outlayer_deposit`. Deposit di bawah `run_fee` gagal seperti `Failed`.
 - Mock menjawab di transaksi yang sama, bukan lewat yield. Timeout 200 blok, resolve di blok 199, dan callback terlambat belum bisa dipentaskan.
-- Jawaban di atas 1024 byte hanya ditandai (`oversize`, plus log). Yang menolaknya adalah vault, dengan `cycle_failed` kode `OVERSIZE`.
+- Jawaban di atas `MAX_DECISION_BYTES` (1024) hanya ditandai (`oversize`, plus log). Yang menolaknya adalah vault, dengan `cycle_failed` kode `OVERSIZE`. Batas itu milik vault, dan `vault_decision_limit_is_1024` mengunci konstanta `MAX_DECISION_BYTES` di harness ke perilaku vault pada 1024 dan 1025 byte.
 
 ## Mock token
 
