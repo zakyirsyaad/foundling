@@ -1,6 +1,6 @@
 //! Reads a decision back from chain data and re-runs the rule that made it. This covers what
-//! the run reported, not whether the prices were true: `obs` still has to be compared with
-//! the public sources at `ta`.
+//! the run reported, not whether the prices were true: `tools/recheck_obs.py` compares `obs`
+//! with the public sources.
 //!
 //! `decide` is compiled in, so this binary has to come from the commit that built the vault's
 //! `wasm_hash`. Any other commit answers for its own rule, and a difference shows as a failure.
