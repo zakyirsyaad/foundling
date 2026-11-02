@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [vault, mock-ref, mock-oracle]
+        crate: [vault, mock-ref, mock-oracle, mock-outlayer, mock-token]
     defaults:
       run:
         working-directory: contracts/${{ matrix.crate }}
@@ -169,6 +169,43 @@ jobs:
           path: contracts/vault/target/near/foundling_vault.wasm
           retention-days: 14
 
+  sandbox:
+    name: Sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/*/target
+            sandbox/target
+          key: sandbox-${{ hashFiles('rust-toolchain.toml', 'contracts/*/Cargo.lock', 'sandbox/Cargo.lock') }}
+          restore-keys: sandbox-
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup component add clippy rustfmt
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Format
+        working-directory: sandbox
+        run: cargo fmt --check
+      - name: Lint
+        working-directory: sandbox
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build the contracts and run the sandbox tests
+        run: make sandbox
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-24.04
@@ -182,12 +219,14 @@ jobs:
           tool: cargo-audit@0.22.2
       - name: Audit every lockfile
         run: |
-          for crate in strategy cli contracts/vault contracts/mock-ref contracts/mock-oracle; do
+          for crate in strategy cli contracts/vault contracts/mock-ref contracts/mock-oracle \
+            contracts/mock-outlayer contracts/mock-token sandbox; do
             cargo audit --file "$crate/Cargo.lock"
           done
       - name: Keep the ignored advisories out of every WASM
         run: |
-          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle; do
+          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle \
+            contracts/mock-outlayer contracts/mock-token; do
             for package in crypto-bigint zstd zstd-safe; do
               if cargo tree --locked --manifest-path "$crate/Cargo.toml" \
                 --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -q "$package"; then
