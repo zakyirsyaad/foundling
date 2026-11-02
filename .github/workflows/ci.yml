@@ -154,7 +154,7 @@ jobs:
           test "$status" -ne 1
 
   attack-lab:
-    name:Attack Lab scaffold
+    name: Attack Lab scaffold
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
