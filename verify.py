@@ -71,17 +71,18 @@ def check_commitment(data):
 def check_keys(data):
     keys = data.get("keys")
     account = data.get("account_id")
-    if not isinstance(keys, list) or not isinstance(account, str):
-        return Result("keys", "FAIL", "KEYS_FORMAT", "fixture needs account_id and a keys list")
+    if not isinstance(keys, list) or not (account is None or isinstance(account, str)):
+        return Result("keys", "FAIL", "KEYS_FORMAT", "fixture needs a keys list and, if present, a string account_id")
+    owner = f"for {account}" if account else "for the vault"
     if keys:
-        return Result("keys", "FAIL", "KEYS_NONEMPTY", f"{account} has {len(keys)} access key(s); a sealed vault has none")
-    return Result("keys", "PASS", "", f"access key list is empty for {account}")
+        return Result("keys", "FAIL", "KEYS_NONEMPTY", f"{len(keys)} access key(s) {owner}; a sealed vault has none")
+    return Result("keys", "PASS", "", f"access key list is empty {owner}")
 
 
 def load_fixture(proofs, name):
     path = Path(proofs) / name
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
         raise ToolError(f"cannot read fixture {name}: {err}") from err
     if not isinstance(data, dict):

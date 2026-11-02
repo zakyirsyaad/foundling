@@ -81,6 +81,43 @@ class VerifyOffline(unittest.TestCase):
                 self.assertEqual(run_cli(*sub, proofs=empty).returncode, 2, sub)
         self.assertEqual(run_cli("no-such-subcommand").returncode, 2)
 
+    def test_verify_keys_check_accepts_raw_rpc_shape(self):
+        raw = {"block_hash": "abc", "block_height": 1, "keys": []}
+        result = verify.check_keys(raw)
+        self.assertEqual(result.status, "PASS")
+
+    def test_verify_exit_code_keys_failure_is_1(self):
+        keys = copy.deepcopy(load("access_keys.json"))
+        keys["keys"] = [{"public_key": "ed25519:AAAA", "access_key": {"permission": "FullAccess"}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            nonempty = proofs_dir(tmp, keys=keys)
+            self.assertEqual(run_cli("keys", proofs=nonempty).returncode, 1)
+            self.assertEqual(run_cli(proofs=nonempty).returncode, 1)
+            self.assertEqual(run_cli("commitment", proofs=nonempty).returncode, 0)
+
+    def test_verify_exit_code_malformed_fixture_is_2(self):
+        for content in ("{bad", "[]"):
+            with tempfile.TemporaryDirectory() as tmp:
+                broken = proofs_dir(tmp)
+                (broken / "access_keys.json").write_text(content)
+                result = run_cli("keys", proofs=broken)
+                self.assertEqual(result.returncode, 2, content)
+                self.assertEqual(result.stdout, "", content)
+
+    def test_verify_offline_runs_with_sockets_blocked(self):
+        guard = (
+            "import runpy, socket, sys\n"
+            "def blocked(*a, **k):\n"
+            "    raise AssertionError('network used in offline mode')\n"
+            "socket.socket.connect = blocked\n"
+            "socket.getaddrinfo = blocked\n"
+            "sys.argv = ['verify.py']\n"
+            f"runpy.run_path({str(ROOT / 'verify.py')!r}, run_name='__main__')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", guard], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, GOLDEN.read_text())
+
     def test_verify_offline_path_imports_no_network_modules(self):
         tree = ast.parse((ROOT / "verify.py").read_text())
         banned = {"urllib", "requests", "socket", "http", "ssl"}
