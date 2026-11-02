@@ -99,6 +99,36 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  verifier:
+    name: Verifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: verifier-${{ hashFiles('rust-toolchain.toml', 'cli/Cargo.lock') }}
+          restore-keys: verifier-
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup component add clippy rustfmt
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Lint the fetch feature
+        run: cargo clippy --locked --all-targets --features fetch -- -D warnings
+      - name: Test
+        run: cargo test --locked
+
   vault-wasm:
     name: Vault WASM
     runs-on: ubuntu-24.04
@@ -152,7 +182,7 @@ jobs:
           tool: cargo-audit@0.22.2
       - name: Audit every lockfile
         run: |
-          for crate in strategy contracts/vault contracts/mock-ref contracts/mock-oracle; do
+          for crate in strategy cli contracts/vault contracts/mock-ref contracts/mock-oracle; do
             cargo audit --file "$crate/Cargo.lock"
           done
       - name: Keep the ignored advisories out of every WASM
