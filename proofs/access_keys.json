@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "account_id": "vault.owner.near",
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "1",
+    "result": {
+      "block_hash": "11111111111111111111111111111111",
+      "block_height": 1000,
+      "keys": []
+    }
+  }
+}
