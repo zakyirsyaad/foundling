@@ -58,6 +58,10 @@ class FakeSources:
             raise recheck.SourceDown("no route")
 
 
+def http_error(code):
+    return recheck.urllib.error.HTTPError("https://example.test", code, "refused", None, None)
+
+
 def row(price, volume, seconds):
     return [price, volume, seconds + 0.25, "b", "m", "", 1]
 
@@ -204,6 +208,44 @@ class Reading(unittest.TestCase):
     def test_a_bad_certificate_is_not_tried_again(self):
         error = recheck.urllib.error.URLError("hostname mismatch")
         self.assertEqual(self.read_with(error), 1)
+
+    def test_a_rate_limit_is_tried_again(self):
+        self.assertEqual(self.read_with(http_error(429)), recheck.RETRIES)
+
+    def test_a_block_the_archive_refused_is_tried_again(self):
+        self.assertEqual(self.read_with(http_error(422)), recheck.RETRIES)
+
+    def test_a_forbidden_request_is_not_tried_again(self):
+        self.assertEqual(self.read_with(http_error(403)), 1)
+
+    def test_the_wait_doubles_between_tries(self):
+        def fail(request, timeout):
+            raise http_error(429)
+
+        with mock.patch.object(recheck.urllib.request, "urlopen", fail), mock.patch.object(
+            recheck.time, "sleep"
+        ) as sleep:
+            with self.assertRaises(recheck.SourceDown):
+                recheck.PublicSources.read(recheck.urllib.request.Request("https://example.test"))
+        waits = [call.args[0] for call in sleep.call_args_list]
+        self.assertEqual(waits, [2, 4, 8, 16])
+
+
+class BlockTimes(unittest.TestCase):
+    def test_a_block_is_read_once(self):
+        sources = recheck.PublicSources()
+        reply = {"result": {"header": {"timestamp": TA * recheck.NANOS_PER_SECOND}}}
+        sources.rpc = mock.Mock(return_value=reply)
+        self.assertEqual(sources.block_seconds(7), TA)
+        self.assertEqual(sources.block_seconds(7), TA)
+        sources.rpc.assert_called_once()
+
+    def test_a_missing_height_is_read_once(self):
+        sources = recheck.PublicSources()
+        sources.rpc = mock.Mock(return_value={"error": {"name": "UNKNOWN_BLOCK"}})
+        self.assertIsNone(sources.block_seconds(7))
+        self.assertIsNone(sources.block_seconds(7))
+        sources.rpc.assert_called_once()
 
 
 class Summary(unittest.TestCase):

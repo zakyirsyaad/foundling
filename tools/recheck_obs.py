@@ -12,6 +12,7 @@ sources are mainnet whichever chain the vault runs on.
 
 Needs no keys. Exit code 0 means nothing failed, 1 means a price did not come back, and 2
 means a source could not be read, so its checks are SKIP and nothing is proven either way.
+A network that blocks Kraken gets SKIP for every `pb`, so read the lines, not only the code.
 """
 
 import argparse
@@ -41,8 +42,10 @@ WNEAR_UNITS_PER_USDC_UNIT = 10**18
 NANOS_PER_SECOND = 10**9
 MAX_BLOCK_READS = 96
 REQUEST_TIMEOUT_SECONDS = 30
-RETRIES = 4
+RETRIES = 5
 RETRY_DELAY_SECONDS = 2
+# 429 is the node's rate limit, and its archive also answers 422 for a while under load.
+RETRIED_STATUS = (422, 429)
 UNKNOWN_BLOCK_NAMES = ("UNKNOWN_BLOCK", "GARBAGE_COLLECTED_BLOCK")
 
 
@@ -108,6 +111,10 @@ def timed_out(error):
 
 
 class PublicSources:
+    def __init__(self):
+        # Every search starts from genesis, so readings close in time share most of their path.
+        self.seconds_by_height = {}
+
     @staticmethod
     def read(request):
         for attempt in range(RETRIES):
@@ -115,12 +122,12 @@ class PublicSources:
                 with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as reply:
                     return json.load(reply)
             except urllib.error.HTTPError as error:
-                if error.code != 429 or attempt == RETRIES - 1:
+                if error.code not in RETRIED_STATUS or attempt == RETRIES - 1:
                     raise SourceDown(f"{request.full_url}: HTTP {error.code}") from error
             except (urllib.error.URLError, TimeoutError, ValueError) as error:
                 if not timed_out(error) or attempt == RETRIES - 1:
                     raise SourceDown(f"{request.full_url}: {error}") from error
-            time.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+            time.sleep(RETRY_DELAY_SECONDS * 2**attempt)
         raise SourceDown(request.full_url)
 
     def rpc(self, method, params):
@@ -137,6 +144,11 @@ class PublicSources:
 
     def block_seconds(self, height):
         """`None` for a height with no block, since the chain skips some."""
+        if height not in self.seconds_by_height:
+            self.seconds_by_height[height] = self.read_block_seconds(height)
+        return self.seconds_by_height[height]
+
+    def read_block_seconds(self, height):
         reply = self.rpc("block", {"block_id": height})
         if "result" in reply:
             return reply["result"]["header"]["timestamp"] // NANOS_PER_SECOND
