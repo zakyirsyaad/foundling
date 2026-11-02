@@ -20,7 +20,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | Bot keeper dan skrip deploy | Partner |
 | `verify.py` dan halaman bukti | Partner |
 | Sandbox dan Attack Lab: harness, mock OutLayer, token mock untuk testnet, tes serangan (oracle dan Ref mock sudah ada di `contracts/`) | Partner |
-| CI, README, video demo | Partner |
+| CI (dasar sudah ada di `.github/workflows/ci.yml`), README, video demo | Partner |
 
 ## Milestone
 
