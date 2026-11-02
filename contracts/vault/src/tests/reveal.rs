@@ -1,6 +1,7 @@
 use near_sdk::env;
 use near_sdk::serde_json::{self, Value};
 
+use crate::reveal::MAX_PARAMS_BYTES;
 use crate::tests::support::*;
 use crate::{InitConfig, Vault};
 
@@ -117,9 +118,9 @@ fn commitment_of_params(params: &str) -> String {
 }
 
 #[test]
-fn a_long_parameter_text_still_opens() {
+fn the_longest_parameter_text_still_opens() {
     set_caller(parent());
-    let params = "x".repeat(20_000);
+    let params = "x".repeat(MAX_PARAMS_BYTES);
     let commitment = commitment_of_params(&params);
     let mut vault = vault_with(|config| config.agent.commitment = commitment);
     set_caller_at(alice(), OPENS_AT);
@@ -127,6 +128,18 @@ fn a_long_parameter_text_still_opens() {
     vault.reveal(params.clone(), text("salt"));
 
     assert_eq!(vault.revealed(), Some(params));
+}
+
+#[test]
+#[should_panic(expected = "PARAMS_TOO_LONG")]
+fn a_parameter_text_past_the_limit_is_refused() {
+    set_caller(parent());
+    let params = "x".repeat(MAX_PARAMS_BYTES + 1);
+    let commitment = commitment_of_params(&params);
+    let mut vault = vault_with(|config| config.agent.commitment = commitment);
+    set_caller_at(alice(), OPENS_AT);
+
+    vault.reveal(params, text("salt"));
 }
 
 #[test]

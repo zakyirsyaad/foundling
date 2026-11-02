@@ -215,25 +215,30 @@ pub fn ready_vault() -> Vault {
 }
 
 pub fn call_to(receiver: &AccountId) -> (String, serde_json::Value, NearToken) {
-    let receipts = get_created_receipts();
-    let receipt = receipts
+    calls_to(receiver).remove(0)
+}
+
+pub fn calls_to(receiver: &AccountId) -> Vec<(String, serde_json::Value, NearToken)> {
+    get_created_receipts()
         .iter()
-        .find(|receipt| &receipt.receiver_id == receiver)
-        .unwrap();
-    let MockAction::FunctionCallWeight {
-        method_name,
-        args,
-        attached_deposit,
-        ..
-    } = &receipt.actions[0]
-    else {
-        panic!("expected a function call");
-    };
-    (
-        String::from_utf8(method_name.clone()).unwrap(),
-        serde_json::from_slice(args).unwrap(),
-        *attached_deposit,
-    )
+        .filter(|receipt| &receipt.receiver_id == receiver)
+        .map(|receipt| {
+            let MockAction::FunctionCallWeight {
+                method_name,
+                args,
+                attached_deposit,
+                ..
+            } = &receipt.actions[0]
+            else {
+                panic!("expected a function call");
+            };
+            (
+                String::from_utf8(method_name.clone()).unwrap(),
+                serde_json::from_slice(args).unwrap(),
+                *attached_deposit,
+            )
+        })
+        .collect()
 }
 
 pub fn logs_contain(text: &str) -> bool {

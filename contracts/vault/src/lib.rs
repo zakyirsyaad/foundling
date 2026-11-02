@@ -35,6 +35,10 @@ use crate::swap::{Bucket, Inflight};
 const MILLIS_PER_SECOND: u64 = 1_000;
 const FULL_BPS: u32 = 10_000;
 const MAX_REVEAL_DELAY: u64 = 365 * 24 * 60 * 60;
+/// OutLayer's yield. An earlier abort would let anyone kill every live run.
+const YIELD_TIMEOUT_BLOCKS: u64 = 200;
+/// Past this, `10^gap` no longer fits the u128 that `decimal_scale` returns.
+const MAX_DECIMAL_GAP: u8 = 38;
 const SHA256_HEX_CHARS: usize = 64;
 
 #[near(serializers = [json, borsh])]
@@ -195,6 +199,36 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         "init: abort_after_blocks must be set"
     );
     require!(
+        policy.abort_after_blocks > YIELD_TIMEOUT_BLOCKS,
+        "init: abort_after_blocks must pass the yield timeout"
+    );
+    require!(
+        [
+            policy.cap_bps,
+            policy.epoch_cap_bps,
+            policy.cap_sell_bps,
+            policy.max_risk_bps,
+        ]
+        .iter()
+        .all(|bps| *bps <= FULL_BPS),
+        "init: a bps limit above 100%"
+    );
+    // Added to the clock later, where an overflow would panic inside a callback.
+    require!(
+        [
+            policy.cooldown,
+            policy.decision_ttl,
+            policy.stuck_after,
+            policy.halt_after,
+            policy.timelock,
+        ]
+        .iter()
+        .all(|seconds| *seconds <= MAX_REVEAL_DELAY),
+        "init: a duration above one year"
+    );
+    require!(policy.near_reserve.0 > 0, "init: near_reserve must be set");
+    require!(policy.min_deposit.0 > 0, "init: min_deposit must be set");
+    require!(
         policy.max_execution_seconds > 0,
         "init: max_execution_seconds must be set"
     );
@@ -210,6 +244,10 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
     require!(
         config.assets.usdc_decimals <= config.assets.wnear_decimals,
         "init: usdc_decimals above wnear_decimals"
+    );
+    require!(
+        config.assets.wnear_decimals - config.assets.usdc_decimals <= MAX_DECIMAL_GAP,
+        "init: the token decimals are too far apart"
     );
     require!(
         policy.slippage_bps < FULL_BPS,
