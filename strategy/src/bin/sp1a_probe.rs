@@ -21,9 +21,12 @@ fn main() {
 
 /// Plain base64 (RFC 4648, with padding), not wasm32-specific: kept at the crate root, not
 /// inside `wasm`, so it can be unit-tested on the host instead of only compiling untested.
+/// The host build has no caller for it outside `#[cfg(test)]` — `wasm::run` is its only
+/// caller on wasm32, where this is not dead code.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b = [
             chunk[0],
