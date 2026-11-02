@@ -454,4 +454,59 @@ mod tests {
         assert_eq!(used, U128(0));
         assert_eq!(token.ft_balance_of(account("alice.testnet")), U128(1_000));
     }
+
+    #[test]
+    fn a_receiver_that_returns_part_refunds_only_that_part() {
+        let mut token = token();
+        call("alice.testnet", one_yocto());
+        token.ft_transfer(account("bob.testnet"), U128(400), None);
+
+        let used = resolve_with(&mut token, PromiseResult::Successful(b"\"150\"".to_vec()));
+
+        assert_eq!(used, U128(250));
+        assert_eq!(token.ft_balance_of(account("alice.testnet")), U128(750));
+        assert_eq!(token.ft_balance_of(account("bob.testnet")), U128(250));
+    }
+
+    #[test]
+    fn a_refund_is_capped_at_what_the_receiver_still_holds() {
+        let mut token = token();
+        call("alice.testnet", one_yocto());
+        token.ft_transfer(account("bob.testnet"), U128(400), None);
+        call("bob.testnet", one_yocto());
+        token.ft_transfer(account("alice.testnet"), U128(350), None);
+
+        let used = resolve_with(&mut token, PromiseResult::Successful(b"\"400\"".to_vec()));
+
+        assert_eq!(used, U128(350));
+        assert_eq!(token.ft_balance_of(account("alice.testnet")), U128(1_000));
+        assert_eq!(token.ft_balance_of(account("bob.testnet")), U128(0));
+    }
+
+    #[test]
+    fn a_receiver_that_claims_more_unused_than_was_sent_refunds_only_the_amount() {
+        let mut token = token();
+        call("alice.testnet", one_yocto());
+        token.ft_transfer(account("bob.testnet"), U128(400), None);
+
+        let used = resolve_with(&mut token, PromiseResult::Successful(b"\"9999\"".to_vec()));
+
+        assert_eq!(used, U128(0));
+        assert_eq!(token.ft_balance_of(account("alice.testnet")), U128(1_000));
+    }
+
+    #[test]
+    fn a_receiver_that_answers_something_else_refunds_everything() {
+        let mut token = token();
+        call("alice.testnet", one_yocto());
+        token.ft_transfer(account("bob.testnet"), U128(400), None);
+
+        let used = resolve_with(
+            &mut token,
+            PromiseResult::Successful(b"\"not a number\"".to_vec()),
+        );
+
+        assert_eq!(used, U128(0));
+        assert_eq!(token.ft_balance_of(account("alice.testnet")), U128(1_000));
+    }
 }
