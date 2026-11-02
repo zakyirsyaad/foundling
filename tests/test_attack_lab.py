@@ -37,12 +37,13 @@ CORE_ATTACKS = [
 
 
 def run(*args, attacks_dir=None, registry=None, flags=()):
-    cmd = [sys.executable, str(ATTACK_PY), *flags]
+    """flags (--strict, --timeout) go after the subcommand, the way people type them."""
+    cmd = [sys.executable, str(ATTACK_PY)]
     if registry:
         cmd += ["--registry", str(registry)]
     if attacks_dir:
         cmd += ["--attacks-dir", str(attacks_dir)]
-    cmd += list(args)
+    cmd += [args[0], *flags, *args[1:]]
     return subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
 
 
@@ -224,9 +225,10 @@ class AttackLabTest(unittest.TestCase):
     def test_timeout_must_be_finite_and_positive(self):
         for bad in ["0", "-1", "nan", "inf", "abc"]:
             with self.subTest(timeout=bad):
-                result = run("list", flags=("--timeout", bad))
+                result = run("run-all", flags=("--timeout", bad))
                 self.assertEqual(result.returncode, 2, result.stdout)
-                self.assertIn("--timeout", result.stderr)
+                self.assertIn("argument --timeout", result.stderr)
+                self.assertNotIn("unrecognized arguments", result.stderr)
 
     def test_missing_registry_exits_2_not_1(self):
         result = run("run-all", registry=self.tmp / "nope.json")
