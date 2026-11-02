@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attack Lab dispatcher: `foundling attack [--timeout S] [--strict] list|run <name>|run-all`.
+"""Attack Lab dispatcher: `foundling attack list | run NAME [--timeout S] | run-all [--timeout S] [--strict]`.
 
 Exit codes per attack: 0 = system held, 1 = attack succeeded or reason code
 differed, 2 = tool or network error. An attack without a script under
@@ -115,15 +115,16 @@ def main(argv):
     parser = argparse.ArgumentParser(prog="foundling attack")
     parser.add_argument("--registry", default=DEFAULT_REGISTRY)
     parser.add_argument("--attacks-dir", default=DEFAULT_ATTACKS_DIR)
-    parser.add_argument("--timeout", type=seconds, default=ATTACK_TIMEOUT_SECONDS)
-    parser.add_argument(
-        "--strict", action="store_true", help="run-all: NOT_IMPLEMENTED exits 2"
-    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
-    sub.add_parser("run-all")
+    run_all_parser = sub.add_parser("run-all")
+    run_all_parser.add_argument(
+        "--strict", action="store_true", help="NOT_IMPLEMENTED exits 2"
+    )
     run_parser = sub.add_parser("run")
     run_parser.add_argument("name")
+    for p in (run_all_parser, run_parser):
+        p.add_argument("--timeout", type=seconds, default=ATTACK_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
 
     try:
