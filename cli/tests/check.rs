@@ -46,7 +46,7 @@ fn a_real_cycle_passes_every_check() {
     assert_eq!(failed(&report), Vec::<&str>::new());
     assert_eq!(report.skipped, 0);
     assert!(report.lines.iter().any(|line| line == "1/1 reproduced"));
-    assert_eq!(report.summary(), "SUMMARY pass=14 skip=0 fail=0 keys=none");
+    assert_eq!(report.summary(), "SUMMARY pass=14 skip=0 fail=0");
 }
 
 #[test]

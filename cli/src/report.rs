@@ -27,7 +27,7 @@ impl Report {
 
     pub fn summary(&self) -> String {
         format!(
-            "SUMMARY pass={} skip={} fail={} keys=none",
+            "SUMMARY pass={} skip={} fail={}",
             self.passed, self.skipped, self.failed
         )
     }
