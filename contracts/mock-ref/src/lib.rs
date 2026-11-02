@@ -42,7 +42,7 @@ pub enum Fault {
     WithdrawPartial,
     /// Everything is sent, the answer cannot be read.
     WithdrawGarbage,
-    /// `get_deposits` panics until the owner clears it. The others fire once.
+    /// Balance reads panic until the owner clears it. The others fire once.
     ProbeFails,
     /// The deposit lands, the answer comes only when the yield times out.
     DepositHang,
@@ -281,6 +281,11 @@ impl MockRef {
             .into_iter()
             .map(|token| (token.clone(), U128(self.balance(&account_id, token))))
             .collect()
+    }
+
+    pub fn get_deposit(&self, account_id: AccountId, token_id: AccountId) -> U128 {
+        require!(self.fault != Fault::ProbeFails, "probe fault");
+        U128(self.balance(&account_id, &token_id))
     }
 
     pub fn get_pool(&self, pool_id: u64) -> PoolInfo {
@@ -791,6 +796,25 @@ mod tests {
         set_fault(&mut contract, Fault::ProbeFails);
 
         contract.get_deposits(vault());
+    }
+
+    #[test]
+    #[should_panic(expected = "probe fault")]
+    fn a_probe_fault_breaks_get_deposit() {
+        let mut contract = set_up();
+        set_fault(&mut contract, Fault::ProbeFails);
+
+        contract.get_deposit(vault(), usdc());
+    }
+
+    #[test]
+    fn get_deposit_reads_one_token_and_zero_for_any_other() {
+        let mut contract = set_up();
+        let _ = deposit(&mut contract, UNIT);
+
+        assert_eq!(contract.get_deposit(vault(), usdc()), U128(UNIT));
+        let other_token = account("other-token.testnet");
+        assert_eq!(contract.get_deposit(vault(), other_token), U128(0));
     }
 
     #[test]

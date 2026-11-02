@@ -396,6 +396,69 @@ fn the_reveal_time_cannot_have_passed() {
 }
 
 #[test]
+#[should_panic(expected = "init: abort_after_blocks must pass the yield timeout")]
+fn an_abort_cannot_beat_the_yield_timeout() {
+    init_with(|config| config.policy.abort_after_blocks = 200);
+}
+
+#[test]
+#[should_panic(expected = "init: a bps limit above 100%")]
+fn a_cap_cannot_pass_the_whole_book() {
+    init_with(|config| config.policy.cap_bps = 10_001);
+}
+
+#[test]
+#[should_panic(expected = "init: a bps limit above 100%")]
+fn an_epoch_cap_cannot_pass_the_whole_book() {
+    init_with(|config| config.policy.epoch_cap_bps = 10_001);
+}
+
+#[test]
+#[should_panic(expected = "init: a bps limit above 100%")]
+fn a_sell_cap_cannot_pass_the_whole_book() {
+    init_with(|config| config.policy.cap_sell_bps = 10_001);
+}
+
+#[test]
+#[should_panic(expected = "init: a bps limit above 100%")]
+fn the_risk_limit_cannot_pass_the_whole_book() {
+    init_with(|config| config.policy.max_risk_bps = 10_001);
+}
+
+#[test]
+#[should_panic(expected = "init: a duration above one year")]
+fn a_duration_that_would_overflow_is_refused() {
+    init_with(|config| config.policy.decision_ttl = u64::MAX);
+}
+
+#[test]
+#[should_panic(expected = "init: a duration above one year")]
+fn a_timelock_of_centuries_is_refused() {
+    init_with(|config| config.policy.timelock = u64::MAX);
+}
+
+#[test]
+#[should_panic(expected = "init: near_reserve must be set")]
+fn the_near_reserve_cannot_be_zero() {
+    init_with(|config| config.policy.near_reserve = U128(0));
+}
+
+#[test]
+#[should_panic(expected = "init: min_deposit must be set")]
+fn the_minimum_deposit_cannot_be_zero() {
+    init_with(|config| config.policy.min_deposit = U128(0));
+}
+
+#[test]
+#[should_panic(expected = "init: the token decimals are too far apart")]
+fn a_decimal_gap_that_overflows_the_scale_is_refused() {
+    init_with(|config| {
+        config.assets.usdc_decimals = 0;
+        config.assets.wnear_decimals = 39;
+    });
+}
+
+#[test]
 #[should_panic(expected = "init: the two tokens must differ")]
 fn the_two_tokens_cannot_be_the_same() {
     init_with(|config| config.assets.usdc = config.assets.wnear.clone());
