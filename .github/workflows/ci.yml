@@ -136,9 +136,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test
-        run: python3 -m unittest tests.test_verify_offline
+        run: python3 -m unittest tests.test_verify_offline tests.test_recheck_obs
       - name: Run the tier 0a checks
         run: python3 verify.py
+
+  recheck-obs:
+    name: Recheck obs (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Past prices cannot change, so 1 is a real mismatch. 2 only means a source is down.
+      - name: Recheck recorded readings against the archive and Kraken
+        run: |
+          status=0
+          python3 tools/recheck_obs.py tools/fixtures/m10-obs.json || status=$?
+          test "$status" -ne 1
 
   attack-lab:
     name: Attack Lab scaffold
