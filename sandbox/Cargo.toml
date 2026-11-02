@@ -7,10 +7,10 @@ description = "near-workspaces harness for the Foundling vault and its testnet m
 
 [dependencies]
 near-workspaces = "0.24.0"
-tokio = { version = "1", features = ["full"] }
 serde = "1"
 serde_json = "1"
 anyhow = "1"
 
 [dev-dependencies]
 sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }

@@ -29,6 +29,9 @@ pub const WNEAR_DECIMALS: u8 = 24;
 /// wNEAR in USDC with eight decimals, and what `mock-oracle` is told for NEAR/USD.
 pub const NEAR_PRICE: u128 = 450_000_000;
 pub const OUTLAYER_DEPOSIT: u128 = 50_000_000_000_000_000_000_000;
+/// The size the vault rejects a decision above (`MAX_DECISION_BYTES` in the vault). Tests
+/// take their boundary from here, and `vault_decision_limit_is_1024` pins it to the vault.
+pub const MAX_DECISION_BYTES: usize = 1024;
 
 const EVENT_PREFIX: &str = "EVENT_JSON:";
 const VAULT_BALANCE: NearToken = NearToken::from_near(10);
@@ -68,14 +71,13 @@ pub fn now_seconds() -> u64 {
 /// mismatch without rebuilding the harness.
 #[derive(Clone, Debug)]
 pub struct Setup {
-    pub vault_pool_fee_bps: u32,
+    /// The fee the mock Ref reports for the pool. The vault is configured with `POOL_FEE_BPS`.
     pub ref_pool_fee_bps: u32,
 }
 
 impl Default for Setup {
     fn default() -> Self {
         Self {
-            vault_pool_fee_bps: POOL_FEE_BPS,
             ref_pool_fee_bps: POOL_FEE_BPS,
         }
     }
@@ -108,7 +110,21 @@ impl Foundling {
         Self::start_with(Setup::default()).await
     }
 
+    /// Like `launch`, but fails when the vault's `init` fails, so a config that drifted from
+    /// the contract shows up as that and not as account errors in the first call.
     pub async fn start_with(setup: Setup) -> anyhow::Result<Self> {
+        let env = Self::launch(setup).await?;
+        anyhow::ensure!(
+            env.init_result.is_success(),
+            "vault init failed, so the config in this harness may have drifted from the contract: {}",
+            failures(&env.init_result)
+        );
+        Ok(env)
+    }
+
+    /// Boots everything and returns the result of `init` without checking it. For a test
+    /// that wants to see `init` fail.
+    pub async fn launch(setup: Setup) -> anyhow::Result<Self> {
         let worker = near_workspaces::sandbox().await?;
         let root = worker.root_account()?;
         let parent = account(&root, "owner", ACCOUNT_BALANCE).await?;
@@ -169,7 +185,6 @@ impl Foundling {
 
         let vault_id: AccountId = format!("vault.{}", parent.id()).parse()?;
         let config = vault_config(
-            &setup,
             [&governor, &keeper, &guardian, &alice],
             [&usdc, &wnear, &rhea, &oracle, &outlayer],
         );
@@ -182,11 +197,6 @@ impl Foundling {
             .call(Function::new("init").args(init_args.clone()).max_gas())
             .transact()
             .await?;
-        anyhow::ensure!(
-            init_result.is_success(),
-            "vault init failed, so the config in this harness may have drifted from the contract: {}",
-            failures(&init_result)
-        );
 
         Ok(Self {
             worker,
@@ -353,7 +363,7 @@ async fn set_feed(
     Ok(())
 }
 
-fn vault_config(setup: &Setup, people: [&Account; 4], contracts: [&Contract; 5]) -> Value {
+fn vault_config(people: [&Account; 4], contracts: [&Contract; 5]) -> Value {
     let [governor, keeper, guardian, alice] = people;
     let [usdc, wnear, rhea, oracle, outlayer] = contracts;
     let wnear_unit = 10u128.pow(24);
@@ -361,7 +371,7 @@ fn vault_config(setup: &Setup, people: [&Account; 4], contracts: [&Contract; 5])
         "roles": {"governor": governor.id(), "keeper": keeper.id(), "guardian": guardian.id()},
         "assets": {
             "usdc": usdc.id(), "wnear": wnear.id(), "rhea": rhea.id(),
-            "pool_id": POOL_ID, "pool_fee_bps": setup.vault_pool_fee_bps,
+            "pool_id": POOL_ID, "pool_fee_bps": POOL_FEE_BPS,
             "usdc_decimals": USDC_DECIMALS, "wnear_decimals": WNEAR_DECIMALS,
         },
         "agent": {
