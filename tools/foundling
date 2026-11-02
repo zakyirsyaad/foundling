@@ -1,0 +1,14 @@
+#!/bin/sh
+# Dispatcher for scripted commands. Usage: foundling attack <list|run NAME|run-all>
+here=$(cd "$(dirname "$0")" && pwd)
+cmd=${1:-}
+case "$cmd" in
+  attack)
+    shift
+    exec python3 "$here/attack.py" "$@"
+    ;;
+  *)
+    echo "usage: foundling attack <list|run NAME|run-all>" >&2
+    exit 2
+    ;;
+esac

@@ -1,6 +1,6 @@
 CONTRACTS := vault mock-oracle mock-ref mock-outlayer mock-token
 
-.PHONY: quick wasm sandbox
+.PHONY: quick wasm sandbox attack-lab
 
 # Unit tests and proptest of every contract and the strategy, as CI runs them: --locked,
 # so a stale Cargo.lock fails here and is not rewritten. No sandbox, no wasm build.
@@ -24,3 +24,7 @@ wasm:
 # near-workspaces tests against a local sandbox node. The first run downloads neard.
 sandbox: wasm
 	cd sandbox && cargo test --locked
+
+# Runs every core attack in tools/attack-registry.json and prints PASS/FAIL/NOT_IMPLEMENTED/ERROR.
+attack-lab:
+	@python3 tools/attack.py run-all
