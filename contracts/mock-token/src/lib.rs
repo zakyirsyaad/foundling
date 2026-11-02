@@ -253,13 +253,26 @@ impl MockToken {
 
 #[cfg(test)]
 mod tests {
-    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::mock::MockAction;
+    use near_sdk::test_utils::{get_created_receipts, VMContextBuilder};
     use near_sdk::{testing_env, PromiseResult};
 
     use super::*;
 
     fn account(name: &str) -> AccountId {
         name.parse().unwrap()
+    }
+
+    fn refunded_to(who: &str) -> Vec<NearToken> {
+        get_created_receipts()
+            .into_iter()
+            .filter(|receipt| receipt.receiver_id == account(who))
+            .flat_map(|receipt| receipt.actions)
+            .filter_map(|action| match action {
+                MockAction::Transfer { deposit, .. } => Some(deposit),
+                _ => None,
+            })
+            .collect()
     }
 
     fn call(predecessor: &str, deposit: NearToken) {
@@ -347,6 +360,38 @@ mod tests {
 
         assert!(token.storage_balance_of(account("carol.testnet")).is_some());
         assert!(token.storage_balance_of(account("dave.testnet")).is_none());
+    }
+
+    #[test]
+    fn storage_deposit_refunds_what_exceeds_the_minimum() {
+        let mut token = token();
+        let extra = NearToken::from_yoctonear(5);
+        call("carol.testnet", STORAGE_MIN.saturating_add(extra));
+
+        token.storage_deposit(None, Some(true));
+
+        assert_eq!(refunded_to("carol.testnet"), vec![extra]);
+    }
+
+    #[test]
+    fn storage_deposit_of_exactly_the_minimum_refunds_nothing() {
+        let mut token = token();
+        call("carol.testnet", STORAGE_MIN);
+
+        token.storage_deposit(None, Some(true));
+
+        assert!(refunded_to("carol.testnet").is_empty());
+    }
+
+    #[test]
+    fn storage_deposit_for_a_registered_account_refunds_everything() {
+        let mut token = token();
+        let attached = NearToken::from_yoctonear(7);
+        call("alice.testnet", attached);
+
+        token.storage_deposit(Some(account("alice.testnet")), None);
+
+        assert_eq!(refunded_to("alice.testnet"), vec![attached]);
     }
 
     #[test]
