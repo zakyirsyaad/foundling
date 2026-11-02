@@ -8,9 +8,17 @@
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json, Value};
-use near_sdk::{env, near, require, AccountId, PanicOnDefault};
+use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise};
 
-/// Resume payloads above this fail on real OutLayer.
+const FAIL_GAS: Gas = Gas::from_tgas(5);
+
+/// What one run costs, inside the 0.0012-0.0025 NEAR SPEC records for a real run. The rest
+/// of the attached deposit goes back to the payer, as real OutLayer does, so a vault's
+/// balance falls by about this per cycle and not by the whole `outlayer_deposit`.
+pub const RUN_FEE: NearToken = NearToken::from_yoctonear(2_000_000_000_000_000_000_000);
+
+/// The size the vault's `MAX_DECISION_BYTES` rejects above. The mock still delivers a
+/// bigger answer and flags it, so the limit under test is the vault's, not the mock's.
 pub const MAX_RESPONSE_BYTES: usize = 1024;
 
 #[near(serializers = [json, borsh])]
@@ -34,7 +42,11 @@ pub struct DecisionTemplate {
 pub enum Mode {
     /// The run failed or timed out: OutLayer answers `null`.
     Null,
-    /// `request_execution` itself panics, as when OutLayer is paused or underpaid.
+    /// The request fails, as when OutLayer is paused: the vault's callback sees a failed
+    /// result and the whole deposit comes back. It is a failing call returned from
+    /// `request_execution`, not a panic in it, because a panic would roll back the queue
+    /// pop and the same entry would fire on every later request. A deposit under
+    /// `RUN_FEE` fails the same way.
     Failed,
     /// These bytes, verbatim: broken JSON, a wrong shape, or anything over 1024 bytes.
     Raw { payload: String },
@@ -53,7 +65,7 @@ pub struct Recorded {
     pub secrets_ref: String,
     pub input_data: String,
     pub response_len: u32,
-    /// The answer is over the 1024-byte limit real OutLayer enforces.
+    /// The answer is over `MAX_RESPONSE_BYTES`, which the vault rejects.
     pub oversize: bool,
 }
 
@@ -111,14 +123,24 @@ impl MockOutlayer {
         } else {
             self.queue.remove(0)
         };
-        require!(mode != Mode::Failed, "MOCK_OUTLAYER: configured to fail");
+        let deposit = env::attached_deposit();
+        let underpaid = deposit < RUN_FEE;
+        let failed = mode == Mode::Failed || underpaid;
         let input = input_data.unwrap_or_default();
-        let answer = answer_bytes(&mode, &input);
+        let answer = if underpaid {
+            Vec::new()
+        } else {
+            answer_bytes(&mode, &input)
+        };
         let oversize = answer.len() > MAX_RESPONSE_BYTES;
+        let payer = payer_account_id
+            .as_deref()
+            .and_then(|payer| payer.parse::<AccountId>().ok())
+            .unwrap_or_else(env::predecessor_account_id);
         self.requests += 1;
         self.last = Some(Recorded {
             caller: env::predecessor_account_id(),
-            deposit: U128(env::attached_deposit().as_yoctonear()),
+            deposit: U128(deposit.as_yoctonear()),
             payer_account_id,
             source: source.to_string(),
             resource_limits: resource_limits.map(|v| v.to_string()).unwrap_or_default(),
@@ -127,6 +149,24 @@ impl MockOutlayer {
             response_len: answer.len() as u32,
             oversize,
         });
+        if failed {
+            if !deposit.is_zero() {
+                let _ = Promise::new(env::predecessor_account_id()).transfer(deposit);
+            }
+            let call = env::promise_create(
+                env::current_account_id(),
+                "mock_fail",
+                "{}",
+                NearToken::from_yoctonear(0),
+                FAIL_GAS,
+            );
+            env::promise_return(call);
+            return;
+        }
+        let change = deposit.saturating_sub(RUN_FEE);
+        if !change.is_zero() {
+            let _ = Promise::new(payer).transfer(change);
+        }
         if oversize {
             env::log_str(&format!(
                 "MOCK_OUTLAYER: oversize answer, {} bytes",
@@ -134,6 +174,12 @@ impl MockOutlayer {
             ));
         }
         env::value_return(&answer);
+    }
+
+    /// Only reached through a `Failed` answer.
+    #[private]
+    pub fn mock_fail(&self) {
+        env::panic_str("MOCK_OUTLAYER: configured to fail");
     }
 
     pub fn last_request(&self) -> Option<Recorded> {
@@ -146,6 +192,10 @@ impl MockOutlayer {
 
     pub fn queued(&self) -> u32 {
         self.queue.len() as u32
+    }
+
+    pub fn run_fee(&self) -> U128 {
+        U128(RUN_FEE.as_yoctonear())
     }
 }
 
@@ -160,7 +210,8 @@ impl MockOutlayer {
 
 fn answer_bytes(mode: &Mode, input_data: &str) -> Vec<u8> {
     match mode {
-        Mode::Null | Mode::Failed => b"null".to_vec(),
+        Mode::Null => b"null".to_vec(),
+        Mode::Failed => Vec::new(),
         Mode::Raw { payload } => payload.clone().into_bytes(),
         Mode::Decision { template } => decision_bytes(template, input_data),
     }
@@ -168,15 +219,21 @@ fn answer_bytes(mode: &Mode, input_data: &str) -> Vec<u8> {
 
 fn decision_bytes(template: &DecisionTemplate, input_data: &str) -> Vec<u8> {
     let input: Value = serde_json::from_str(input_data).unwrap_or(Value::Null);
+    // A missing value must be loud: an empty vault or nonce 0 would reach the vault as a
+    // nonce mismatch, and an input shape that drifted would look like a replay attack.
     let vault = template
         .vault
         .clone()
         .or_else(|| input["vault"].as_str().map(str::to_string))
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            env::panic_str("MOCK_OUTLAYER: input_data has no vault and the template sets none")
+        });
     let nonce = template
         .nonce
         .or_else(|| input["nonce"].as_u64())
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            env::panic_str("MOCK_OUTLAYER: input_data has no nonce and the template sets none")
+        });
     json!({
         "v": 1,
         "vault": vault,
@@ -197,7 +254,8 @@ fn decision_bytes(template: &DecisionTemplate, input_data: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::mock::MockAction;
+    use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
     use near_sdk::{testing_env, NearToken};
 
     use super::*;
@@ -233,8 +291,15 @@ mod tests {
         }
     }
 
+    /// 0.01 NEAR, comfortably over `RUN_FEE`.
+    const DEPOSIT: u128 = 10_000_000_000_000_000_000_000;
+
     fn request(mock: &mut MockOutlayer, input: &str) {
-        call_as("vault.owner.testnet", 5);
+        request_with(mock, "vault.owner.testnet", DEPOSIT, input);
+    }
+
+    fn request_with(mock: &mut MockOutlayer, caller: &str, deposit: u128, input: &str) {
+        call_as(caller, deposit);
         mock.request_execution(
             json!({"WasmUrl": {"url": "https://x/s.wasm", "hash": "bb"}}),
             Some(json!({"max_execution_seconds": 45})),
@@ -335,7 +400,7 @@ mod tests {
         request(&mut mock, r#"{"nonce":1}"#);
 
         let last = mock.last_request().unwrap();
-        assert_eq!(last.deposit, U128(5));
+        assert_eq!(last.deposit, U128(DEPOSIT));
         assert_eq!(
             last.payer_account_id.as_deref(),
             Some("vault.owner.testnet")
@@ -343,14 +408,143 @@ mod tests {
         assert_eq!(last.input_data, r#"{"nonce":1}"#);
     }
 
+    fn receipts_to(receiver: &str) -> Vec<MockAction> {
+        get_created_receipts()
+            .into_iter()
+            .filter(|receipt| receipt.receiver_id == account(receiver))
+            .flat_map(|receipt| receipt.actions)
+            .collect()
+    }
+
     #[test]
-    #[should_panic(expected = "configured to fail")]
-    fn failed_mode_panics_the_request() {
+    fn failed_mode_hands_back_a_failing_call_instead_of_panicking() {
+        let mut mock = mock();
+        call_as("owner.testnet", 0);
+        mock.set_next(Mode::Failed);
+        mock.set_next(Mode::Null);
+
+        request(&mut mock, "{}");
+
+        let calls: Vec<String> = receipts_to("outlayer.testnet")
+            .into_iter()
+            .filter_map(|action| match action {
+                MockAction::FunctionCallWeight { method_name, .. } => {
+                    Some(String::from_utf8(method_name).unwrap())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls, vec!["mock_fail".to_string()]);
+        assert_eq!(mock.queued(), 1, "the Failed entry is consumed");
+        assert_eq!(mock.request_count(), 1);
+    }
+
+    #[test]
+    fn the_request_after_a_failed_one_gets_the_next_answer() {
+        let mut mock = mock();
+        call_as("owner.testnet", 0);
+        mock.set_next(Mode::Failed);
+        mock.set_next(Mode::Raw {
+            payload: "next".to_string(),
+        });
+
+        request(&mut mock, "{}");
+        request(&mut mock, "{}");
+
+        assert_eq!(mock.last_request().unwrap().response_len, 4);
+        assert_eq!(mock.queued(), 0);
+    }
+
+    #[test]
+    fn failed_mode_gives_the_deposit_back_to_the_caller() {
         let mut mock = mock();
         call_as("owner.testnet", 0);
         mock.set_next(Mode::Failed);
 
         request(&mut mock, "{}");
+
+        assert_eq!(
+            refunds_to("vault.owner.testnet"),
+            vec![NearToken::from_yoctonear(DEPOSIT)]
+        );
+    }
+
+    fn refunds_to(who: &str) -> Vec<NearToken> {
+        receipts_to(who)
+            .into_iter()
+            .filter_map(|action| match action {
+                MockAction::Transfer { deposit, .. } => Some(deposit),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_run_keeps_the_fee_and_refunds_the_rest() {
+        let mut mock = mock();
+
+        request(&mut mock, "{}");
+
+        let change = NearToken::from_yoctonear(DEPOSIT - RUN_FEE.as_yoctonear());
+        assert_eq!(refunds_to("vault.owner.testnet"), vec![change]);
+    }
+
+    #[test]
+    fn the_change_goes_to_the_payer_not_to_the_caller() {
+        let mut mock = mock();
+
+        request_with(&mut mock, "keeper.testnet", DEPOSIT, "{}");
+
+        assert!(refunds_to("keeper.testnet").is_empty());
+        assert_eq!(refunds_to("vault.owner.testnet").len(), 1);
+    }
+
+    #[test]
+    fn a_deposit_under_the_fee_fails_like_a_failed_request() {
+        let mut mock = mock();
+        let short = RUN_FEE.as_yoctonear() - 1;
+
+        request_with(&mut mock, "vault.owner.testnet", short, "{}");
+
+        assert_eq!(
+            refunds_to("vault.owner.testnet"),
+            vec![NearToken::from_yoctonear(short)]
+        );
+        let last = mock.last_request().unwrap();
+        assert_eq!(last.response_len, 0);
+        assert_eq!(mock.queued(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no vault")]
+    fn a_decision_without_a_vault_is_loud() {
+        decision_bytes(&template(), r#"{"nonce":1}"#);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no nonce")]
+    fn a_decision_without_a_nonce_is_loud() {
+        decision_bytes(&template(), r#"{"vault":"v.near"}"#);
+    }
+
+    #[test]
+    fn a_template_that_sets_both_needs_nothing_from_the_input() {
+        let staged = DecisionTemplate {
+            nonce: Some(7),
+            vault: Some("other.near".to_string()),
+            ..template()
+        };
+
+        let decision: Value = serde_json::from_slice(&decision_bytes(&staged, "not json")).unwrap();
+
+        assert_eq!(decision["vault"], "other.near");
+        assert_eq!(decision["nonce"], 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "configured to fail")]
+    fn mock_fail_always_panics() {
+        mock().mock_fail();
     }
 
     #[test]
