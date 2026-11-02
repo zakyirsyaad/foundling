@@ -18,16 +18,31 @@ DEFAULT_ATTACKS_DIR = HERE / "attacks"
 STATUSES = ("PASS", "FAIL", "NOT_IMPLEMENTED", "ERROR")
 
 
+class BadRegistry(Exception):
+    pass
+
+
 def load_registry(path):
-    return json.loads(Path(path).read_text())["attacks"]
+    try:
+        attacks = json.loads(Path(path).read_text())["attacks"]
+        names = [a["name"] for a in attacks]
+    except (OSError, ValueError, KeyError, TypeError) as err:
+        raise BadRegistry(f"cannot read {path}: {err!r}") from err
+    if not names:
+        raise BadRegistry(f"{path} has no attacks")
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise BadRegistry(f"{path} has duplicate attacks: {', '.join(duplicates)}")
+    return attacks
 
 
 def find_script(attacks_dir, name):
+    """Return (script, executable); script is None when no file exists."""
     for suffix in ("", ".sh", ".py"):
         candidate = Path(attacks_dir) / f"{name}{suffix}"
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+        if candidate.is_file():
+            return candidate, os.access(candidate, os.X_OK)
+    return None, False
 
 
 def run_attack(name, registry, attacks_dir):
@@ -35,16 +50,20 @@ def run_attack(name, registry, attacks_dir):
     if name not in {a["name"] for a in registry}:
         print(f"UNKNOWN_ATTACK: {name}", file=sys.stderr)
         return 2, "ERROR"
-    script = find_script(attacks_dir, name)
+    script, executable = find_script(attacks_dir, name)
     if script is None:
         print(f"NOT_IMPLEMENTED: {name}", file=sys.stderr)
         return 2, "NOT_IMPLEMENTED"
+    if not executable:
+        print(f"NOT_EXECUTABLE: {script} (chmod +x it)", file=sys.stderr)
+        return 2, "ERROR"
     try:
         code = subprocess.run([str(script)]).returncode
     except OSError as err:
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
-    return code, {0: "PASS", 1: "FAIL"}.get(code, "ERROR")
+    status = {0: "PASS", 1: "FAIL"}.get(code, "ERROR")
+    return {"PASS": 0, "FAIL": 1, "ERROR": 2}[status], status
 
 
 def run_all(registry, attacks_dir):
@@ -71,7 +90,11 @@ def main(argv):
     run_parser.add_argument("name")
     args = parser.parse_args(argv)
 
-    registry = load_registry(args.registry)
+    try:
+        registry = load_registry(args.registry)
+    except BadRegistry as err:
+        print(f"BAD_REGISTRY: {err}", file=sys.stderr)
+        return 2
     if args.cmd == "list":
         for attack in registry:
             print(attack["name"])
