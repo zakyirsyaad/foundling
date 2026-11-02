@@ -182,6 +182,11 @@ impl Foundling {
             .call(Function::new("init").args(init_args.clone()).max_gas())
             .transact()
             .await?;
+        anyhow::ensure!(
+            init_result.is_success(),
+            "vault init failed, so the config in this harness may have drifted from the contract: {}",
+            failures(&init_result)
+        );
 
         Ok(Self {
             worker,
