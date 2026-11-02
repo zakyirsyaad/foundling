@@ -160,6 +160,7 @@ impl Foundling {
                 "owner": owner, "usdc": usdc.id(), "wnear": wnear.id(),
                 "pool_id": POOL_ID, "total_fee": setup.ref_pool_fee_bps,
                 "price": NEAR_PRICE.to_string(),
+                "decimal_scale": 10u128.pow((WNEAR_DECIMALS - USDC_DECIMALS) as u32).to_string(),
             }),
         )
         .await?;
