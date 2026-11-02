@@ -1,0 +1,18 @@
+[package]
+name = "foundling-verify"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+# Downloads Intel collateral. Checking a proof file needs no network, so it stays out by default.
+fetch = ["dcap-qvl/report", "dcap-qvl/ring", "dep:tokio"]
+
+[dependencies]
+base64 = "0.22"
+dcap-qvl = { version = "=0.7.0", default-features = false, features = ["std", "rustcrypto", "default-x509"] }
+foundling-strategy = { path = "../strategy" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt"], optional = true }

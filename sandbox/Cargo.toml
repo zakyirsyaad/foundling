@@ -1,0 +1,16 @@
+[package]
+name = "foundling-sandbox"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "near-workspaces harness for the Foundling vault and its testnet mocks"
+
+[dependencies]
+near-workspaces = "0.24.0"
+serde = "1"
+serde_json = "1"
+anyhow = "1"
+
+[dev-dependencies]
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }

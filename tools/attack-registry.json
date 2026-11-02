@@ -1,0 +1,102 @@
+{
+  "attacks": [
+    {
+      "name": "over-cap",
+      "expected": "`Rejected(OVER_CAP)`",
+      "codes": [
+        "OVER_CAP"
+      ]
+    },
+    {
+      "name": "drip",
+      "expected": "`Rejected(OVER_EPOCH_CAP)` pada keputusan yang melewati batas",
+      "codes": [
+        "OVER_EPOCH_CAP"
+      ]
+    },
+    {
+      "name": "replay",
+      "expected": "`NONCE_MISMATCH`, `EXPIRED`, `FROZEN`, atau `CycleFailed`; tanpa trade",
+      "codes": [
+        "NONCE_MISMATCH",
+        "EXPIRED",
+        "FROZEN",
+        "CycleFailed"
+      ]
+    },
+    {
+      "name": "bad-route",
+      "expected": "`Rejected(ROUTE_NOT_ALLOWED)`; tujuan keluar tak terdaftar tidak ada jalurnya (I9)",
+      "codes": [
+        "ROUTE_NOT_ALLOWED"
+      ]
+    },
+    {
+      "name": "stale-price",
+      "expected": "`Rejected(PRICE_UNAVAILABLE)` (atau `PRICE_STALE` pada mock `publish_time`)",
+      "codes": [
+        "PRICE_UNAVAILABLE",
+        "PRICE_STALE"
+      ]
+    },
+    {
+      "name": "kill-agent",
+      "expected": "Tidak ada siklus baru; `redeem` in-kind tetap berhasil",
+      "codes": []
+    },
+    {
+      "name": "governor-loosen",
+      "expected": "Method tidak ada atau ditolak; rotasi keeper hanya terjadwal dan bisa dibatalkan guardian",
+      "codes": []
+    },
+    {
+      "name": "double-redeem",
+      "expected": "Tidak ada pembayaran ganda; saldo menjadi `claimable`",
+      "codes": []
+    },
+    {
+      "name": "forged-caller",
+      "expected": "`NOT_KEEPER` atau `NOT_ALLOWED`; state tidak berubah",
+      "codes": [
+        "NOT_KEEPER",
+        "NOT_ALLOWED"
+      ]
+    },
+    {
+      "name": "freeze-race",
+      "expected": "`FROZEN`; tanpa trade baru; redeem tetap jalan",
+      "codes": [
+        "FROZEN"
+      ]
+    },
+    {
+      "name": "inflated-nav",
+      "expected": "`Rejected(OVER_ABS_CAP)` oleh cap absolut (I13)",
+      "codes": [
+        "OVER_ABS_CAP"
+      ]
+    },
+    {
+      "name": "deflated-sell",
+      "expected": "`Rejected(OVER_ABS_CAP)` oleh `cap_wnear` dan `cap_sell_bps`",
+      "codes": [
+        "OVER_ABS_CAP"
+      ]
+    },
+    {
+      "name": "never-flat",
+      "expected": "Vault kembali datar (`wnear_book` ≤ `dust_wnear`) dan deposit dicetak",
+      "codes": []
+    },
+    {
+      "name": "setup-spam",
+      "expected": "Paling banyak satu per target; NEAR vault tidak turun di bawah `near_reserve`",
+      "codes": []
+    },
+    {
+      "name": "advance-race",
+      "expected": "Satu pengiriman ulang saja (kunci `Probing`); saldo Rhea cocok dengan `rhea_bal`",
+      "codes": []
+    }
+  ]
+}
