@@ -1,9 +1,12 @@
 import json
+import os
 import re
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -157,6 +160,73 @@ class AttackLabTest(unittest.TestCase):
         self.assertIn("TIMEOUT: slow", result.stderr)
         self.assertRegex(result.stdout, r"(?m)^slow\s+ERROR$")
         self.assertEqual(result.returncode, 2)
+
+    def test_timeout_kills_the_whole_process_group(self):
+        registry = self.registry_of(["spawner"])
+        pidfile = self.tmp / "child.pid"
+        make_script(
+            self.attacks,
+            "spawner",
+            0,
+            body=f"#!/bin/sh\nsleep 29 >/dev/null 2>&1 &\necho $! > {pidfile}\nwait\n",
+        )
+        run("run", "spawner", attacks_dir=self.attacks, registry=registry, flags=("--timeout", "1"))
+        child = int(pidfile.read_text())
+        self.addCleanup(self.kill_quietly, child)
+        for _ in range(20):
+            if not self.alive(child):
+                break
+            time.sleep(0.1)
+        self.assertFalse(self.alive(child), "child of a timed-out attack is still running")
+
+    @staticmethod
+    def alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    @staticmethod
+    def kill_quietly(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def test_ctrl_c_kills_the_running_attack(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.tmp / "hang.pid"
+        make_script(
+            self.attacks, "hang", 0, body=f"#!/bin/sh\necho $$ > {pidfile}\nexec sleep 29\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, str(ATTACK_PY), "--registry", str(registry),
+             "--attacks-dir", str(self.attacks), "run", "hang"],
+            cwd=ROOT,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(proc.kill)
+        for _ in range(50):
+            if pidfile.exists() and pidfile.read_text().strip():
+                break
+            time.sleep(0.1)
+        child = int(pidfile.read_text())
+        self.addCleanup(self.kill_quietly, child)
+        proc.send_signal(signal.SIGINT)
+        proc.wait(timeout=10)
+        for _ in range(20):
+            if not self.alive(child):
+                break
+            time.sleep(0.1)
+        self.assertFalse(self.alive(child), "attack kept running after Ctrl-C")
+
+    def test_timeout_must_be_finite_and_positive(self):
+        for bad in ["0", "-1", "nan", "inf", "abc"]:
+            with self.subTest(timeout=bad):
+                result = run("list", flags=("--timeout", bad))
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn("--timeout", result.stderr)
 
     def test_missing_registry_exits_2_not_1(self):
         result = run("run-all", registry=self.tmp / "nope.json")

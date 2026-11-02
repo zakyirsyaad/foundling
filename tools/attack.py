@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Attack Lab dispatcher: `foundling attack list|run <name>|run-all`.
+"""Attack Lab dispatcher: `foundling attack [--timeout S] [--strict] list|run <name>|run-all`.
 
 Exit codes per attack: 0 = system held, 1 = attack succeeded or reason code
 differed, 2 = tool or network error. An attack without a script under
-tools/attacks/ is NOT_IMPLEMENTED and exits 2.
+tools/attacks/ is NOT_IMPLEMENTED and exits 2. To implement one, add an
+executable tools/attacks/<name>[.sh|.py] that follows the same exit codes.
+A script that does not exit within --timeout seconds is killed with its
+children and counts as ERROR. run-all --strict also exits 2 on NOT_IMPLEMENTED.
 """
 import argparse
 import json
+import math
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -64,10 +69,19 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
         print(f"NOT_EXECUTABLE: {script} (chmod +x it)", file=sys.stderr)
         return 2, "ERROR"
     try:
-        code = subprocess.run([str(script)], timeout=timeout).returncode
-    except subprocess.TimeoutExpired:
-        print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
-        return 2, "ERROR"
+        # Own session so a timeout can kill the whole group, not just the script.
+        with subprocess.Popen([str(script)], start_new_session=True) as proc:
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
+                return 2, "ERROR"
+            except KeyboardInterrupt:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                raise
     except OSError as err:
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
@@ -90,11 +104,18 @@ def run_all(registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS, strict=False)
     return 0
 
 
+def seconds(text):
+    value = float(text)
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"must be a finite number above 0, got {text!r}")
+    return value
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="foundling attack")
     parser.add_argument("--registry", default=DEFAULT_REGISTRY)
     parser.add_argument("--attacks-dir", default=DEFAULT_ATTACKS_DIR)
-    parser.add_argument("--timeout", type=float, default=ATTACK_TIMEOUT_SECONDS)
+    parser.add_argument("--timeout", type=seconds, default=ATTACK_TIMEOUT_SECONDS)
     parser.add_argument(
         "--strict", action="store_true", help="run-all: NOT_IMPLEMENTED exits 2"
     )
