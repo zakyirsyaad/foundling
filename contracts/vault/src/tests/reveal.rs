@@ -86,6 +86,16 @@ fn the_event_publishes_the_salt_and_the_view_the_params() {
     assert_eq!(vault.revealed(), Some(text("params")));
 }
 
+#[test]
+fn the_salt_stays_readable_after_the_logs_are_gone() {
+    let mut vault = committed_vault();
+    assert_eq!(vault.revealed_salt(), None);
+
+    reveal_at_open(&mut vault);
+
+    assert_eq!(vault.revealed_salt(), Some(text("salt")));
+}
+
 fn commitment_of_params(params: &str) -> String {
     let salt: Vec<u8> = (0..32).collect();
     let fields = [

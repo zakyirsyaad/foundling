@@ -98,6 +98,7 @@ enum StorageKey {
     Allowlist,
     Buckets,
     BucketClaims,
+    Decisions,
 }
 
 #[near(contract_state)]
@@ -145,6 +146,9 @@ pub struct Vault {
     args_hash: String,
     /// The committed parameters, exactly as opened by `reveal`.
     revealed: Option<String>,
+    revealed_salt: Option<String>,
+    /// Slot to the nonce it holds and the bytes that run answered with.
+    decisions: LookupMap<u64, (u64, String)>,
 }
 
 pub(crate) fn to_hex(bytes: &[u8]) -> String {
@@ -315,6 +319,8 @@ impl Vault {
             sell_window: Window::default(),
             args_hash,
             revealed: None,
+            revealed_salt: None,
+            decisions: LookupMap::new(StorageKey::Decisions),
         }
     }
 

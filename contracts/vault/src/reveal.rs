@@ -28,10 +28,16 @@ impl Vault {
         // The text can outgrow the log limit, so it is read from `revealed`.
         emit("revealed", &json!({ "salt": salt }).to_string());
         self.revealed = Some(params);
+        self.revealed_salt = Some(salt);
     }
 
     pub fn revealed(&self) -> Option<String> {
         self.revealed.clone()
+    }
+
+    /// With `revealed`, opens the commitment from plain state, long after the logs are gone.
+    pub fn revealed_salt(&self) -> Option<String> {
+        self.revealed_salt.clone()
     }
 
     pub fn reveal_after(&self) -> u64 {
