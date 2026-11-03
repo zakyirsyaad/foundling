@@ -62,4 +62,4 @@ Vault latihan memakai parameter dan salt yang berbeda dari vault final, karena `
 - CLI Rust penuh diganti skrip di atas near-cli.
 - Halaman bukti statis, tanpa tombol cek ulang.
 - `verify.py` memegang semua pemeriksaan non-kripto; cek attestation dan signature ada di alat kecil milik lead.
-- Fitur opsional (UI web, deposit lintas chain lewat 1Click API milik NEAR Intents, Trezu, E2EE) hanya dikerjakan bila milestone 4 selesai lebih awal.
+- Fitur opsional (UI web, deposit lintas chain lewat 1Click API milik NEAR Intents, E2EE) hanya dikerjakan bila milestone 4 selesai lebih awal.
