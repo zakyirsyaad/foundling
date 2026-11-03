@@ -61,6 +61,7 @@ async fn sandbox_selftest_reflects_config() -> anyhow::Result<()> {
 async fn sandbox_selftest_rejects_a_pool_fee_that_differs_from_the_config() -> anyhow::Result<()> {
     let env = Foundling::start_with(Setup {
         ref_pool_fee_bps: 25,
+        ..Default::default()
     })
     .await?;
 

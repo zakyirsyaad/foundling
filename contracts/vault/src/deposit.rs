@@ -52,7 +52,8 @@ impl Vault {
             && self.is_setup_done()
             && self.selftest_passed
             && self.has_near_floor(0)
-            && self.allowlist.contains(sender)
+            && self.may_deposit(sender)
+            && self.is_registered(sender)
             && amount >= self.policy.min_deposit.0
             && self.net_deposit(sender) + amount <= self.policy.per_user_cap.0
             && self.total_net + amount <= self.policy.tvl_cap.0

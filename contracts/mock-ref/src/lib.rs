@@ -191,7 +191,11 @@ impl MockRef {
         unregister: Option<bool>,
         skip_unwrap_near: Option<bool>,
     ) -> PromiseOrValue<U128> {
-        let _ = (unregister, skip_unwrap_near);
+        let _ = unregister;
+        // Ref would unwrap and send native NEAR, which the vault's book never sees.
+        if token_id == self.wnear && skip_unwrap_near != Some(true) {
+            env::panic_str("mock: wNEAR withdrawn without skip_unwrap_near");
+        }
         if self.take_fault(Fault::WithdrawZero) {
             return PromiseOrValue::Value(U128(0));
         }
@@ -500,6 +504,30 @@ mod tests {
         call_from(account("other.testnet"));
 
         let _ = contract.ft_on_transfer(vault(), U128(1), String::new());
+    }
+
+    /// Ref unwraps wNEAR to native NEAR unless told not to, and the vault books only wNEAR.
+    #[test]
+    #[should_panic(expected = "mock: wNEAR withdrawn without skip_unwrap_near")]
+    fn withdrawing_wnear_without_skipping_the_unwrap_panics() {
+        let mut contract = funded(2 * UNIT);
+        buy(&mut contract, 2 * UNIT, 1);
+        call_from(vault());
+
+        let _ = contract.withdraw(wnear(), U128(1), None, None);
+    }
+
+    #[test]
+    fn withdrawing_usdc_needs_no_unwrap_flag() {
+        let mut contract = funded(2 * UNIT);
+        call_from(vault());
+
+        assert!(!sent_nothing(contract.withdraw(
+            usdc(),
+            U128(UNIT),
+            None,
+            None
+        )));
     }
 
     #[test]

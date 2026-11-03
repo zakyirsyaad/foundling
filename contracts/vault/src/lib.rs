@@ -18,6 +18,7 @@ pub mod redeem;
 pub mod reveal;
 pub mod selftest;
 pub mod setup;
+pub mod storage;
 pub mod swap;
 
 #[cfg(test)]
@@ -103,6 +104,8 @@ enum StorageKey {
     Buckets,
     BucketClaims,
     Decisions,
+    Registered,
+    OpenClaims,
 }
 
 #[near(contract_state)]
@@ -133,12 +136,16 @@ pub struct Vault {
     pending: IterableMap<AccountId, u128>,
     claimable: LookupMap<(AccountId, Token), u128>,
     allowlist: LookupSet<AccountId>,
+    /// Accounts that paid the registration fee. Permanent, see `storage_unregister`.
+    registered: LookupSet<AccountId>,
     stage: Stage,
     last_nonce: u64,
     decision: Option<Decision>,
     inflight: Option<Inflight>,
     buckets: LookupMap<u64, Bucket>,
     bucket_claims: LookupMap<(u64, AccountId), u128>,
+    /// The nonce of each account's one unpaid bucket claim.
+    open_claims: LookupMap<AccountId, u64>,
     /// What this vault put in its internal Ref account. Anyone can add to that account
     /// with `mft_transfer`, so the ledger is what counts, not the balance Ref reports.
     rhea_usdc: u128,
@@ -343,12 +350,14 @@ impl Vault {
             pending: IterableMap::new(StorageKey::Pending),
             claimable: LookupMap::new(StorageKey::Claimable),
             allowlist,
+            registered: LookupSet::new(StorageKey::Registered),
             stage: Stage::Idle,
             last_nonce: 0,
             decision: None,
             inflight: None,
             buckets: LookupMap::new(StorageKey::Buckets),
             bucket_claims: LookupMap::new(StorageKey::BucketClaims),
+            open_claims: LookupMap::new(StorageKey::OpenClaims),
             rhea_usdc: 0,
             rhea_wnear: 0,
             last_trigger: 0,
@@ -406,7 +415,7 @@ impl Vault {
     }
 
     pub fn is_allowed(&self, account: AccountId) -> bool {
-        self.allowlist.contains(&account)
+        self.may_deposit(&account)
     }
 
     pub fn total_shares(&self) -> U128 {
@@ -437,6 +446,10 @@ impl Vault {
 impl Vault {
     pub(crate) fn net_deposit(&self, account: &AccountId) -> u128 {
         self.net_deposits.get(account).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn may_deposit(&self, account: &AccountId) -> bool {
+        self.policy.open_deposits || self.allowlist.contains(account)
     }
 
     pub(crate) fn token_account(&self, token: Token) -> AccountId {
@@ -471,5 +484,34 @@ impl Vault {
 
     pub fn set_max_mint_for_tests(&mut self, limit: u32) {
         self.policy.max_mint_per_cycle = limit;
+    }
+
+    /// A swap in flight at `nonce` with nothing traded yet, for tests of what happens around it.
+    pub fn begin_swap_for_tests(&mut self, nonce: u64) {
+        self.inflight = Some(Inflight {
+            nonce,
+            token_in: Token::Usdc,
+            token_out: Token::Wnear,
+            amount_in: U128(0),
+            min_amount_out: U128(0),
+            amount_out: None,
+            shares_snapshot: U128(self.total_shares),
+            shares_burned: U128(0),
+            recovered: U128(0),
+            stuck_since: None,
+        });
+    }
+
+    /// Writes every cached entry out, so `env::storage_usage` counts it. The two sets write
+    /// straight through and keep no cache.
+    pub fn flush_for_tests(&mut self) {
+        self.shares.flush();
+        self.net_deposits.flush();
+        self.pending.flush();
+        self.claimable.flush();
+        self.buckets.flush();
+        self.bucket_claims.flush();
+        self.open_claims.flush();
+        self.decisions.flush();
     }
 }
