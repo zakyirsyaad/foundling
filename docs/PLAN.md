@@ -30,10 +30,10 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | 2 | Uji testnet selesai: callback OutLayer (SP1a, sudah lulus), rahasia terikat hash (SP2, sudah lulus), panggilan NEAR AI dari worker (SP1b, sumber harga publik sudah lulus dari worker), rute Ref (SP8, sudah lulus) | Lead, partner siapkan harness | 3 Nov |
 | 3 | Vault dasar lulus tes di sandbox atau testnet: deposit, redeem, cap, freeze (sudah lulus di testnet) | Lead | 4 Nov |
 | 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` (sudah lulus di testnet lewat skrip; bot keeper belum) | Lead, bot dari partner | 6 Nov |
-| 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
+| 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), deposit publik (sudah di-merge, PR #29), Attack Lab lulus, soak semalam lulus, kontrak beku; lead memutuskan vault final di mainnet atau testnet | Lead, Partner | 9 Nov |
 | 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di jaringan terpilih, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
 | 7 | `reveal` (kontraknya sudah lulus di testnet) dan replay lulus di jaringan terpilih, `verify.py` lulus | Lead, Partner | 12 Nov |
-| 8 | LICENSE, video, README, post X, repo publik, submit oleh lead | Partner, Lead | 13 Nov |
+| 8 | LICENSE, video, README, post X (wajib tag @NEARProtocol dan #NEARHackathon), repo publik, submit oleh lead | Partner, Lead | 13 Nov |
 
 Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian selesai 18 Nov. Bila bot berjalan di Mac, Mac harus tersambung listrik.
 
@@ -62,4 +62,4 @@ Vault latihan memakai parameter dan salt yang berbeda dari vault final, karena `
 - CLI Rust penuh diganti skrip di atas near-cli.
 - Halaman bukti statis, tanpa tombol cek ulang.
 - `verify.py` memegang semua pemeriksaan non-kripto; cek attestation dan signature ada di alat kecil milik lead.
-- Fitur opsional (UI web, 1Click, Trezu, E2EE) hanya dikerjakan bila milestone 4 selesai lebih awal.
+- Fitur opsional (UI web, deposit lintas chain lewat 1Click API milik NEAR Intents, Trezu, E2EE) hanya dikerjakan bila milestone 4 selesai lebih awal.
