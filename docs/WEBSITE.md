@@ -10,7 +10,7 @@ Desain website, API, dan worker. Kontrak dan jaminan ada di `docs/SPEC.md`, jadw
 | Pengguna testnet | Hanya lead dan partner. Deployment testnet tidak dipublikasikan |
 | Pengguna mainnet | Semua orang bisa melihat dan deposit dengan wallet sendiri, dalam batas `per_user_cap` dan `tvl_cap`, sesuai §9.4 SPEC (keputusan lead 2026-11-03) |
 | Tanda tangan mainnet | Pengguna menandatangani dengan wallet masing-masing. Akun depositor tim memakai profil browser terpisah yang hanya memegang kunci itu. Kunci induk dan governor tidak pernah dibuka di browser yang memuat kode wallet |
-| Kontrak | Berubah sebelum kontrak beku: flag deposit terbuka yang dipatok di `init` dan hanya bisa ditutup lewat `tighten_policy`, ditambah registrasi storage depositor (NEP-145). Vault testnet tetap ber-allowlist untuk lead dan partner |
+| Kontrak | Berubah di PR #29: flag `open_deposits` yang dipatok di `init` dan hanya bisa ditutup lewat `tighten_policy`, registrasi storage NEP-145 sebesar 0,015 NEAR, dan satu klaim bucket terbuka per akun. Vault testnet tetap ber-allowlist untuk lead dan partner |
 | Cross-chain | Masuk cakupan, lewat 1Click API milik NEAR Intents di tepi: USDC dari chain lain dikirim ke akun NEAR pengguna, lalu disetor seperti biasa. Hanya mainnet, untuk siapa pun. Keluar tetap di NEAR |
 | Tampilan | Design system Foundling, arah Foundling token. Young Serif, IBM Plex Sans, dan IBM Plex Mono di-host sendiri, lisensinya dicatat di `THIRD_PARTY_NOTICES.md` |
 | Bahasa website | Inggris |
@@ -69,7 +69,7 @@ Connect wallet tersedia di semua halaman, karena panel macet di `/vault` juga bu
 7. Shares dicetak pada `trigger_cycle` berikutnya saat vault datar. UI menjelaskan alasannya: deposit tidak butuh harga, jadi harga yang salah tidak bisa mendilusi pemegang lama.
 8. `cancel_deposit` tersedia selama ada antrean. Ini juga jalan keluar bila keeper mati dan shares tidak pernah dicetak.
 
-Antrean, shares, dan klaim bisa ada bersamaan, jadi ditampilkan terpisah, bukan sebagai satu status.
+Antrean, shares, dan klaim bisa ada bersamaan, jadi ditampilkan terpisah, bukan sebagai satu status. Klaim bucket lama pindah ke `claimable` saat akun `redeem` lagi di tengah swap berikutnya (event `claim_folded`), jadi panel klaim membaca `bucket_claim` dan `claimable_of` sekaligus.
 
 ### Redeem
 
