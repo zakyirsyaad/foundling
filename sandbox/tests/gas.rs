@@ -44,6 +44,7 @@ async fn queue_deposit(env: &Foundling, index: usize) -> anyhow::Result<Account>
         )
         .await?;
     anyhow::ensure!(added.is_success(), "{}", failures(&added));
+    env.register(&depositor).await?;
     env.mint(&env.usdc, depositor.id(), MIN_DEPOSIT).await?;
     let deposited = depositor
         .call(env.usdc.id(), "ft_transfer_call")

@@ -31,12 +31,80 @@ pub fn demo_policy() -> Policy {
         min_deposit: U128(1_000_000),
         max_mint_per_cycle: 8,
         timelock: 86_400,
+        open_deposits: false,
     }
 }
 
 fn tighten(change: PolicyChange) -> Result<Policy, &'static str> {
     let policy = demo_policy();
     policy.tightened(&policy, &change)
+}
+
+fn open_policy() -> Policy {
+    Policy {
+        open_deposits: true,
+        ..demo_policy()
+    }
+}
+
+#[test]
+fn a_policy_that_leaves_out_open_deposits_reads_as_closed() {
+    let mut value = near_sdk::serde_json::to_value(open_policy()).unwrap();
+    value.as_object_mut().unwrap().remove("open_deposits");
+
+    let policy: Policy = near_sdk::serde_json::from_value(value).unwrap();
+
+    assert!(!policy.open_deposits);
+}
+
+#[test]
+fn open_deposits_can_close() {
+    let policy = open_policy();
+
+    let tightened = policy.tightened(
+        &policy,
+        &PolicyChange {
+            open_deposits: Some(false),
+            ..Default::default()
+        },
+    );
+
+    assert!(!tightened.unwrap().open_deposits);
+}
+
+#[test]
+fn closed_deposits_cannot_open() {
+    let result = tighten(PolicyChange {
+        open_deposits: Some(true),
+        ..Default::default()
+    });
+
+    assert_eq!(result.unwrap_err(), NOT_TIGHTER);
+}
+
+#[test]
+fn closing_closed_deposits_is_not_tighter() {
+    let result = tighten(PolicyChange {
+        open_deposits: Some(false),
+        ..Default::default()
+    });
+
+    assert_eq!(result.unwrap_err(), NOT_TIGHTER);
+}
+
+#[test]
+fn open_deposits_stay_open_when_the_change_leaves_them_out() {
+    let policy = open_policy();
+
+    let tightened = policy.tightened(
+        &policy,
+        &PolicyChange {
+            price_max_age: Some(60),
+            ..Default::default()
+        },
+    );
+
+    assert!(tightened.unwrap().open_deposits);
 }
 
 #[test]
