@@ -9,5 +9,6 @@ mod pricing;
 mod recovery;
 mod reveal;
 mod selftest;
+mod storage;
 pub mod support;
 pub mod swap;

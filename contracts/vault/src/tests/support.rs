@@ -9,6 +9,7 @@ use near_sdk::{
 
 use crate::cycle::AgentConfig;
 use crate::setup::SetupTarget;
+use crate::storage::REGISTRATION_FEE;
 use crate::tests::policy::demo_policy;
 use crate::{Assets, InitConfig, OracleConfig, Roles, Vault};
 
@@ -167,8 +168,19 @@ pub fn init_config() -> InitConfig {
 }
 
 pub fn new_vault() -> Vault {
+    new_vault_from(init_config())
+}
+
+pub fn new_vault_from(config: InitConfig) -> Vault {
     set_caller(parent());
-    Vault::init(init_config())
+    Vault::init(config)
+}
+
+pub fn register(vault: &mut Vault, who: AccountId) {
+    let mut ctx = context(who, 0);
+    ctx.attached_deposit(REGISTRATION_FEE);
+    testing_env!(ctx.build());
+    vault.storage_deposit(None, None);
 }
 
 pub fn finish_setup(vault: &mut Vault, target: SetupTarget) {
@@ -179,7 +191,12 @@ pub fn finish_setup(vault: &mut Vault, target: SetupTarget) {
 }
 
 pub fn set_up_vault() -> Vault {
-    let mut vault = new_vault();
+    set_up_vault_from(init_config())
+}
+
+/// The two test depositors register here, as every depositor must before a deposit.
+pub fn set_up_vault_from(config: InitConfig) -> Vault {
+    let mut vault = new_vault_from(config);
     for target in [
         SetupTarget::Usdc,
         SetupTarget::Wnear,
@@ -188,6 +205,8 @@ pub fn set_up_vault() -> Vault {
     ] {
         finish_setup(&mut vault, target);
     }
+    register(&mut vault, alice());
+    register(&mut vault, bob());
     vault
 }
 
@@ -206,7 +225,11 @@ pub fn selftest_results() -> Vec<PromiseResult> {
 }
 
 pub fn ready_vault() -> Vault {
-    let mut vault = set_up_vault();
+    ready_vault_from(init_config())
+}
+
+pub fn ready_vault_from(config: InitConfig) -> Vault {
+    let mut vault = set_up_vault_from(config);
     set_caller(alice());
     vault.selftest();
     set_callback(selftest_results());
