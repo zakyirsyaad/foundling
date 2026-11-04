@@ -64,6 +64,10 @@ def find_script(attacks_dir, name):
     return None, False
 
 
+def stop_on_signal(signum, frame):
+    raise Stopped("TERMINATED", 128 + signum)
+
+
 def kill_group(proc):
     """SIGKILL the script's whole process group, then reap the script."""
     try:
@@ -100,6 +104,9 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
         return 2, "ERROR"
     except KeyboardInterrupt:
         raise Stopped("INTERRUPTED", 130, name) from None
+    except Stopped as stop:
+        stop.name = name
+        raise
     if code is None:
         print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"
@@ -154,12 +161,16 @@ def main(argv):
         for attack in registry:
             print(attack["name"])
         return 0
+    # The script runs in its own session, so a signal sent to the dispatcher
+    # never reaches it. Turn the signals into an exception so the group is killed.
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, stop_on_signal)
     try:
         if args.cmd == "run-all":
             return run_all(registry, args.attacks_dir, args.timeout, args.strict)
         return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
     except Stopped as stop:
-        print(f"{stop.label}: {stop.name}", file=sys.stderr)
+        print(f"{stop.label}: {stop.name or args.cmd}", file=sys.stderr)
         return stop.code
 
 

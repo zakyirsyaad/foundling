@@ -437,6 +437,31 @@ class AttackCleanupTest(unittest.TestCase):
         self.assertEqual(stderr.splitlines(), ["INTERRUPTED: hang"])
         self.assertFalse(marker.exists(), "run-all went on to the next attack after Ctrl-C")
 
+    def stop_dispatcher_with(self, sig):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        pidfile.unlink(missing_ok=True)
+        proc = self.start(registry, "run", "hang")
+        script = self.pid_from(pidfile)
+        proc.send_signal(sig)
+        stderr = self.finish(proc)
+        return proc, script, stderr
+
+    def test_sigterm_to_the_dispatcher_kills_the_running_attack(self):
+        _, script, _ = self.stop_dispatcher_with(signal.SIGTERM)
+        self.assert_dies(script, "attack kept running after the dispatcher got SIGTERM")
+
+    def test_sighup_to_the_dispatcher_kills_the_running_attack(self):
+        _, script, _ = self.stop_dispatcher_with(signal.SIGHUP)
+        self.assert_dies(script, "attack kept running after the dispatcher got SIGHUP")
+
+    def test_terminated_dispatcher_names_the_attack_and_exits_128_plus_signal(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                proc, _, stderr = self.stop_dispatcher_with(sig)
+                self.assertEqual(proc.returncode, 128 + sig)
+                self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
+
 
 if __name__ == "__main__":
     unittest.main()
