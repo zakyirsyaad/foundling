@@ -632,7 +632,7 @@ async fn stale_price() -> anyhow::Result<()> {
             && stage(&env).await? == ready
             && ledger(&env).await? == before,
         code.as_deref(),
-        json!({"nonce": nonce, "stage": ready}),
+        json!({"nonce": nonce, "stage_after": "DecisionReady, same nonce and expires_at"}),
     );
 
     let again = execute(&env, nonce).await?;
