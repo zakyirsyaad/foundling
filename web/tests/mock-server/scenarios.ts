@@ -22,6 +22,7 @@ const builders: Record<string, () => Scenario> = {
   frozen: () => ({ ...base("frozen"), views: { ...views, is_frozen: true } }),
   halted: () => ({ ...base("halted"), views: { ...views, is_halted: true } }),
   "not-ready": () => ({ ...base("not-ready"), views: { ...views, is_setup_done: false } }),
+  "frozen-with-queue": () => ({ ...base("frozen-with-queue"), views: { ...views, is_frozen: true }, perAccount: { [VAULT]: { 'pending_of:{"account":"alice.testnet"}': "3000000", 'storage_balance_of:{"account_id":"alice.testnet"}': { total: "1", available: "0" } } } }),
   closed: () => ({ ...base("closed"), views: { ...views, policy: { ...policyJson, open_deposits: false } } }),
 };
 

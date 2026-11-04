@@ -309,6 +309,8 @@ jobs:
         run: npm run -w web test:coverage
       - name: Call table and events match the contract
         run: npm run -w web check:contract
+      - name: Exit paths do not import the history API
+        run: npm run -w web depcruise
       - name: Production bundle has no mock wallet
         env:
           FOUNDLING_BUNDLE_CHECK: "1"
