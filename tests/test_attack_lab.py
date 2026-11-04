@@ -330,6 +330,25 @@ sys.exit(attack.main(sys.argv[1:]))
 """
 
 
+# Runs the real dispatcher after `setup` has patched the attack module, to open
+# a timing window that cannot be hit reliably from outside.
+PATCHED_DISPATCHER = """
+import os, subprocess, sys, time
+sys.path.insert(0, {tools!r})
+import attack
+{setup}
+sys.exit(attack.main(sys.argv[1:]))
+"""
+
+SLOW_KILLPG = """
+real_killpg = os.killpg
+def killpg(pgid, sig):
+    time.sleep(1.0)
+    real_killpg(pgid, sig)
+os.killpg = killpg
+"""
+
+
 class AttackCleanupTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -341,9 +360,12 @@ class AttackCleanupTest(unittest.TestCase):
     def registry_of(self, names):
         return write_registry(self.tmp / "r.json", names)
 
-    def start(self, registry, *args, racing_error=None):
+    def start(self, registry, *args, racing_error=None, setup=None):
         argv = ["--registry", str(registry), "--attacks-dir", str(self.attacks), *args]
-        if racing_error:
+        if setup:
+            harness = PATCHED_DISPATCHER.format(tools=str(ATTACK_PY.parent), setup=setup)
+            cmd = [sys.executable, "-c", harness, *argv]
+        elif racing_error:
             harness = RACING_KILLPG_HARNESS.format(tools=str(ATTACK_PY.parent), error=racing_error)
             cmd = [sys.executable, "-c", harness, *argv]
         else:
@@ -357,7 +379,10 @@ class AttackCleanupTest(unittest.TestCase):
         return proc
 
     def finish(self, proc):
-        proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.fail("dispatcher did not exit within 10s")
         return (self.tmp / "err.txt").read_text()
 
     def pid_from(self, pidfile):
@@ -454,6 +479,18 @@ class AttackCleanupTest(unittest.TestCase):
     def test_sighup_to_the_dispatcher_kills_the_running_attack(self):
         _, script, _ = self.stop_dispatcher_with(signal.SIGHUP)
         self.assert_dies(script, "attack kept running after the dispatcher got SIGHUP")
+
+    def test_second_signal_during_cleanup_does_not_abort_the_kill(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        proc = self.start(registry, "run", "hang", setup=SLOW_KILLPG)
+        script = self.pid_from(pidfile)
+        proc.send_signal(signal.SIGTERM)
+        time.sleep(0.3)
+        proc.send_signal(signal.SIGTERM)
+        stderr = self.finish(proc)
+        self.assert_dies(script, "a second signal aborted the cleanup and left the attack running")
+        self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
 
     def test_terminated_dispatcher_names_the_attack_and_exits_128_plus_signal(self):
         for sig in (signal.SIGTERM, signal.SIGHUP):

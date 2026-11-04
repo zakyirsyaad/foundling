@@ -64,8 +64,14 @@ def find_script(attacks_dir, name):
     return None, False
 
 
+_state = {"stop": None}
+
+
 def stop_on_signal(signum, frame):
-    raise Stopped("TERMINATED", 128 + signum)
+    if _state["stop"]:
+        return  # already stopping; a second signal must not cut the cleanup short
+    _state["stop"] = Stopped("TERMINATED", 128 + signum)
+    raise _state["stop"]
 
 
 def kill_group(proc):
