@@ -62,3 +62,11 @@ test("a test build may point 1Click at the mock server", () => {
   expect(c.oneClick?.baseUrl).toBe("http://localhost:3199/1click");
   expect(loadConfig({ ...mainnetEnv, NEXT_PUBLIC_ONECLICK_URL: "http://localhost:3199/1click" }).oneClick?.baseUrl).toBe("https://1click.chaindefuser.com");
 });
+test("a test build may use the mock quote key and turn chains on; a real build may not", () => {
+  const t = loadConfig({ ...mainnetEnv, NEXT_PUBLIC_TEST_BUILD: "1", NEXT_PUBLIC_ONECLICK_KEY: "ed25519:test", NEXT_PUBLIC_ONECLICK_CHAINS: "base,eth" });
+  expect(t.oneClick?.quotePublicKey).toBe("ed25519:test");
+  expect(t.oneClick?.chains.map((c) => [c.id, c.enabled])).toEqual([["base", true], ["arb", false], ["eth", true]]);
+  const real = loadConfig({ ...mainnetEnv, NEXT_PUBLIC_ONECLICK_KEY: "ed25519:test", NEXT_PUBLIC_ONECLICK_CHAINS: "base" });
+  expect(real.oneClick?.quotePublicKey).toBe("ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc");
+  expect(real.oneClick?.chains.every((c) => !c.enabled)).toBe(true);
+});

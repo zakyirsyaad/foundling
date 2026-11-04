@@ -98,6 +98,16 @@ function tokens(network: Network, env: Record<string, string | undefined>) {
   };
 }
 
+/** Test build only: the mock 1Click URL and signing key, and which origin chains are on. */
+function testOneClick(pinned: OneClickConfig, env: Record<string, string | undefined>): OneClickConfig {
+  const on = env.NEXT_PUBLIC_ONECLICK_CHAINS?.split(",").map((c) => c.trim());
+  return {
+    baseUrl: env.NEXT_PUBLIC_ONECLICK_URL?.trim() || pinned.baseUrl,
+    quotePublicKey: env.NEXT_PUBLIC_ONECLICK_KEY?.trim() || pinned.quotePublicKey,
+    chains: on ? pinned.chains.map((c) => ({ ...c, enabled: on.includes(c.id) })) : pinned.chains,
+  };
+}
+
 export function loadConfig(env: Record<string, string | undefined>): DeploymentConfig {
   const network = z.enum(["mainnet", "testnet"]).parse(env.NEXT_PUBLIC_NETWORK);
   const testBuild = env.NEXT_PUBLIC_TEST_BUILD === "1";
@@ -107,8 +117,7 @@ export function loadConfig(env: Record<string, string | undefined>): DeploymentC
   const sample = env.NEXT_PUBLIC_SAMPLE?.trim() || null;
   if (sample !== null && sample !== "m12") throw new Error(`unknown sample: ${sample}`);
   const pinned = network === "mainnet" ? oneClickSchema.parse(mainnet.oneClick) : null;
-  const oneClickOverride = testBuild ? env.NEXT_PUBLIC_ONECLICK_URL?.trim() || null : null;
-  const oneClick = pinned && oneClickOverride ? { ...pinned, baseUrl: oneClickOverride } : pinned;
+  const oneClick = pinned && testBuild ? testOneClick(pinned, env) : pinned;
   return {
     network,
     vaultId: accountId.parse(env.NEXT_PUBLIC_VAULT_ID),

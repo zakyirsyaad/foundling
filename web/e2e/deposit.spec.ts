@@ -51,3 +51,8 @@ test("every action has a CLI command", async ({ page, request }) => {
   await expect(deposit.locator("code").filter({ hasText: "ft_transfer_call" })).toContainText("network-config testnet sign-with-keychain send");
   for (const name of ["Redeem", "Claims"]) await expect(page.getByRole("region", { name }).getByText("CLI command")).toHaveCount(1);
 });
+test("the testnet build never renders deposits from another chain", async ({ page, request }) => {
+  await useScenario(request, "normal");
+  await connect(page);
+  await expect(page.getByRole("heading", { name: "From another chain" })).toHaveCount(0);
+});

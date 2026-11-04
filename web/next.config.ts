@@ -23,6 +23,8 @@ if (!isTestBuild && !isBundleCheck && process.argv.includes("build") && (terms.d
 const walletMock = isTestBuild ? "./lib/wallet/mock.ts" : "./lib/wallet/no-mock.ts";
 
 const nextConfig: NextConfig = {
+  // A second test build (mainnet config, for the 1Click flows) builds into its own folder.
+  distDir: process.env.FOUNDLING_DIST_DIR ?? ".next",
   poweredByHeader: false,
   turbopack: { resolveAlias: { "@foundling/wallet-mock": walletMock } },
   webpack: (cfg) => {

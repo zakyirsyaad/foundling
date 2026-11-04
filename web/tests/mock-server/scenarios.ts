@@ -5,6 +5,10 @@ import type { Scenario } from "./state";
 export const VAULT = "vault.foundling.testnet";
 export const USDC = "usdc.foundling.testnet";
 export const WNEAR = "wrap.testnet";
+/** The mainnet test build's vault: same views, mainnet token ids, for the 1Click flows. */
+export const MAINNET_VAULT = "foundling-vault.near";
+const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+const mainnetVault = { [MAINNET_VAULT]: { assets: { ...assetsJson, usdc: MAINNET_USDC, wnear: "wrap.near" } } };
 
 const decisions = Object.fromEntries([41, 40, 39].map((n) => [`published_decision:{"nonce":${n}}`, n === 40 ? null : `{"action":"buy","nonce":${n}}`]));
 /** Defaults for any account the tests connect; a /__tx call overrides them per account. */
@@ -19,7 +23,7 @@ const holder = {
 };
 
 function base(name: string): Scenario {
-  return { name, views, perAccount: {}, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: { api: API_ROUTES } };
+  return { name, views, perAccount: { ...structuredClone(mainnetVault) }, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: { api: API_ROUTES } };
 }
 
 const builders: Record<string, () => Scenario> = {
@@ -49,6 +53,10 @@ const builders: Record<string, () => Scenario> = {
     perAccount: { [VAULT]: holder },
   }),
   "awaiting-stale": () => ({ ...base("awaiting-stale"), views: { ...views, policy: { ...policyJson, abort_after_blocks: 100 }, stage: { AwaitingDecision: { nonce: 42, entered_block: 1 } } } }),
+  "oneclick-down": () => ({ ...base("oneclick-down"), oneClickDown: true }),
+  "oneclick-bad-signature": () => ({ ...base("oneclick-bad-signature"), extra: { api: API_ROUTES, badSignature: true } }),
+  "oneclick-bad-echo": () => ({ ...base("oneclick-bad-echo"), extra: { api: API_ROUTES, badEcho: true } }),
+  "oneclick-clock-skew": () => ({ ...base("oneclick-clock-skew"), extra: { api: API_ROUTES, clockSkewMs: 30 * 60_000 } }),
   closed: () => ({ ...base("closed"), views: { ...views, policy: { ...policyJson, open_deposits: false } } }),
 };
 

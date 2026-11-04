@@ -28,6 +28,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(res, 204, undefined);
   const body = req.method === "GET" ? "" : await readBody(req);
   try {
+    if (url.pathname === "/__oneclick/status") {
+      current.extra.swapStatus = JSON.parse(body);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/__scenario") {
       current = scenario(JSON.parse(body).name);
       return send(res, 200, { ok: current.name });

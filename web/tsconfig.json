@@ -41,12 +41,15 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-mainnet/types/**/*.ts",
+    ".next-mainnet/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     ".next",
     "test-results",
-    "playwright-report"
+    "playwright-report",
+    ".next-mainnet"
   ]
 }

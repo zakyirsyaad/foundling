@@ -1,6 +1,6 @@
 import type http from "node:http";
 
-import { USDC, VAULT, WNEAR } from "./scenarios";
+import { USDC, VAULT } from "./scenarios";
 import { type Scenario, send } from "./state";
 
 type Tx = { receiverId: string; methodName: string; args: Record<string, unknown>; gas: string; deposit: string };
@@ -33,10 +33,11 @@ export function handleTx(res: http.ServerResponse, s: Scenario, raw: string): vo
     const who = { account: signer };
     const reg = { total: t.deposit, available: "0" };
     if (t.methodName === "storage_deposit") put(s, t.receiverId, "storage_balance_of", { account_id: signer }, reg);
-    if (t.receiverId === USDC && t.methodName === "ft_transfer_call") {
+    if (t.methodName === "ft_transfer_call") {
       const amount = BigInt(String(t.args.amount));
-      put(s, VAULT, "pending_of", who, (num(s, VAULT, "pending_of", who) + amount).toString());
-      put(s, USDC, "ft_balance_of", { account_id: signer }, (num(s, USDC, "ft_balance_of", { account_id: signer }) - amount).toString());
+      const vault = String(t.args.receiver_id);
+      put(s, vault, "pending_of", who, (num(s, vault, "pending_of", who) + amount).toString());
+      put(s, t.receiverId, "ft_balance_of", { account_id: signer }, (num(s, t.receiverId, "ft_balance_of", { account_id: signer }) - amount).toString());
     }
     if (t.receiverId === VAULT && t.methodName === "cancel_deposit") {
       const pending = num(s, VAULT, "pending_of", who);
@@ -52,6 +53,6 @@ export function handleTx(res: http.ServerResponse, s: Scenario, raw: string): vo
     if (t.receiverId === VAULT && t.methodName === "claim_bucket") put(s, VAULT, "bucket_claim", { nonce: t.args.nonce, account: signer }, "0");
     hashes.push(`MockTx${++counter}${t.methodName}`);
   }
-  void WNEAR;
+  void USDC;
   return send(res, 200, { hashes });
 }

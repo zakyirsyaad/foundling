@@ -26,7 +26,7 @@ export function buildCtxFor(s: VaultSnapshot | null): BuildCtx | null {
 export interface PortfolioSlots {
   exits?: (args: { s: VaultSnapshot; p: Position; ctx: BuildCtx; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
   stuck?: (args: { s: VaultSnapshot; fresh: boolean; canSign: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
-  crossChain?: (args: { s: VaultSnapshot; p: Position | null; unreadable: boolean }) => ReactNode;
+  crossChain?: (args: { s: VaultSnapshot; p: Position | null; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
 }
 
 export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
@@ -64,7 +64,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
           {ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy }) : null}
         </>
       )}
-      {slots.crossChain ? slots.crossChain({ s, p, unreadable }) : null}
+      {slots.crossChain && config.oneClick ? slots.crossChain({ s, p, unreadable, run, busy }) : null}
     </div>
   );
 }
