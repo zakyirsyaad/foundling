@@ -50,6 +50,8 @@ class World:
         self.advance_mode = "success"  # success | noop | stay_stuck
         self.price_delay = 3  # seconds from execute_decision to the oracle callback
         self.price_hang = False  # the callback never arrives
+        self.call_duration = 0  # seconds near-cli blocks after sending, as it does while a yield runs
+        self.tx_log_executors = []  # the executor filter each tx_logs call asked for
         self.calls = []  # dicts: t, method, args, gas, ok, error, hash
         self.logs = {}
         self.timeline = []
@@ -99,7 +101,8 @@ class World:
             return self.stale_blocks.pop(0)
         return self.height, int(self.now)
 
-    def tx_logs(self, tx_hash, signer):
+    def tx_logs(self, tx_hash, signer, executor=None):
+        self.tx_log_executors.append(executor)
         return list(self.logs[tx_hash])
 
     def view(self, account, method, args=None, block_id=None):
@@ -211,6 +214,8 @@ class World:
     def _price_arrives(self, tx, nonce, expires_at, step):
         if self.kind() != "AwaitingPrice" or self.fields()["nonce"] != nonce:
             return
+        if step == "EXECUTED" and not all(self.feeds.values()):
+            step = "PRICE_UNAVAILABLE"  # the vault reads the same oracle the bot looked at
         if step == "PRICE_UNAVAILABLE":
             self._emit(tx, "rejected", nonce=nonce, code="PRICE_UNAVAILABLE")
             self.stage = {"DecisionReady": {"nonce": nonce, "expires_at": expires_at}}
@@ -294,7 +299,10 @@ class _WorldNear:
 
     def call(self, contract, method, args, gas_tgas):
         assert contract == VAULT, contract
-        return self.world.apply(method, args, gas_tgas)
+        result = self.world.apply(method, args, gas_tgas)
+        if self.world.call_duration:
+            self.world.sleep(self.world.call_duration)
+        return result
 
 
 class MemoryStore:

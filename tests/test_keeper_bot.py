@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tests.keeper_fakes import GAS_FLOORS as WORLD_FLOORS
 from tests.keeper_fakes import KEEPER, NEAR_ID, USDC_ID, VAULT, ListLog, MemoryStore, World
-from tools.keeper.bot import GAS_FLOORS, Bot, Config, ConfigError
+from tools.keeper.bot import GAS_FLOORS, Bot, Config, ConfigError, GiveUp, summarize
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -84,16 +84,20 @@ class ExecuteTest(unittest.TestCase):
         (cycle,) = log.of("cycle")
         self.assertEqual((cycle["result"], cycle["price_retries"]), ("Executed", 1))
 
-    def test_holds_execute_while_a_price_feed_is_null(self):
+    def test_execute_is_not_gated_on_the_oracle_so_the_vault_records_the_rejection(self):
         world = World()
         world.set_stage("DecisionReady", nonce=1, expires_at=int(world.now) + 600)
         world.null_feed(NEAR_ID)
-        bot = make_bot(world)
-        drive(bot, world, 60)
-        self.assertEqual(world.methods("execute_decision"), [])
+        bot = make_bot(world, retry_interval=30)
+        drive(bot, world, 100)
+        executes = world.methods("execute_decision")
+        self.assertGreaterEqual(len(executes), 3, "it keeps trying while the decision lives")
+        self.assertTrue(all(b["t"] - a["t"] >= 30 for a, b in zip(executes, executes[1:])))
+        self.assertEqual(world.kind(), "DecisionReady", "PRICE_UNAVAILABLE does not end the cycle")
         world.feeds[NEAR_ID] = True
-        drive(bot, world, 20)
-        self.assertEqual(len(world.methods("execute_decision")), 1)
+        drive(bot, world, 40)
+        executed = [line for lines in world.logs.values() for line in lines if '"event":"executed"' in line]
+        self.assertTrue(executed, "once the feed is back the swap goes through")
 
     def test_a_frozen_vault_is_not_sent_an_execute(self):
         world = World()
@@ -173,14 +177,16 @@ class RecoveryTest(unittest.TestCase):
 
     def test_expires_decision_past_expires_at(self):
         world = World()
-        world.set_stage("DecisionReady", nonce=4, expires_at=int(world.now) + 100)
+        expires_at = int(world.now) + 100
+        world.set_stage("DecisionReady", nonce=4, expires_at=expires_at)
         world.null_feed(NEAR_ID)
         bot = make_bot(world)
         drive(bot, world, 90)
         self.assertEqual(world.methods("expire_decision"), [])
         drive(bot, world, 30)
         self.assertEqual(len(world.methods("expire_decision")), 1)
-        self.assertEqual(world.methods("execute_decision"), [])
+        self.assertTrue(all(c["t"] < expires_at for c in world.methods("execute_decision")),
+                        "nothing is executed once the decision has expired")
 
 
 class CycleLogTest(unittest.TestCase):
@@ -327,16 +333,156 @@ class AdvanceWindowTest(unittest.TestCase):
 
 
 class PriceOutageTest(unittest.TestCase):
-    def test_a_price_outage_until_expiry_is_recorded_as_such(self):
+    def test_a_price_outage_until_expiry_retries_then_expires_and_says_so(self):
         world = World(cooldown=3600)
         world.at(5, world.null_feed)
         log = ListLog()
-        drive(make_bot(world, log=log), world, 900)
-        self.assertEqual(world.methods("execute_decision"), [])
+        drive(make_bot(world, log=log, retry_interval=30), world, 900)
+        self.assertGreaterEqual(len(world.methods("execute_decision")), 5)
         self.assertEqual(len(world.methods("expire_decision")), 1)
         (cycle,) = log.of("cycle")
         self.assertEqual((cycle["result"], cycle["code"]), ("CycleFailed", "EXPIRED"))
-        self.assertGreater(cycle["price_skips"], 0)
+        self.assertGreaterEqual(cycle["price_retries"], 5)
+        self.assertEqual(cycle["failed_calls"], 0)
+
+    def test_a_failed_call_is_counted_on_the_cycle(self):
+        world = World(cooldown=3600)
+        world.execute_script = ["PRICE_UNAVAILABLE"] * 50
+        log = ListLog()
+        bot = make_bot(world, log=log, retry_interval=30, max_call_failures=50)
+        drive(bot, world, 20)  # one execute, rejected PRICE_UNAVAILABLE on chain
+        world.force_panic["execute_decision"] = "NOT_KEEPER"  # then every execute fails by itself
+        drive(bot, world, 800)
+        (cycle,) = log.of("cycle")
+        self.assertGreater(cycle["failed_calls"], 0)
+
+
+class EventParsingTest(unittest.TestCase):
+    GOOD = ('EVENT_JSON:{"standard":"foundling","version":"1.0.0","event":"hold",'
+            '"data":[{"nonce":4,"code":"NO_DECISION"}]}')
+
+    def test_malformed_events_are_skipped_and_do_not_hide_a_good_one(self):
+        logs = ["EVENT_JSON:null", "EVENT_JSON:[1]", "EVENT_JSON:7", 'EVENT_JSON:"text"',
+                'EVENT_JSON:{"standard":"foundling","event":"hold","data":["x"]}',
+                'EVENT_JSON:{"standard":"foundling","event":"hold","data":{"a":1}}',
+                'EVENT_JSON:{"standard":"foundling","event":"hold","data":[]}',
+                'EVENT_JSON:{"standard":"foundling","event":["hold"],"data":[{"nonce":4}]}',
+                "EVENT_JSON:{broken", self.GOOD]
+        outcome = summarize(logs, 4)
+        self.assertEqual((outcome["result"], outcome["code"]), ("Hold", "NO_DECISION"))
+
+    def test_the_bot_asks_for_the_vaults_own_logs_only(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        drive(make_bot(world), world, 60)
+        self.assertEqual(set(world.tx_log_executors), {VAULT})
+
+
+class StaleHeightTest(unittest.TestCase):
+    def test_a_bad_high_block_read_does_not_stop_the_bot_for_good(self):
+        world = World(cooldown=3600, stuck_after=120)
+        world.advance_mode = "noop"
+        world.set_stage("Swapping", nonce=3, attempt=0, entered_at=int(world.now))
+        log = ListLog()
+        bot = make_bot(world, log=log)
+        world.stale_blocks = [(world.height + 10_000_000, int(world.now))]  # one wild reading
+        bot.tick()
+        self.assertEqual(world.methods("advance"), [], "nothing to do yet, so the wild read cost nothing")
+        for _ in range(60):  # 300 s: the swap becomes stuck at 120 s, long after the bad reading
+            world.sleep(bot.config.poll_interval)
+            bot.tick()
+        self.assertGreaterEqual(len(world.methods("advance")), 1, "the bot acted again after it recovered")
+        errors = log.of("error")
+        self.assertTrue(errors and errors[0]["reason"] == "stale_block", "the stall was logged")
+
+
+class FailureBackoffTest(unittest.TestCase):
+    def failing_world(self):
+        world = World(cooldown=60)
+        world.force_panic["trigger_cycle"] = "SOME_NEW_REASON"
+        return world
+
+    def test_repeated_failures_back_off_exponentially_up_to_a_cap(self):
+        world = self.failing_world()
+        bot = make_bot(world, retry_interval=30, max_call_failures=50)
+        drive(bot, world, 3000)
+        times = [c["t"] for c in world.methods("trigger_cycle")]
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        self.assertGreaterEqual(gaps[1], 2 * gaps[0] - 6)
+        self.assertGreaterEqual(gaps[2], 2 * gaps[1] - 6)
+        self.assertTrue(all(g <= 600 + 6 for g in gaps), gaps)
+
+    def test_it_gives_up_instead_of_burning_gas_for_ever(self):
+        world = self.failing_world()
+        bot = make_bot(world, retry_interval=30, max_call_failures=5)
+        with self.assertRaises(GiveUp):
+            for _ in range(10_000):
+                bot.tick()
+                world.sleep(bot.config.poll_interval)
+        self.assertEqual(len(world.methods("trigger_cycle")), 5)
+
+    def test_a_rotated_keeper_is_noticed_after_a_few_failures(self):
+        world = self.failing_world()
+        bot = make_bot(world, retry_interval=30)
+        drive(bot, world, 40)
+        world.keeper = "someone.else.test"
+        with self.assertRaises(ConfigError):
+            for _ in range(10_000):
+                bot.tick()
+                world.sleep(bot.config.poll_interval)
+
+    def test_the_backoff_survives_a_restart(self):
+        world = self.failing_world()
+        store = MemoryStore()
+        drive(make_bot(world, store=store, retry_interval=300), world, 6)
+        self.assertEqual(len(world.methods("trigger_cycle")), 1)
+        restarted = make_bot(world, store=store, retry_interval=300)
+        drive(restarted, world, 100)
+        self.assertEqual(len(world.methods("trigger_cycle")), 1, "the delay was not forgotten")
+
+    def test_the_delay_is_counted_from_the_end_of_a_slow_call(self):
+        world = self.failing_world()
+        world.call_duration = 100
+        drive(make_bot(world, retry_interval=30), world, 400)
+        calls = world.methods("trigger_cycle")
+        self.assertGreaterEqual(calls[1]["t"] - calls[0]["t"], 100 + 30)
+
+    def test_a_success_clears_the_failure_count(self):
+        world = self.failing_world()
+        bot = make_bot(world, retry_interval=30, max_call_failures=3)
+        drive(bot, world, 70)  # two failures, at about 0 and 30 s
+        del world.force_panic["trigger_cycle"]
+        drive(bot, world, 80)  # the retry at about 90 s succeeds and the cycle runs
+        triggers = world.methods("trigger_cycle")
+        self.assertEqual(len(triggers), 3)
+        self.assertTrue(triggers[-1]["ok"])
+        world.force_panic["trigger_cycle"] = "AGAIN"
+        # After the cooldown: two more failures. GiveUp would fire on the first of them if the
+        # two earlier failures still counted, since the limit is 3.
+        drive(bot, world, 70)
+        self.assertEqual(len([c for c in world.methods("trigger_cycle") if not c["ok"]]), 4)
+
+
+class BlockingCallTest(unittest.TestCase):
+    def test_a_trigger_that_returns_only_after_the_run_finished_is_still_tracked(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        world.call_duration = 40  # near-cli waits through the whole yield
+        log = ListLog()
+        drive(make_bot(world, log=log), world, 120)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["code"]), ("Hold", "NO_DECISION"))
+        self.assertEqual(cycle["txs"][0]["hash"], "TX1")
+        self.assertGreaterEqual(cycle["duration_s"], 40)
+
+    def test_last_nonce_before_a_trigger_is_read_at_the_pinned_height(self):
+        world = World()
+        bot = make_bot(world)
+        world.view_log.clear()
+        height = world.height
+        bot.tick()
+        first = next(entry for entry in world.view_log if entry[1] == "last_nonce")
+        self.assertEqual(first[2], height)
 
 
 class ConfigTest(unittest.TestCase):
@@ -353,6 +499,11 @@ class ConfigTest(unittest.TestCase):
                            ("gas_advance", "advance")):
             with self.subTest(key), self.assertRaises(ConfigError):
                 Config(vault=VAULT, keeper_account=KEEPER, **{key: GAS_FLOORS[floor] - 1})
+
+    def test_only_testnet_is_allowed_without_the_flag(self):
+        for name in ("mainnet", "Mainnet", "MAINNET", "localnet", ""):
+            with self.subTest(name), self.assertRaises(ConfigError):
+                Config(vault=VAULT, keeper_account=KEEPER, network=name)
 
     def test_mainnet_needs_an_explicit_flag(self):
         with self.assertRaises(ConfigError):

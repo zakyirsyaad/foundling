@@ -27,10 +27,17 @@ NONCE_POLL = 2
 SETTLE_GRACE = 30  # an Idle read with no stage seen yet is not trusted for this long after a trigger
 MAX_CLOSE_TRIES = 3
 MAX_CONSECUTIVE_ERRORS = 100
+STALE_LIMIT = 6  # consecutive ticks whose block is behind the highest seen before that is doubted
+MAX_BACKOFF = 600
+ROLE_RECHECK_AFTER = 3  # failures of one method before the vault is asked who its keeper is
 
 
 class ConfigError(Exception):
     pass
+
+
+class GiveUp(Exception):
+    """Too many calls in a row failed. Going on would only burn the keeper's gas."""
 
 
 @dataclass
@@ -48,10 +55,11 @@ class Config:
     skip_interval: int = 15
     nonce_wait: int = 60
     policy_ttl: int = 60
+    max_call_failures: int = 12
 
     def __post_init__(self):
-        if self.network == "mainnet" and not self.allow_mainnet:
-            raise ConfigError("mainnet needs --allow-mainnet")
+        if self.network != "testnet" and not self.allow_mainnet:
+            raise ConfigError(f"network {self.network!r} needs --allow-mainnet; only testnet is allowed without it")
         for field, method in (("gas_trigger", "trigger_cycle"), ("gas_execute", "execute_decision"),
                               ("gas_advance", "advance")):
             if getattr(self, field) < GAS_FLOORS[method]:
@@ -75,20 +83,31 @@ def parse_stage(raw):
     return Stage(kind, fields)
 
 
+def _event_data(line):
+    """(name, data) of a foundling event line, or None for anything else or anything malformed."""
+    try:
+        body = json.loads(line[len(EVENT_PREFIX):])
+    except ValueError:
+        return None
+    if not isinstance(body, dict) or body.get("standard") != "foundling":
+        return None
+    name, data = body.get("event"), body.get("data")
+    if not isinstance(name, str) or not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        return None
+    return name, data[0]
+
+
 def summarize(logs, nonce):
     """The outcome of one cycle from the events its transactions emitted."""
     result, code, stuck, retries = "Unknown", None, False, 0
     for line in logs:
-        if not line.startswith(EVENT_PREFIX):
+        if not isinstance(line, str) or not line.startswith(EVENT_PREFIX):
             continue
-        try:
-            body = json.loads(line[len(EVENT_PREFIX):])
-        except ValueError:
+        event = _event_data(line)
+        if event is None or event[1].get("nonce") != nonce:
             continue
-        data = (body.get("data") or [{}])[0]
-        if body.get("standard") != "foundling" or data.get("nonce") != nonce:
-            continue
-        name, event_code = body.get("event"), data.get("code")
+        name, data = event
+        event_code = data.get("code")
         if name == "stuck":
             stuck = True
         elif name == "rejected" and event_code == "PRICE_UNAVAILABLE":
@@ -110,7 +129,9 @@ class Bot:
         if saved.get("vault") != config.vault:
             saved = {}  # state written for another vault says nothing about this one
         self.state = {"vault": config.vault, "last_trigger": saved.get("last_trigger", 0),
-                      "cycle": saved.get("cycle")}
+                      "cycle": saved.get("cycle"),
+                      "failures": saved.get("failures") or {"streak": 0, "methods": {}}}
+        self._stale = 0
         self.errors = 0
         self._height = 0
         self._deposit = 0
@@ -150,7 +171,12 @@ class Bot:
     def _tick(self):
         height, now = self.rpc.block()
         if height < self._height:
-            return "stale"  # this node is behind one already heard from
+            self._stale += 1
+            if self._stale < STALE_LIMIT:
+                # Usually a node a block or two behind. Never stop for good on one wild reading.
+                self._note("error", "stale_block", error=f"block {height} is behind {self._height}")
+                return "stale"
+        self._stale = 0
         self._height = height
         stage = parse_stage(self._read("stage"))
         self._track(stage, now)
@@ -178,7 +204,7 @@ class Bot:
         if now < self.state["last_trigger"] + policy["cooldown"] + COOLDOWN_MARGIN:
             return "wait"
         key = ("trigger",)
-        if not self._due(key, now):
+        if not self._due(key, now) or self._blocked("trigger_cycle", now):
             return "wait"
         for flag, view in (("frozen", "is_frozen"), ("halted", "is_halted")):
             if self._read(view):
@@ -192,7 +218,7 @@ class Bot:
     def _awaiting(self, stage, height, now, policy):
         stale = height >= stage.fields["entered_block"] + policy["abort_after_blocks"]
         key = ("abort", stage.nonce)
-        if stale and self._due(key, now):
+        if stale and self._due(key, now) and not self._blocked("abort_stale_cycle", now):
             self._send("abort_stale_cycle", {}, self.config.gas_light, key, now, self.config.retry_interval)
             return "abort"
         return "wait"
@@ -201,21 +227,18 @@ class Bot:
         nonce = stage.nonce
         if now >= stage.fields["expires_at"]:
             key = ("expire", nonce)
-            if not self._due(key, now):
+            if not self._due(key, now) or self._blocked("expire_decision", now):
                 return "wait"
             self._send("expire_decision", {}, self.config.gas_light, key, now, self.config.retry_interval)
             return "expire"
         key = ("execute", nonce)
-        if not self._due(key, now):
+        if not self._due(key, now) or self._blocked("execute_decision", now):
             return "wait"
         for flag, view in (("frozen", "is_frozen"), ("halted", "is_halted")):
             if self._read(view):
                 return self._skip(flag, key, now)
-        if not self._prices_ok(self._get_policy()):
-            if self.state["cycle"]:
-                self.state["cycle"]["price_skips"] = self.state["cycle"].get("price_skips", 0) + 1
-                self._save()
-            return self._skip("price_null", key, now)
+        # No oracle check here: if a feed is null the vault answers Rejected(PRICE_UNAVAILABLE),
+        # which is recorded on chain, keeps the decision alive and costs one cheap call.
         self._send("execute_decision", {"nonce": nonce}, self.config.gas_execute, key, now,
                    self.config.retry_interval)
         return "execute"
@@ -224,7 +247,7 @@ class Bot:
         # Not the attempt: a failed probe lands in Stuck again with attempt + 1 and the same
         # since, and that is the same window.
         key = ("advance", stage.nonce, since)
-        if not self._due(key, now):
+        if not self._due(key, now) or self._blocked("advance", now):
             return "wait"
         self._send("advance", {"nonce": stage.nonce}, self.config.gas_advance, key, now,
                    policy["stuck_after"])
@@ -232,10 +255,11 @@ class Bot:
 
     # actions -----------------------------------------------------------------------------
     def _trigger(self, now):
-        before = self.rpc.view(self.config.vault, "last_nonce")
+        before = self._read("last_nonce")
         started = self.clock()
         result = self.near.call(self.config.vault, "trigger_cycle", {}, self.config.gas_trigger)
-        self._next_try[("trigger",)] = now + self.config.retry_interval
+        spent = self.clock() - started
+        self._next_try[("trigger",)] = now + spent + self.config.retry_interval
         maybe_landed = (result.error or "").startswith("timeout")
         if not result.ok and not maybe_landed:
             self._call_failed("trigger_cycle", {}, result)
@@ -243,17 +267,20 @@ class Bot:
                 # A trigger the bot did not see: wait one whole cooldown from here.
                 self.state["last_trigger"] = now
                 self._save()
+            self._failed("trigger_cycle", now + spent)
             return "trigger_failed"
         nonce = self._wait_for_nonce(before)
         if nonce is None:
             self._call_failed("trigger_cycle", {}, result, "last_nonce did not move")
+            self._failed("trigger_cycle", now + spent)
             return "trigger_failed"
+        self._succeeded("trigger_cycle")
         height, seen_at = self.rpc.block()
         self._height = max(self._height, height)
         self.state["last_trigger"] = max(seen_at, now)
         txs = [{"method": "trigger_cycle", "hash": result.tx_hash}] if result.tx_hash else []
         self.state["cycle"] = {"nonce": nonce, "started": started, "txs": txs, "stages": [],
-                               "resumed": False, "price_skips": 0}
+                               "resumed": False, "failed_calls": 0}
         self._save()
         return "trigger"
 
@@ -268,13 +295,21 @@ class Bot:
             self.sleep(NONCE_POLL)
 
     def _send(self, method, args, gas, key, now, delay):
+        started = self.clock()
         result = self.near.call(self.config.vault, method, args, gas)
-        self._next_try[key] = now + delay
-        if result.tx_hash and self.state["cycle"]:
-            self.state["cycle"]["txs"].append({"method": method, "hash": result.tx_hash})
+        spent = self.clock() - started  # a call can block for minutes; the spacing starts after it
+        self._next_try[key] = now + spent + delay
+        cycle = self.state["cycle"]
+        if result.tx_hash and cycle:
+            cycle["txs"].append({"method": method, "hash": result.tx_hash})
             self._save()
-        if not result.ok:
+        if result.ok:
+            self._succeeded(method)
+        else:
+            if cycle:
+                cycle["failed_calls"] = cycle.get("failed_calls", 0) + 1
             self._call_failed(method, args, result)
+            self._failed(method, now + spent)
         return result
 
     def _call_failed(self, method, args, result, reason=None):
@@ -293,7 +328,7 @@ class Bot:
             # Someone else's trigger, or one this bot lost track of: its cooldown still runs.
             self.state["last_trigger"] = max(self.state["last_trigger"], now)
             cycle = self.state["cycle"] = {"nonce": stage.nonce, "started": self.clock(), "txs": [],
-                                           "stages": [], "resumed": True, "price_skips": 0}
+                                           "stages": [], "resumed": True, "failed_calls": 0}
         if stage.kind not in cycle["stages"]:
             cycle["stages"].append(stage.kind)
             self._save()
@@ -302,7 +337,8 @@ class Bot:
         cycle = self.state["cycle"]
         try:
             logs = [line for tx in cycle["txs"] if tx["hash"]
-                    for line in self.rpc.tx_logs(tx["hash"], self.config.keeper_account)]
+                    for line in self.rpc.tx_logs(tx["hash"], self.config.keeper_account,
+                                                 executor=self.config.vault)]
             outcome = summarize(logs, cycle["nonce"])
         except RpcError:
             cycle["close_tries"] = cycle.get("close_tries", 0) + 1
@@ -318,7 +354,7 @@ class Bot:
             "started_at": iso(cycle["started"]), "ended_at": iso(ended),
             "stages_seen": cycle["stages"],
             "stuck": outcome["stuck"] or "Stuck" in cycle["stages"],
-            "price_retries": outcome["price_retries"], "price_skips": cycle.get("price_skips", 0),
+            "price_retries": outcome["price_retries"], "failed_calls": cycle.get("failed_calls", 0),
             "resumed": cycle["resumed"],
         })
         self.state["cycle"] = None
@@ -346,6 +382,31 @@ class Bot:
         except ViewError:
             return False
         return all(feeds.get(feed_id) is not None for feed_id in ids)
+
+    # failures ----------------------------------------------------------------------------
+    def _blocked(self, method, now):
+        return now < self.state["failures"]["methods"].get(method, {}).get("until", 0)
+
+    def _failed(self, method, at):
+        """A call failed: back off exponentially, notice a rotated keeper, and in the end stop."""
+        failures = self.state["failures"]
+        entry = failures["methods"].setdefault(method, {"count": 0, "until": 0})
+        entry["count"] += 1
+        failures["streak"] += 1
+        entry["until"] = at + min(self.config.retry_interval * 2 ** (entry["count"] - 1), MAX_BACKOFF)
+        self._save()
+        if entry["count"] >= ROLE_RECHECK_AFTER:
+            keeper = self.rpc.view(self.config.vault, "roles")["keeper"]
+            if keeper != self.config.keeper_account:
+                raise ConfigError(f"the vault's keeper is now {keeper}, not {self.config.keeper_account}")
+        if failures["streak"] >= self.config.max_call_failures:
+            raise GiveUp(f"{failures['streak']} calls in a row failed; the last was {method}")
+
+    def _succeeded(self, method):
+        failures = self.state["failures"]
+        failures["methods"].pop(method, None)
+        failures["streak"] = 0
+        self._save()
 
     # small helpers -------------------------------------------------------------------------
     def _skip(self, reason, key, now):
