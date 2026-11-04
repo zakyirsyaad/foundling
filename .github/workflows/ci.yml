@@ -401,7 +401,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run every core attack
-        run: python3 tools/attack.py run-all
+        run: |
+          status=0
+          python3 tools/attack.py run-all | tee "$RUNNER_TEMP/attacks.txt" || status=$?
+          {
+            echo '### Attack Lab (run-all)'
+            echo "exit status: $status"
+            echo '```'
+            cat "$RUNNER_TEMP/attacks.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::run-all exited $status; this job does not fail the workflow yet"
+          fi
+          exit "$status"
 
   workflow:
     name: Workflow shape
