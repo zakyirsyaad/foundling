@@ -1,7 +1,7 @@
 import type { Fact } from "@/lib/proof/facts";
 import type { SnapshotSource } from "@/lib/proof/local";
 import type { AttackRow } from "@/lib/proof/sample";
-import { CopyButton } from "./CopyButton";
+import { CopyButton } from "@/components/fm/CopyButton";
 
 const CANNOT_SHOW = [
   "That the strategy is correct or makes money. Attestation shows which code ran, not that it is good.",
@@ -32,7 +32,7 @@ export function ProofView({ source, facts, attacks, synthetic }: { source: Snaps
               <pre>
                 <code>{f.command}</code>
               </pre>
-              <CopyButton text={f.command} />
+              <CopyButton text={f.command} label="Copy command" />
             </li>
           ))}
         </ul>

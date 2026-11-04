@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-export function CopyButton({ text, label = "Copy command" }: { text: string; label?: string }) {
+const COPIED_MS = 1500;
+
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -13,7 +15,7 @@ export function CopyButton({ text, label = "Copy command" }: { text: string; lab
         try {
           await navigator.clipboard.writeText(text);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
+          setTimeout(() => setCopied(false), COPIED_MS);
         } catch {
           setCopied(false);
         }
