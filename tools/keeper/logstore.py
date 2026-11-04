@@ -6,6 +6,10 @@ import tempfile
 from pathlib import Path
 
 
+class StateError(Exception):
+    pass
+
+
 class JsonlLog:
     def __init__(self, path):
         self.path = Path(path)
@@ -24,6 +28,9 @@ class FileStore:
             return json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return {}
+        except ValueError:
+            raise StateError(f"the state file {self.path} is not valid JSON; "
+                             "move it aside to start from a clean state") from None
 
     def save(self, data):
         fd, temp = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name + ".")

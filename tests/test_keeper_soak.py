@@ -5,13 +5,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.keeper.logstore import FileStore, JsonlLog
+from tools.keeper.logstore import FileStore, JsonlLog, StateError
 from tools.keeper.soak import render, summarize_log
 
 
-def cycle(nonce, result="Hold", code="NO_DECISION", stuck=False, final_stage="Idle", retries=0):
+def cycle(nonce, result="Hold", code="NO_DECISION", stuck=False, final_stage="Idle", retries=0,
+          skips=0):
     return {"kind": "cycle", "nonce": nonce, "result": result, "code": code, "stuck": stuck,
-            "final_stage": final_stage, "price_retries": retries, "txs": [], "duration_s": 12.0}
+            "final_stage": final_stage, "price_retries": retries, "price_skips": skips, "txs": [],
+            "duration_s": 12.0}
 
 
 def lines(*records):
@@ -48,6 +50,22 @@ class SummaryTest(unittest.TestCase):
         self.assertTrue(summary.passed, summary.unexpected)
         self.assertEqual(summary.cycles, 5)
         self.assertEqual(summary.price_retries, 2)
+
+    def test_expiry_after_a_price_outage_is_the_expected_price_unavailable(self):
+        records = [cycle(1, "CycleFailed", "EXPIRED", skips=3),
+                   cycle(2, "CycleFailed", "EXPIRED", retries=1)]
+        summary = summarize_log(lines(*records))
+        self.assertTrue(summary.passed, summary.unexpected)
+
+    def test_expiry_with_no_price_trouble_is_still_unexpected(self):
+        summary = summarize_log(lines(cycle(1, "CycleFailed", "EXPIRED")))
+        self.assertEqual([u["reason"] for u in summary.unexpected], ["CycleFailed(EXPIRED)"])
+
+    def test_error_lines_are_counted_and_shown_but_do_not_fail_the_soak(self):
+        summary = summarize_log(lines(cycle(1), {"kind": "error", "reason": "RpcError"}))
+        self.assertEqual(summary.errors, 1)
+        self.assertTrue(summary.passed)
+        self.assertIn("RPC gagal: 1", render(summary))
 
     def test_a_soak_with_no_cycles_fails_unless_allowed(self):
         self.assertFalse(summarize_log([]).passed)
@@ -92,6 +110,11 @@ class StorageTest(unittest.TestCase):
         store.save({"last_trigger": 5, "cycle": None})
         self.assertEqual(FileStore(self.path / "state.json").load(), {"last_trigger": 5, "cycle": None})
         self.assertEqual([p.name for p in self.path.iterdir()], ["state.json"], "no temp file left")
+
+    def test_a_corrupt_state_file_is_a_named_error_not_a_traceback(self):
+        (self.path / "state.json").write_text("{not json")
+        with self.assertRaises(StateError):
+            FileStore(self.path / "state.json").load()
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from unittest import mock
 from tests.keeper_fakes import KEEPER, VAULT, World
 from tools.keeper.__main__ import main, parse_config
 from tools.keeper.bot import ConfigError
+from tools.keeper.near_cli import NearCliError
 
 SECRET = "ed25519:" + "3Hq7" * 22
 RPCS = "https://a.example,https://b.example"
@@ -132,6 +133,32 @@ class ConfigTest(Workspace):
     def test_mainnet_is_refused_without_the_flag(self):
         with self.assertRaises(ConfigError):
             parse_config(["run", "--network", "mainnet"], self.environ())
+
+
+class FailureTest(Workspace):
+    def test_a_missing_near_binary_ends_with_a_message_and_exit_2(self):
+        world = World(cooldown=3600)
+
+        def runner(argv, timeout):
+            raise NearCliError("the near CLI was not found on PATH")
+
+        code, stderr = self.run_main(["run"], self.environ(), world, runner, seconds=30)
+        self.assertEqual(code, 2)
+        self.assertIn("near CLI", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_a_corrupt_state_file_ends_with_a_message_and_exit_2(self):
+        (self.path / "state.json").write_text("{broken")
+        world = World()
+        code, stderr = self.run_main(["run", "--state", str(self.path / "state.json")], self.environ(),
+                                     world, world_runner(world), seconds=10)
+        self.assertEqual(code, 2)
+        self.assertIn("state file", stderr)
+
+    def test_summary_of_a_missing_log_is_exit_2_with_a_message(self):
+        stderr = io.StringIO()
+        self.assertEqual(main(["summary", str(self.path / "absent.jsonl")], {}, stderr), 2)
+        self.assertIn("absent.jsonl", stderr.getvalue())
 
 
 class SummaryCommandTest(Workspace):

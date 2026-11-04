@@ -17,6 +17,7 @@ class Summary:
     cycles: int = 0
     skips: int = 0
     call_failures: int = 0
+    errors: int = 0
     malformed: int = 0
     price_retries: int = 0
     min_cycles: int = 1
@@ -33,6 +34,10 @@ def unexpected_reason(record):
         return "Stuck"
     key = (record.get("result"), record.get("code"))
     if key in EXPECTED:
+        return None
+    # The bot does not send an execute it knows the oracle would refuse, so a price outage
+    # that outlasts the decision ends in EXPIRED, which is PRICE_UNAVAILABLE by another road.
+    if key == ("CycleFailed", "EXPIRED") and (record.get("price_skips") or record.get("price_retries")):
         return None
     return f"{key[0]}({key[1]})" if key[1] else str(key[0])
 
@@ -52,6 +57,8 @@ def summarize_log(lines, min_cycles=1):
             summary.skips += 1
         elif kind == "call_failed":
             summary.call_failures += 1
+        elif kind == "error":
+            summary.errors += 1
         elif kind == "cycle":
             summary.cycles += 1
             summary.price_retries += record.get("price_retries", 0)
@@ -65,7 +72,7 @@ def summarize_log(lines, min_cycles=1):
 
 def render(summary):
     out = [f"Siklus: {summary.cycles}   skip: {summary.skips}   panggilan gagal: {summary.call_failures}"
-           f"   PRICE_UNAVAILABLE diulang: {summary.price_retries}"]
+           f"   RPC gagal: {summary.errors}   PRICE_UNAVAILABLE diulang: {summary.price_retries}"]
     out += [f"  {name}: {count}" for name, count in sorted(summary.outcomes.items())]
     if summary.malformed:
         out.append(f"Baris log rusak: {summary.malformed}")

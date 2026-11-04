@@ -8,8 +8,8 @@ import time
 from urllib.parse import urlparse
 
 from .bot import Bot, Config, ConfigError
-from .logstore import FileStore, JsonlLog
-from .near_cli import NearCli, run_subprocess
+from .logstore import FileStore, JsonlLog, StateError
+from .near_cli import NearCli, NearCliError, run_subprocess
 from .rpc import RpcClient, RpcError
 from .soak import render, summarize_log
 
@@ -86,8 +86,12 @@ def main(argv=None, environ=None, stderr=None, *, rpc=None, runner=None, sleep=N
     clock = clock or time.time
     args = build_parser().parse_args(argv)
     if args.command == "summary":
-        with open(args.log, encoding="utf-8") as handle:
-            summary = summarize_log(handle, min_cycles=args.min_cycles)
+        try:
+            with open(args.log, encoding="utf-8") as handle:
+                summary = summarize_log(handle, min_cycles=args.min_cycles)
+        except OSError as exc:
+            print(f"error: cannot read {args.log}: {exc.strerror}", file=stderr)
+            return 2
         print(render(summary))
         return 0 if summary.passed else 1
 
@@ -107,7 +111,7 @@ def main(argv=None, environ=None, stderr=None, *, rpc=None, runner=None, sleep=N
             sleep=sleep, clock=clock, log=TeeLog(JsonlLog(log_path), stderr), store=FileStore(state_path),
         )
         bot.preflight()
-    except ConfigError as exc:
+    except (ConfigError, StateError) as exc:
         print(f"error: {exc}", file=stderr)
         return 2
     except RpcError as exc:
@@ -121,6 +125,9 @@ def main(argv=None, environ=None, stderr=None, *, rpc=None, runner=None, sleep=N
         bot.run(stop or (lambda: False))
     except KeyboardInterrupt:
         return 130
+    except NearCliError as exc:
+        print(f"error: {exc}", file=stderr)
+        return 2
     except RpcError as exc:
         print(f"error: {exc}", file=stderr)
         return 1
