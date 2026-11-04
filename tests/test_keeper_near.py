@@ -1,10 +1,12 @@
 """The near-cli wrapper: argument shape, tx id parsing, and keeping key material out of output."""
 
 import builtins
+import os
+import subprocess
 import unittest
 from unittest import mock
 
-from tools.keeper.near_cli import NearCli, scrub
+from tools.keeper.near_cli import NearCli, NearCliError, run_subprocess, scrub
 
 KEY_FILE = "/keys/keeper.json"
 SECRET = "ed25519:" + "5Kq9" * 22
@@ -58,7 +60,31 @@ class ResultTest(unittest.TestCase):
         self.assertIn("timeout", result.error)
 
 
+class TimeoutTest(unittest.TestCase):
+    def test_the_timeout_outlasts_the_outlayer_yield_window(self):
+        # SPEC 3.4: a null run resolves after about 126-146 s; near-cli waits for it.
+        self.assertGreaterEqual(NearCli("k.test", KEY_FILE).timeout, 200)
+
+    def test_a_timeout_keeps_the_transaction_id_the_cli_already_printed(self):
+        def runner(argv, timeout):
+            raise subprocess.TimeoutExpired(argv, timeout, output=f"Transaction ID: {TX}\n".encode())
+
+        result = NearCli("k.test", KEY_FILE, runner=runner).call("v", "m", {}, 300)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.tx_hash, TX)
+        self.assertTrue(result.error.startswith("timeout"))
+
+    def test_a_missing_near_binary_is_a_clear_error(self):
+        with self.assertRaises(NearCliError):
+            run_subprocess(["definitely-not-a-real-binary-xyz"], 5)
+
+
 class ScrubTest(unittest.TestCase):
+    def test_scrubs_a_relative_key_path_in_its_absolute_form(self):
+        absolute = os.path.abspath("keys/keeper.json")
+        clean = scrub(f"cannot read {absolute}", "keys/keeper.json")
+        self.assertNotIn(absolute, clean)
+
     def test_removes_keys_paths_and_color_codes(self):
         text = f'\x1b[31mError\x1b[0m {SECRET} at {KEY_FILE} "private_key": "{SECRET}"'
         clean = scrub(text, KEY_FILE)
