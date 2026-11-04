@@ -370,7 +370,7 @@ class AttackCleanupTest(unittest.TestCase):
     def registry_of(self, names):
         return write_registry(self.tmp / "r.json", names)
 
-    def start(self, registry, *args, racing_error=None, setup=None):
+    def start(self, registry, *args, racing_error=None, setup=None, prefix=()):
         argv = ["--registry", str(registry), "--attacks-dir", str(self.attacks), *args]
         if setup:
             harness = PATCHED_DISPATCHER.format(tools=str(ATTACK_PY.parent), setup=setup)
@@ -384,7 +384,7 @@ class AttackCleanupTest(unittest.TestCase):
         err = open(self.tmp / "err.txt", "w")
         self.addCleanup(out.close)
         self.addCleanup(err.close)
-        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=out, stderr=err)
+        proc = subprocess.Popen([*prefix, *cmd], cwd=ROOT, stdout=out, stderr=err)
         self.addCleanup(proc.kill)
         return proc
 
@@ -500,6 +500,17 @@ class AttackCleanupTest(unittest.TestCase):
         self.assert_dies(script, "attack kept running after SIGTERM arrived during Popen")
         self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
         self.assertEqual(proc.returncode, 128 + signal.SIGTERM)
+
+    def test_sighup_stays_ignored_when_started_under_nohup(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        nohup_like = ("sh", "-c", 'trap "" HUP; exec "$@"', "sh")
+        proc = self.start(registry, "run", "hang", prefix=nohup_like)
+        script = self.pid_from(pidfile)
+        proc.send_signal(signal.SIGHUP)
+        time.sleep(0.5)
+        self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
+        self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
 
     def test_second_signal_during_cleanup_does_not_abort_the_kill(self):
         registry = self.registry_of(["hang"])
