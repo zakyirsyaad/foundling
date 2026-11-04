@@ -35,9 +35,9 @@ def unexpected_reason(record):
     key = (record.get("result"), record.get("code"))
     if key in EXPECTED:
         return None
-    # The bot does not send an execute it knows the oracle would refuse, so a price outage
-    # that outlasts the decision ends in EXPIRED, which is PRICE_UNAVAILABLE by another road.
-    if key == ("CycleFailed", "EXPIRED") and (record.get("price_skips") or record.get("price_retries")):
+    # A price outage that outlasts decision_ttl: every execute is rejected PRICE_UNAVAILABLE
+    # until the decision expires. Any call that failed on its own breaks that reading.
+    if key == ("CycleFailed", "EXPIRED") and record.get("price_retries") and not record.get("failed_calls"):
         return None
     return f"{key[0]}({key[1]})" if key[1] else str(key[0])
 
@@ -79,5 +79,7 @@ def render(summary):
     if summary.cycles < summary.min_cycles:
         out.append(f"Siklus kurang dari minimum ({summary.cycles} < {summary.min_cycles})")
     out += [f"Tak terduga: nonce {u['nonce']} {u['reason']}" for u in summary.unexpected]
+    if summary.call_failures:
+        out.append(f"Peringatan: {summary.call_failures} panggilan gagal (lihat baris call_failed di log)")
     out.append("Soak: LULUS" if summary.passed else "Soak: GAGAL")
     return "\n".join(out)

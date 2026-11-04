@@ -10,9 +10,9 @@ from tools.keeper.soak import render, summarize_log
 
 
 def cycle(nonce, result="Hold", code="NO_DECISION", stuck=False, final_stage="Idle", retries=0,
-          skips=0):
+          failed=0):
     return {"kind": "cycle", "nonce": nonce, "result": result, "code": code, "stuck": stuck,
-            "final_stage": final_stage, "price_retries": retries, "price_skips": skips, "txs": [],
+            "final_stage": final_stage, "price_retries": retries, "failed_calls": failed, "txs": [],
             "duration_s": 12.0}
 
 
@@ -51,15 +51,19 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary.cycles, 5)
         self.assertEqual(summary.price_retries, 2)
 
-    def test_expiry_after_a_price_outage_is_the_expected_price_unavailable(self):
-        records = [cycle(1, "CycleFailed", "EXPIRED", skips=3),
-                   cycle(2, "CycleFailed", "EXPIRED", retries=1)]
-        summary = summarize_log(lines(*records))
+    def test_expiry_after_repeated_price_unavailable_is_expected(self):
+        summary = summarize_log(lines(cycle(1, "CycleFailed", "EXPIRED", retries=4)))
         self.assertTrue(summary.passed, summary.unexpected)
 
-    def test_expiry_with_no_price_trouble_is_still_unexpected(self):
+    def test_expiry_with_no_price_rejection_is_still_unexpected(self):
         summary = summarize_log(lines(cycle(1, "CycleFailed", "EXPIRED")))
         self.assertEqual([u["reason"] for u in summary.unexpected], ["CycleFailed(EXPIRED)"])
+
+    def test_expiry_after_a_price_rejection_and_failed_calls_is_not_hidden(self):
+        # One PRICE_UNAVAILABLE, then every execute failed on its own: that is not a price outage.
+        summary = summarize_log(lines(cycle(1, "CycleFailed", "EXPIRED", retries=1, failed=20)))
+        self.assertFalse(summary.passed)
+        self.assertEqual([u["nonce"] for u in summary.unexpected], [1])
 
     def test_error_lines_are_counted_and_shown_but_do_not_fail_the_soak(self):
         summary = summarize_log(lines(cycle(1), {"kind": "error", "reason": "RpcError"}))
@@ -82,6 +86,13 @@ class SummaryTest(unittest.TestCase):
         summary = summarize_log(lines(*records))
         self.assertEqual((summary.cycles, summary.skips, summary.call_failures), (1, 1, 1))
         self.assertTrue(summary.passed)
+
+    def test_failed_calls_raise_a_warning_even_when_the_soak_passes(self):
+        records = [cycle(1), {"kind": "call_failed", "method": "execute_decision", "error": "x"}]
+        summary = summarize_log(lines(*records))
+        self.assertTrue(summary.passed)
+        self.assertIn("Peringatan: 1 panggilan gagal", render(summary))
+        self.assertNotIn("Peringatan", render(summarize_log(lines(cycle(1)))))
 
     def test_render_names_the_verdict_and_each_unexpected_cycle(self):
         text = render(summarize_log(lines(cycle(1), cycle(2, "Rejected", "OVER_CAP"))))
