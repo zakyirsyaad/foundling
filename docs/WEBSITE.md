@@ -179,8 +179,8 @@ Section Home, berurutan:
 
 | # | Section | Isi |
 | --- | --- | --- |
-| 1 | Header | Wordmark, Proof, Trust, GitHub, tombol Open app |
-| 2 | Hero | "A vault born without keys.", satu kalimat tentang apa produknya, terminal `verify.py --live` berisi access key, `code_hash`, komitmen, dan tahap saat ini dengan label blok, tombol Open app dan Read the proof |
+| 1 | Header | Nama Foundling sebagai teks, How it works, Proof, Trust, GitHub, tombol Open app |
+| 2 | Hero | "A vault born without keys.", satu kalimat tentang apa produknya, tombol Open app dan Read the proof, lalu video 16:9 (motion loop atau video demo) dengan satu baris teks hasil `verify.py --live` di bawahnya |
 | 3 | Built on | Nama mitra sebagai teks, tanpa logo dan tanpa kesan didukung, diambil dari `claims.json`. NEAR Intents baru tampil setelah ada dua tx hash lintas chain, dan NEAR AI baru setelah SP1b lulus. Sebelum itu barisnya memakai teks turun status |
 | 4 | How it works | Decide: WASM strategi di enclave OutLayer memutuskan dengan parameter yang dienkripsi, dan NEAR AI hanya penasihat yang bisa menurunkan eksposur (kalimat ini dari `claims.json`, dan sebelum SP1b lulus memakai teks turun status). Check: kontrak memeriksa batas. Trade: pool 4512. Verify: sekarang attestation, input, dan batas; setelah `reveal`, replay aturan atas input yang direkam |
 | 5 | Demo | Video yang sama dengan demo post |
@@ -189,7 +189,7 @@ Section Home, berurutan:
 | 8 | Penutup | Perintah `git clone` dan `python3 verify.py` yang bisa disalin |
 | 9 | Footer | Proof, Trust, Terms, GitHub, pilihan tema, "Not audited · hackathon build" |
 
-Terminal di hero dirender di server sebagai teks. Animasi mengetik hanya hiasan dan mati pada `prefers-reduced-motion`, karena juri dan mesin penyaring (HACKATHON.md Q-017) membaca HTML-nya. Mode `--live` adalah Tier 1 di SPEC dan belum dibangun. Sampai mode itu ada, terminal menampilkan data testnet m12 berlabel, sama seperti `/proof`, bukan keluaran fixture sintetis `python3 verify.py`. Baris access key menampilkan jumlah kunci vault m12 apa adanya. Bila tidak nol, baris itu diberi label bahwa vault latihan memang punya kunci, supaya tidak bertentangan dengan judul. Penutup tetap memberi perintah `python3 verify.py`, dengan keterangan bahwa fixture-nya sintetis.
+Hero tidak memakai terminal (keputusan lead 2026-11-04). Videonya muted, berulang, dengan caption, dan menampilkan frame poster pada `prefers-reduced-motion`. Baris teks verifier di bawahnya dirender di server, karena juri dan mesin penyaring (HACKATHON.md Q-017) membaca HTML, bukan video. Mode `--live` adalah Tier 1 di SPEC dan belum dibangun. Sampai mode itu ada, baris itu memakai data testnet m12 berlabel, bukan keluaran fixture sintetis. Penutup memberi perintah `git clone` dan `python3 verify.py` dalam kotak kode biasa, dengan keterangan bahwa fixture-nya sintetis.
 
 **App**
 
@@ -215,8 +215,8 @@ Klaim di website diambil dari `claims.json`, sama seperti README, supaya klaim y
 | Warna | Tema `neutral` shadcn/ui (oklch, chroma 0) untuk light dan dark. Tema mengikuti sistem, dengan pilihan manual di footer. Tombol utama hitam di light dan putih di dark. Warna hanya untuk status, selalu dengan label teks, menurut tabel `Status` di bawah. Angka kinerja tidak diberi warna |
 | Huruf | Inter untuk teks dan judul, dengan `font-optical-sizing: auto`. Judul semibold dengan tracking rapat. Geist Mono untuk angka, hash, akun, dan perintah. Kolom angka memakai `tnum`. Hero 56 sampai 64 px, teks landing 16 px, teks app 14 px |
 | Bentuk | Border 1 px, hampir tanpa shadow. Radius 8 px untuk card, 6 px untuk tombol dan input. Grid garis tipis hanya di belakang hero |
-| Komponen | Dari shadcn/ui: Button, Card, Badge, Table, Tabs, Dialog, Sheet, Input, Tooltip, Progress, Skeleton, Alert, Sonner, Chart. Rakitan sendiri: Terminal, Status, Stat, LimitMeter, Hash (mono, dipotong, dengan tombol salin), CycleSteps, StuckPanel, CrossChainCard |
-| Logo | Wordmark `foundling` huruf kecil Inter semibold dengan tanda lingkaran kosong, lambang nol kunci |
+| Komponen | Dari shadcn/ui: Button, Card, Badge, Table, Tabs, Dialog, Sheet, Input, Tooltip, Progress, Skeleton, Alert, Sonner, Chart. Rakitan sendiri: Video, Status, Stat, LimitMeter, Hash (mono, dipotong, dengan tombol salin), CycleSteps, StuckPanel, CrossChainCard |
+| Logo | Belum ada logo (keputusan lead 2026-11-04). Nama `Foundling` ditulis sebagai teks Inter semibold, tanpa tanda apa pun |
 | Copy | Inggris. Mengikuti "Yang tidak diklaim" di SPEC dan aturan teks di §6. Landing tidak mengajak menyetor |
 
 Tabel `Status` adalah satu-satunya sumber kata dan warna status, supaya kata yang sama dipakai di semua halaman.
@@ -425,7 +425,7 @@ Pekerjaan chain di PLAN didahulukan bila bentrok, dan target kontrak beku tidak 
 
 **Lantai aman.** `/proof` statis dari W1 adalah pengganti halaman bukti yang pindah dari partner, jadi proyek tidak pernah sampai submit tanpa halaman bukti.
 
-**Hero.** Terminal di hero memakai `verify.py --live` (Tier 1 SPEC), yang dipegang partner bersama `verify.py`. Sampai mode itu ada, hero memakai data testnet m12 berlabel.
+**Hero.** Baris verifier di bawah video hero memakai `verify.py --live` (Tier 1 SPEC), yang dipegang partner bersama `verify.py`. Sampai mode itu ada, baris itu memakai data testnet m12 berlabel. Videonya dibuat lead.
 
 **Gerbang.** Bila worker belum hidup saat vault final lahir, website rilis tanpa riwayat, memakai halaman yang hanya butuh RPC.
 
