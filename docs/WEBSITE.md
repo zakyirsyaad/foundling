@@ -180,7 +180,7 @@ Section Home, berurutan:
 | # | Section | Isi |
 | --- | --- | --- |
 | 1 | Header | Nama Foundling sebagai teks, How it works, Proof, Trust, GitHub, tombol Open app |
-| 2 | Hero | Pill status ("Live on NEAR mainnet · cycle N", atau label testnet sebelum vault final), "A vault born without keys.", satu kalimat tentang apa produknya, tombol Open app dan Read the proof, lalu video 16:9 (motion loop atau video demo) dengan satu baris teks hasil `verify.py --live` di bawahnya |
+| 2 | Hero | "A vault born without keys.", satu kalimat tentang apa produknya, tombol Open app dan Read the proof, lalu video 16:9 (motion loop atau video demo) dengan satu baris teks hasil `verify.py --live` di bawahnya |
 | 3 | Built on | Nama mitra sebagai teks, tanpa logo dan tanpa kesan didukung, diambil dari `claims.json`. NEAR Intents baru tampil setelah ada dua tx hash lintas chain, dan NEAR AI baru setelah SP1b lulus. Sebelum itu barisnya memakai teks turun status |
 | 4 | How it works | Decide: WASM strategi di enclave OutLayer memutuskan dengan parameter yang dienkripsi, dan NEAR AI hanya penasihat yang bisa menurunkan eksposur (kalimat ini dari `claims.json`, dan sebelum SP1b lulus memakai teks turun status). Check: kontrak memeriksa batas. Trade: pool 4512. Verify: sekarang attestation, input, dan batas; setelah `reveal`, replay aturan atas input yang direkam |
 | 5 | Demo | Video yang sama dengan demo post |
