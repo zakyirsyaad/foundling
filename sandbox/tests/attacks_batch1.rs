@@ -1,6 +1,7 @@
 //! Attack Lab, first five attacks (SPEC section 5, S3). Each test attacks a sandbox vault, writes
 //! `proofs/attack/<name>.json` with its verdict and the ledger before and after, and only then
 //! asserts, so `tools/attacks/<name>` can tell a breach (exit 1) from a tool error (exit 2).
+//! Times in a proof are seconds after the attack's first trade, so a proof is the same on every run.
 //!
 //! Timing attacks run on the testnet profile of SPEC 3.6 (`epoch_len` 600, `cooldown` 60):
 //! `fast_forward` moves about 116 blocks a second and a block is 0.3 s, so one mainnet
@@ -84,6 +85,8 @@ struct Outcome {
     failed: Option<String>,
     /// A swap went out.
     started: bool,
+    /// The chain second the swap was debited from the book, which is when the window stamps it.
+    started_at: Option<u64>,
     /// A method refused the call outright, with this text in the failure.
     refused: Option<String>,
 }
@@ -103,6 +106,7 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
         rejected: code_of(event_data(&triggered, "rejected")),
         failed: code_of(event_data(&triggered, "cycle_failed")),
         started: false,
+        started_at: None,
         refused: None,
     };
     let stage: Value = env.view_vault("stage", json!({})).await?;
@@ -112,6 +116,9 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
             .iter()
             .any(|e| e["event"] == "swap_started");
         outcome.rejected = code_of(event_data(&executed, "rejected"));
+        if outcome.started {
+            outcome.started_at = Some(second_of(env, &executed, "swap_started").await?);
+        }
         if executed.is_failure() {
             outcome.refused = Some(failures(&executed));
         }
@@ -183,6 +190,25 @@ async fn wait_until(env: &Foundling, target: u64) -> anyhow::Result<()> {
         let blocks = ((target - now) * BLOCKS_PER_SECOND_NUM / BLOCKS_PER_SECOND_DEN).max(1);
         env.worker.fast_forward(blocks).await?;
     }
+}
+
+/// The second of the block whose receipt logged `needle`.
+async fn second_of(
+    env: &Foundling,
+    result: &near_workspaces::result::ExecutionFinalResult,
+    needle: &str,
+) -> anyhow::Result<u64> {
+    let outcome = result
+        .outcomes()
+        .into_iter()
+        .find(|outcome| outcome.logs.iter().any(|log| log.contains(needle)))
+        .ok_or_else(|| anyhow::anyhow!("no receipt logged {needle}"))?;
+    let block = env
+        .worker
+        .view_block()
+        .block_hash(outcome.block_hash)
+        .await?;
+    Ok(block.timestamp() / 1_000_000_000)
 }
 
 async fn wait_seconds(env: &Foundling, seconds: u64) -> anyhow::Result<()> {
@@ -297,4 +323,119 @@ async fn over_cap() -> anyhow::Result<()> {
     );
 
     run.finish(before, after_one_over)
+}
+
+async fn window_usdc(env: &Foundling) -> anyhow::Result<u128> {
+    let used: String = env
+        .view_vault("window_used", json!({"token_in": "Usdc"}))
+        .await?;
+    Ok(used.parse()?)
+}
+
+/// Buys of 1.5 USDC at NAV 20: each is under the 2 USDC cap, and the window holds two of them
+/// (3.0 of about 4.0), so the third inside one `epoch_len` is the one that must be refused.
+#[tokio::test]
+async fn drip() -> anyhow::Result<()> {
+    const CHUNK: u128 = 1_500_000;
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new("drip", &["OVER_EPOCH_CAP"]);
+    let before = settle_deposit(&env).await?;
+
+    let first = decide(&env, template("buy_risk", CHUNK)).await?;
+    let first_at = first.started_at.unwrap_or_default();
+    run.step(
+        "first chunk is accepted",
+        first.started && first_at > 0,
+        None,
+        json!({"nonce": first.nonce, "second": 0}),
+    );
+
+    wait_until(&env, first_at + EPOCH_LEN / 2).await?;
+    let second = decide(&env, template("buy_risk", CHUNK)).await?;
+    let after_second = ledger(&env).await?;
+    run.step(
+        "second chunk, half an epoch later, is accepted",
+        second.started && window_usdc(&env).await? == 2 * CHUNK,
+        None,
+        json!({"nonce": second.nonce, "half_an_epoch_in": second.started_at.is_some_and(|at| at - first_at >= EPOCH_LEN / 2), "window": 2 * CHUNK}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let third = decide(&env, template("buy_risk", CHUNK)).await?;
+    let after_third = ledger(&env).await?;
+    run.step(
+        "third chunk crosses the epoch cap",
+        third.rejected.as_deref() == Some("OVER_EPOCH_CAP")
+            && !third.started
+            && after_third == after_second,
+        third.rejected.as_deref(),
+        json!({"nonce": third.nonce, "ledger_unchanged": after_third == after_second}),
+    );
+
+    // Twenty seconds before the first chunk leaves the window it still counts.
+    wait_until(&env, first_at + EPOCH_LEN - 20).await?;
+    let inside = decide(&env, template("buy_risk", CHUNK)).await?;
+    let after_inside = ledger(&env).await?;
+    run.step(
+        "just inside the boundary the first chunk still counts",
+        inside.rejected.as_deref() == Some("OVER_EPOCH_CAP")
+            && !inside.started
+            && after_inside == after_second,
+        inside.rejected.as_deref(),
+        json!({"nonce": inside.nonce, "before_boundary": head_second(&env).await? < first_at + EPOCH_LEN}),
+    );
+
+    // The window is half open: an entry counts while `at + epoch_len > now`. Reading the view
+    // block by block shows the exact second the first chunk drops out, and that it does.
+    let leaves_at = first_at + EPOCH_LEN;
+    let mut samples = Vec::new();
+    while head_second(&env).await? <= leaves_at + 1 {
+        let second = head_second(&env).await?;
+        let used = window_usdc(&env).await?;
+        if samples.last().map(|(s, _)| *s) != Some(second) {
+            samples.push((second, used));
+        }
+        env.worker.fast_forward(1).await?;
+    }
+    let edge_ok = samples.iter().all(|(second, used)| {
+        *used
+            == if *second < leaves_at {
+                2 * CHUNK
+            } else {
+                CHUNK
+            }
+    });
+    let saw_both_sides = samples.iter().any(|(s, _)| *s == leaves_at - 1)
+        && samples.iter().any(|(s, _)| *s == leaves_at);
+    run.step(
+        "the first chunk leaves the window at exactly at + epoch_len, not before",
+        edge_ok && saw_both_sides,
+        None,
+        json!({"leaves_at": EPOCH_LEN, "samples_around_the_edge": samples.iter().filter(|(second, _)| second.abs_diff(leaves_at) <= 3).map(|(second, used)| (second - first_at, used)).collect::<Vec<_>>()}),
+    );
+
+    // Cooldown has passed since `inside`; the first chunk is gone but the second is not.
+    wait_until(&env, leaves_at + COOLDOWN).await?;
+    let fourth = decide(&env, template("buy_risk", CHUNK)).await?;
+    let after_fourth = ledger(&env).await?;
+    run.step(
+        "after the boundary one chunk fits again",
+        fourth.started && window_usdc(&env).await? == 2 * CHUNK,
+        None,
+        json!({"nonce": fourth.nonce, "window": window_usdc(&env).await?.to_string()}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let fifth = decide(&env, template("buy_risk", CHUNK)).await?;
+    let after_fifth = ledger(&env).await?;
+    run.step(
+        "a full epoch after the first chunk the cap still holds: no fixed boundary resets it",
+        fifth.rejected.as_deref() == Some("OVER_EPOCH_CAP")
+            && !fifth.started
+            && after_fifth == after_fourth,
+        fifth.rejected.as_deref(),
+        json!({"nonce": fifth.nonce, "after_boundary": head_second(&env).await? > first_at + EPOCH_LEN}),
+    );
+
+    run.finish(before, after_fifth)
 }
