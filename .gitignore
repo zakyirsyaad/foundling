@@ -16,6 +16,7 @@ __pycache__/
 
 # Logs
 *.log
+keeper-soak.jsonl*
 
 # Internal notes and local agent config
 IDEAS*.md
