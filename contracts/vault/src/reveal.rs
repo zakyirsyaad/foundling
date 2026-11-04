@@ -11,6 +11,9 @@ use crate::{now_seconds, to_hex, Vault, VaultExt};
 
 const COMMITMENT_TAG: &[u8] = b"foundling/v1/commitment";
 const SALT_BYTES: usize = 32;
+/// The text lives in the state every call reads, so its size is paid on every call afterwards.
+/// A commitment to anything longer can never be opened, so the creator checks it before `init`.
+pub const MAX_PARAMS_BYTES: usize = 8 * 1024;
 
 #[near]
 impl Vault {
@@ -18,6 +21,7 @@ impl Vault {
     pub fn reveal(&mut self, params: String, salt: String) {
         require!(now_seconds() >= self.agent.reveal_after, "TOO_EARLY");
         require!(self.revealed.is_none(), "ALREADY_REVEALED");
+        require!(params.len() <= MAX_PARAMS_BYTES, "PARAMS_TOO_LONG");
         let Some(salt_bytes) = from_hex(&salt).filter(|bytes| bytes.len() == SALT_BYTES) else {
             env::panic_str("BAD_SALT");
         };
@@ -28,10 +32,16 @@ impl Vault {
         // The text can outgrow the log limit, so it is read from `revealed`.
         emit("revealed", &json!({ "salt": salt }).to_string());
         self.revealed = Some(params);
+        self.revealed_salt = Some(salt);
     }
 
     pub fn revealed(&self) -> Option<String> {
         self.revealed.clone()
+    }
+
+    /// With `revealed`, opens the commitment from plain state, long after the logs are gone.
+    pub fn revealed_salt(&self) -> Option<String> {
+        self.revealed_salt.clone()
     }
 
     pub fn reveal_after(&self) -> u64 {

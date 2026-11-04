@@ -5,6 +5,9 @@ use foundling_sandbox::{
 use near_workspaces::types::NearToken;
 use serde_json::{json, Value};
 
+/// A third of the 30 TGas `on_decision` gets, the headroom the SPEC asks of callbacks.
+const ON_DECISION_LIMIT_TGAS: u64 = 10;
+
 async fn run_fee(env: &Foundling) -> anyhow::Result<u128> {
     let fee: String = env
         .view_contract(&env.outlayer, "run_fee", json!({}))
@@ -220,6 +223,45 @@ async fn vault_decision_limit_is_1024() -> anyhow::Result<()> {
         let failed = event_data(&result, "cycle_failed").expect("a cycle_failed event");
         assert_eq!(failed["code"], code, "{size} bytes");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_largest_decision_fits_the_callback_and_stays_readable() -> anyhow::Result<()> {
+    let run = |mode: Value| async move {
+        let env = Foundling::start().await?;
+        env.set_next(mode).await?;
+        let result = env.trigger_cycle().await?;
+        assert!(result.is_success(), "{}", failures(&result));
+        let event = event_data(&result, "decision").expect("a decision event");
+        let kept: Option<String> = env
+            .view_vault("published_decision", json!({"nonce": 1}))
+            .await?;
+        assert_eq!(kept.as_deref(), event["decision"].as_str());
+        let callback = result
+            .outcomes()
+            .into_iter()
+            .find(|outcome| {
+                outcome
+                    .logs
+                    .iter()
+                    .any(|log| log.contains("decision_ready"))
+            })
+            .expect("the callback outcome");
+        anyhow::Ok((kept.unwrap(), callback.gas_burnt.as_tgas()))
+    };
+
+    let (short, _) = run(json!({"Decision": {"template": decision_template()}})).await?;
+    let padding = "a".repeat(MAX_DECISION_BYTES - short.len());
+    let padded = short.replacen(
+        r#""inputs_digest":""#,
+        &format!(r#""inputs_digest":"{padding}"#),
+        1,
+    );
+    let (largest, burnt_tgas) = run(json!({"Raw": {"payload": padded}})).await?;
+
+    assert_eq!(largest.len(), MAX_DECISION_BYTES);
+    assert!(burnt_tgas <= ON_DECISION_LIMIT_TGAS, "{burnt_tgas} TGas");
     Ok(())
 }
 

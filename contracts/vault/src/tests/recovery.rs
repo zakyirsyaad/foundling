@@ -12,13 +12,12 @@ const OUT: u128 = 18 * WNEAR_UNIT / 10;
 const STUCK_AFTER: u64 = 600;
 const HALT_AFTER: u64 = 3_600;
 
+fn amount_reply(amount: u128) -> PromiseResult {
+    PromiseResult::Successful(format!("\"{amount}\"").into_bytes())
+}
+
 fn held(usdc_amount: u128, wnear_amount: u128) -> Vec<PromiseResult> {
-    let body = format!(
-        r#"{{"{}":"{usdc_amount}","{}":"{wnear_amount}"}}"#,
-        usdc(),
-        wnear()
-    );
-    vec![PromiseResult::Successful(body.into_bytes())]
+    vec![amount_reply(usdc_amount), amount_reply(wnear_amount)]
 }
 
 fn probe(vault: &mut Vault, attempt: u32, reply: Vec<PromiseResult>) {
@@ -164,8 +163,46 @@ fn advance_reads_what_ref_holds_for_the_vault() {
     vault.advance(1);
 
     let (method, args, _) = call_to(&rhea());
-    assert_eq!(method, "get_deposits");
+    assert_eq!(method, "get_deposit");
     assert_eq!(args["account_id"], vault_id().as_str());
+}
+
+#[test]
+fn advance_asks_for_each_token_alone() {
+    let mut vault = stuck_on_deposit();
+    set_caller(alice());
+
+    vault.advance(1);
+
+    let tokens: Vec<_> = calls_to(&rhea())
+        .into_iter()
+        .map(|(_, args, _)| args["token_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tokens, [usdc().to_string(), wnear().to_string()]);
+}
+
+#[test]
+fn a_reading_with_one_reply_stays_stuck() {
+    let mut vault = stuck_on_deposit();
+    set_caller(alice());
+    vault.advance(1);
+
+    set_callback(vec![amount_reply(0)]);
+    vault.on_probe(1, 1);
+
+    assert!(matches!(vault.stage(), Stage::Stuck { .. }));
+}
+
+#[test]
+fn one_failed_reading_of_two_stays_stuck() {
+    let mut vault = stuck_on_deposit();
+    set_caller(alice());
+    vault.advance(1);
+
+    set_callback(vec![amount_reply(0), PromiseResult::Failed]);
+    vault.on_probe(1, 1);
+
+    assert!(matches!(vault.stage(), Stage::Stuck { .. }));
 }
 
 #[test]

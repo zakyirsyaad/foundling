@@ -136,9 +136,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test
-        run: python3 -m unittest tests.test_verify_offline
+        run: python3 -m unittest tests.test_verify_offline tests.test_recheck_obs
       - name: Run the tier 0a checks
         run: python3 verify.py
+
+  recheck-obs:
+    name: Recheck obs (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Past prices cannot change, so 1 is a real mismatch. 2 only means a source is down.
+      - name: Recheck recorded readings against the archive and Kraken
+        run: |
+          status=0
+          python3 tools/recheck_obs.py tools/fixtures/m10-obs.json || status=$?
+          test "$status" -ne 1
 
   attack-lab:
     name: Attack Lab scaffold
@@ -188,6 +201,56 @@ jobs:
           name: foundling-vault
           path: contracts/vault/target/near/foundling_vault.wasm
           retention-days: 14
+
+  vault-reproducible:
+    name: Vault reproducible (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    steps:
+      # The build records the commit, so it has to be the pushed one and not the merge ref.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Build the vault in the pinned image
+        working-directory: contracts/vault
+        run: cargo near build reproducible-wasm < /dev/null
+      - name: Audit the host imports
+        run: python3 tools/wasm_imports.py contracts/vault/target/near/foundling_vault.wasm tools/allowlist.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: foundling-vault-reproducible-${{ matrix.os }}
+          path: contracts/vault/target/near/foundling_vault.wasm
+          retention-days: 14
+
+  vault-reproducible-compare:
+    name: Vault reproducible hash
+    needs: vault-reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: foundling-vault-reproducible-*
+      - name: Compare the two builds
+        run: |
+          sha256sum foundling-vault-reproducible-*/foundling_vault.wasm | tee hashes.txt
+          test "$(cut -d' ' -f1 hashes.txt | sort -u | wc -l)" -eq 1
+          echo "Vault reproducible WASM: \`$(head -n1 hashes.txt | cut -d' ' -f1)\`" >> "$GITHUB_STEP_SUMMARY"
 
   sandbox:
     name: Sandbox

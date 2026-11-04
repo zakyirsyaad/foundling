@@ -64,6 +64,8 @@ pub struct Bucket {
     pub token: Token,
     pub result: U128,
     pub snapshot: U128,
+    /// Shares burned during the swap whose claim is still unpaid. The bucket goes at zero.
+    pub unclaimed: U128,
 }
 
 struct Trade {
@@ -250,13 +252,15 @@ impl Vault {
     pub fn claim_bucket(&mut self, nonce: u64) {
         assert_one_yocto();
         self.require_transfer_gas(1);
-        let Some(bucket) = self.buckets.get(&nonce).cloned() else {
-            env::panic_str("bucket not resolved");
-        };
         let account = env::predecessor_account_id();
         let Some(shares) = self.bucket_claims.remove(&(nonce, account.clone())) else {
             env::panic_str("nothing to claim");
         };
+        let Some(bucket) = self.buckets.get(&nonce).cloned() else {
+            env::panic_str("bucket not resolved");
+        };
+        self.close_claim(&account, nonce);
+        self.release_bucket(nonce, &bucket, shares);
         let amount = mul_div(bucket.result.0, shares, bucket.snapshot.0);
         emit(
             "claimed",
@@ -512,6 +516,7 @@ impl Vault {
                     token,
                     result: U128(result),
                     snapshot: inflight.shares_snapshot,
+                    unclaimed: U128(burned),
                 },
             );
             mul_div(result, burned, inflight.shares_snapshot.0)
@@ -560,15 +565,71 @@ impl Vault {
         self.stage = Stage::Idle;
     }
 
-    /// Called by `redeem`: shares burned mid-swap keep their claim on the result.
+    /// Called by `redeem`: shares burned mid-swap keep their claim on the result. An account
+    /// holds one open claim at most, so the storage its registration paid for stays enough.
     pub(crate) fn note_burn_during_swap(&mut self, account: &AccountId, shares: u128) {
-        let Some(inflight) = self.inflight.as_mut() else {
+        let Some(nonce) = self.inflight.as_ref().map(|swap| swap.nonce) else {
             return;
         };
-        inflight.shares_burned = U128(inflight.shares_burned.0 + shares);
-        let key = (inflight.nonce, account.clone());
+        self.fold_older_claim(account, nonce);
+        if let Some(inflight) = self.inflight.as_mut() {
+            inflight.shares_burned = U128(inflight.shares_burned.0 + shares);
+        }
+        let key = (nonce, account.clone());
         let held = self.bucket_claims.get(&key).copied().unwrap_or(0);
         self.bucket_claims.insert(key, held + shares);
+        self.open_claims.insert(account.clone(), nonce);
+    }
+
+    /// Pays a claim on an earlier swap into `claimable`. Only one swap runs at a time, so
+    /// that swap has settled and its bucket exists.
+    fn fold_older_claim(&mut self, account: &AccountId, nonce: u64) {
+        let Some(older) = self.open_claims.get(account).copied() else {
+            return;
+        };
+        if older == nonce {
+            return;
+        }
+        let Some(bucket) = self.buckets.get(&older).cloned() else {
+            return;
+        };
+        let shares = self
+            .bucket_claims
+            .remove(&(older, account.clone()))
+            .unwrap_or(0);
+        self.open_claims.remove(account);
+        self.release_bucket(older, &bucket, shares);
+        let amount = mul_div(bucket.result.0, shares, bucket.snapshot.0);
+        let held = self.claimable_amount(account, bucket.token);
+        self.claimable
+            .insert((account.clone(), bucket.token), held + amount);
+        emit(
+            "claim_folded",
+            &format!(r#"{{"account":"{account}","nonce":{older},"amount":"{amount}"}}"#),
+        );
+    }
+
+    fn close_claim(&mut self, account: &AccountId, nonce: u64) {
+        if self.open_claims.get(account) == Some(&nonce) {
+            self.open_claims.remove(account);
+        }
+    }
+
+    /// Drops the bucket once every share burned during its swap has been paid out.
+    /// Saturating, because a claim must never be blocked by bookkeeping of the bucket itself.
+    fn release_bucket(&mut self, nonce: u64, bucket: &Bucket, shares: u128) {
+        let unclaimed = bucket.unclaimed.0.saturating_sub(shares);
+        if unclaimed == 0 {
+            self.buckets.remove(&nonce);
+        } else {
+            self.buckets.insert(
+                nonce,
+                Bucket {
+                    unclaimed: U128(unclaimed),
+                    ..bucket.clone()
+                },
+            );
+        }
     }
 
     fn credit(&mut self, token: Token, amount: u128) {

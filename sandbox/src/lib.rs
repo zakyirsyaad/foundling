@@ -73,12 +73,15 @@ pub fn now_seconds() -> u64 {
 pub struct Setup {
     /// The fee the mock Ref reports for the pool. The vault is configured with `POOL_FEE_BPS`.
     pub ref_pool_fee_bps: u32,
+    /// The vault's `open_deposits` policy. Closed keeps the allowlist of alice alone.
+    pub open_deposits: bool,
 }
 
 impl Default for Setup {
     fn default() -> Self {
         Self {
             ref_pool_fee_bps: POOL_FEE_BPS,
+            open_deposits: false,
         }
     }
 }
@@ -160,6 +163,7 @@ impl Foundling {
                 "owner": owner, "usdc": usdc.id(), "wnear": wnear.id(),
                 "pool_id": POOL_ID, "total_fee": setup.ref_pool_fee_bps,
                 "price": NEAR_PRICE.to_string(),
+                "decimal_scale": 10u128.pow((WNEAR_DECIMALS - USDC_DECIMALS) as u32).to_string(),
             }),
         )
         .await?;
@@ -187,6 +191,7 @@ impl Foundling {
         let config = vault_config(
             [&governor, &keeper, &guardian, &alice],
             [&usdc, &wnear, &rhea, &oracle, &outlayer],
+            setup.open_deposits,
         );
         let init_args = serde_json::to_vec(&json!({ "config": config }))?;
         let init_result = parent
@@ -218,7 +223,26 @@ impl Foundling {
         })
     }
 
-    /// Runs the one-time registrations and the selftest, so deposits are accepted.
+    /// Pays the vault's registration fee for `who`, which every depositor needs first.
+    pub async fn register(&self, who: &Account) -> anyhow::Result<()> {
+        let bounds: Value = self.view_vault("storage_balance_bounds", json!({})).await?;
+        let fee: u128 = bounds["min"].as_str().unwrap_or_default().parse()?;
+        let result = who
+            .call(&self.vault_id, "storage_deposit")
+            .args_json(json!({}))
+            .deposit(NearToken::from_yoctonear(fee))
+            .transact()
+            .await?;
+        anyhow::ensure!(
+            result.is_success(),
+            "storage_deposit: {}",
+            failures(&result)
+        );
+        Ok(())
+    }
+
+    /// Runs the one-time registrations and the selftest, and registers alice, so her
+    /// deposits are accepted.
     pub async fn ready(&self) -> anyhow::Result<()> {
         for target in ["Usdc", "Wnear", "Rhea", "RheaTokens"] {
             let result = self
@@ -247,7 +271,7 @@ impl Foundling {
             "selftest did not pass: {:?}",
             events(&result)
         );
-        Ok(())
+        self.register(&self.alice).await
     }
 
     /// Calls the vault from `who` with all the gas there is.
@@ -363,7 +387,7 @@ async fn set_feed(
     Ok(())
 }
 
-fn vault_config(people: [&Account; 4], contracts: [&Contract; 5]) -> Value {
+fn vault_config(people: [&Account; 4], contracts: [&Contract; 5], open_deposits: bool) -> Value {
     let [governor, keeper, guardian, alice] = people;
     let [usdc, wnear, rhea, oracle, outlayer] = contracts;
     let wnear_unit = 10u128.pow(24);
@@ -407,7 +431,7 @@ fn vault_config(people: [&Account; 4], contracts: [&Contract; 5]) -> Value {
             "near_reserve": (3 * wnear_unit / 10).to_string(),
             "tvl_cap": "100000000", "per_user_cap": "50000000",
             "min_deposit": "1000000", "max_mint_per_cycle": 8,
-            "timelock": 86_400,
+            "timelock": 86_400, "open_deposits": open_deposits,
         },
         "allowlist": [alice.id()],
     })

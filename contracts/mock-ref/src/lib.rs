@@ -4,16 +4,18 @@
 use std::collections::BTreeMap;
 
 use near_sdk::json_types::U128;
+use near_sdk::serde_json::json;
 use near_sdk::store::LookupMap;
 use near_sdk::{
-    env, ext_contract, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault,
-    PromiseOrValue,
+    env, ext_contract, near, require, AccountId, BorshStorageKey, Gas, GasWeight, NearToken,
+    PanicOnDefault, Promise, PromiseOrValue,
 };
 
 const PRICE_ONE: u128 = 100_000_000;
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const FT_TRANSFER_GAS: Gas = Gas::from_tgas(20);
 const ON_WITHDRAW_GAS: Gas = Gas::from_tgas(10);
+const ON_LATE_REPLY_GAS: Gas = Gas::from_tgas(5);
 const MAX_RESULT_BYTES: usize = 64;
 const GARBAGE: &[u8] = br#""not a number""#;
 
@@ -40,8 +42,18 @@ pub enum Fault {
     WithdrawPartial,
     /// Everything is sent, the answer cannot be read.
     WithdrawGarbage,
-    /// `get_deposits` panics until the owner clears it. The others fire once.
+    /// Balance reads panic until the owner clears it. The others fire once.
     ProbeFails,
+    /// The deposit lands, the answer comes only when the yield times out.
+    DepositHang,
+    /// The swap happens, the answer comes only when the yield times out.
+    SwapHang,
+    /// The swap does not happen, the answer comes only when the yield times out.
+    SwapHangNotApplied,
+    /// Nothing is sent, and `"0"` comes only when the yield times out.
+    WithdrawHang,
+    /// Everything is sent, the answer comes only when the yield times out.
+    WithdrawHangSent,
 }
 
 #[near(serializers = [json])]
@@ -79,6 +91,8 @@ pub struct MockRef {
     total_fee: u32,
     /// wNEAR in USDC with eight decimals.
     price: u128,
+    /// 10^(wNEAR decimals - USDC decimals).
+    decimal_scale: u128,
     fault: Fault,
     deposits: LookupMap<(AccountId, AccountId), u128>,
 }
@@ -93,6 +107,7 @@ impl MockRef {
         pool_id: u64,
         total_fee: u32,
         price: U128,
+        decimal_scale: U128,
     ) -> Self {
         require!(
             env::predecessor_account_id() == env::current_account_id(),
@@ -105,6 +120,7 @@ impl MockRef {
             pool_id,
             total_fee,
             price: price.0,
+            decimal_scale: decimal_scale.0,
             fault: Fault::None,
             deposits: LookupMap::new(StorageKey::Deposits),
         }
@@ -120,7 +136,12 @@ impl MockRef {
         self.price = price.0;
     }
 
-    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> U128 {
+    pub fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
         let _ = msg;
         let token = env::predecessor_account_id();
         require!(
@@ -133,7 +154,10 @@ impl MockRef {
             0
         };
         self.credit(&sender_id, &token, amount.0 - refund);
-        U128(refund)
+        if self.take_fault(Fault::DepositHang) {
+            return PromiseOrValue::Promise(late_reply(amount_reply(refund, false)));
+        }
+        PromiseOrValue::Value(U128(refund))
     }
 
     #[payable]
@@ -143,12 +167,18 @@ impl MockRef {
         require!(action.pool_id == self.pool_id, "E404: pool not found");
         let amount_out = self.quote(&action.token_in, action.amount_in.0);
         require!(amount_out >= action.min_amount_out.0, "E68: slippage error");
-        let skipped = self.take_fault(Fault::SwapGarbageNotApplied);
-        let garbage = skipped || self.take_fault(Fault::SwapGarbage);
-        if !skipped {
+        let hung_unapplied = self.take_fault(Fault::SwapHangNotApplied);
+        let hung = hung_unapplied || self.take_fault(Fault::SwapHang);
+        let unreadable_unapplied = self.take_fault(Fault::SwapGarbageNotApplied);
+        let garbage = unreadable_unapplied || self.take_fault(Fault::SwapGarbage);
+        if !hung_unapplied && !unreadable_unapplied {
             let sender = env::predecessor_account_id();
             self.debit(&sender, &action.token_in, action.amount_in.0);
             self.credit(&sender, &action.token_out, amount_out);
+        }
+        if hung {
+            drop(late_reply(amount_reply(amount_out, garbage)));
+            return;
         }
         env::value_return(amount_reply(amount_out, garbage));
     }
@@ -161,9 +191,16 @@ impl MockRef {
         unregister: Option<bool>,
         skip_unwrap_near: Option<bool>,
     ) -> PromiseOrValue<U128> {
-        let _ = (unregister, skip_unwrap_near);
+        let _ = unregister;
+        // Ref would unwrap and send native NEAR, which the vault's book never sees.
+        if token_id == self.wnear && skip_unwrap_near != Some(true) {
+            env::panic_str("mock: wNEAR withdrawn without skip_unwrap_near");
+        }
         if self.take_fault(Fault::WithdrawZero) {
             return PromiseOrValue::Value(U128(0));
+        }
+        if self.take_fault(Fault::WithdrawHang) {
+            return PromiseOrValue::Promise(late_reply(amount_reply(0, false)));
         }
         let sent = if self.take_fault(Fault::WithdrawPartial) {
             amount.0 / 2
@@ -177,6 +214,10 @@ impl MockRef {
             .with_attached_deposit(ONE_YOCTO)
             .with_static_gas(FT_TRANSFER_GAS)
             .ft_transfer(sender.clone(), U128(sent));
+        if self.take_fault(Fault::WithdrawHangSent) {
+            drop(transfer);
+            return PromiseOrValue::Promise(late_reply(amount_reply(sent, false)));
+        }
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(ON_WITHDRAW_GAS)
             .on_withdraw(sender, token_id, U128(sent), garbage);
@@ -198,6 +239,12 @@ impl MockRef {
             return;
         }
         env::value_return(amount_reply(amount.0, garbage));
+    }
+
+    /// Where a hung call finally answers. The yield only ever times out here.
+    #[private]
+    pub fn on_late_reply(&self, reply: String) {
+        env::value_return(reply.as_bytes());
     }
 
     /// Real Ref lets any account credit another one this way, so a vault's Ref balance
@@ -240,6 +287,11 @@ impl MockRef {
             .collect()
     }
 
+    pub fn get_deposit(&self, account_id: AccountId, token_id: AccountId) -> U128 {
+        require!(self.fault != Fault::ProbeFails, "probe fault");
+        U128(self.balance(&account_id, &token_id))
+    }
+
     pub fn get_pool(&self, pool_id: u64) -> PoolInfo {
         require!(pool_id == self.pool_id, "E404: pool not found");
         PoolInfo {
@@ -271,9 +323,9 @@ impl MockRef {
 
     fn quote(&self, token_in: &AccountId, amount_in: u128) -> u128 {
         if *token_in == self.usdc {
-            amount_in * PRICE_ONE / self.price
+            amount_in * self.decimal_scale * PRICE_ONE / self.price
         } else {
-            amount_in * self.price / PRICE_ONE
+            amount_in * self.price / PRICE_ONE / self.decimal_scale
         }
     }
 
@@ -296,6 +348,14 @@ impl MockRef {
     }
 }
 
+/// An answer held back for about 200 blocks, so the caller's step outlives `stuck_after`.
+fn late_reply(reply: Vec<u8>) -> Promise {
+    let text = String::from_utf8_lossy(&reply);
+    let args = json!({ "reply": text }).to_string();
+    let (promise, _) = Promise::new_yield("on_late_reply", args, ON_LATE_REPLY_GAS, GasWeight(0));
+    promise.as_return()
+}
+
 fn amount_reply(amount: u128, garbage: bool) -> Vec<u8> {
     if garbage {
         return GARBAGE.to_vec();
@@ -313,6 +373,7 @@ mod tests {
     const PRICE: u128 = 200_000_000;
     const UNIT: u128 = 1_000_000_000_000_000_000_000_000;
     const POOL: u64 = 1103;
+    const MAINNET_SCALE: u128 = 1_000_000_000_000_000_000;
 
     fn account(name: &str) -> AccountId {
         name.parse().unwrap()
@@ -348,20 +409,27 @@ mod tests {
 
     fn set_up() -> MockRef {
         call_from(mock_ref());
-        let contract = MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE));
+        let contract = MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE), U128(1));
         call_from(owner());
         contract
     }
 
     fn funded(amount: u128) -> MockRef {
         let mut contract = set_up();
-        deposit(&mut contract, amount);
+        let _ = deposit(&mut contract, amount);
         contract
     }
 
-    fn deposit(contract: &mut MockRef, amount: u128) -> U128 {
+    fn deposit(contract: &mut MockRef, amount: u128) -> PromiseOrValue<U128> {
         call_from(usdc());
         contract.ft_on_transfer(vault(), U128(amount), String::new())
+    }
+
+    fn refund(contract: &mut MockRef, amount: u128) -> u128 {
+        match deposit(contract, amount) {
+            PromiseOrValue::Value(unused) => unused.0,
+            PromiseOrValue::Promise(_) => panic!("the deposit hung"),
+        }
     }
 
     fn set_fault(contract: &mut MockRef, fault: Fault) {
@@ -399,7 +467,7 @@ mod tests {
     fn a_stranger_cannot_initialise_it() {
         call_from(account("stranger.testnet"));
 
-        MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE));
+        MockRef::init(owner(), usdc(), wnear(), POOL, 30, U128(PRICE), U128(1));
     }
 
     #[test]
@@ -424,7 +492,7 @@ mod tests {
     fn a_transfer_credits_the_sender() {
         let mut contract = set_up();
 
-        assert_eq!(deposit(&mut contract, 5 * UNIT), U128(0));
+        assert_eq!(refund(&mut contract, 5 * UNIT), 0);
 
         assert_eq!(balances(&contract), (5 * UNIT, 0));
     }
@@ -435,7 +503,31 @@ mod tests {
         let mut contract = set_up();
         call_from(account("other.testnet"));
 
-        contract.ft_on_transfer(vault(), U128(1), String::new());
+        let _ = contract.ft_on_transfer(vault(), U128(1), String::new());
+    }
+
+    /// Ref unwraps wNEAR to native NEAR unless told not to, and the vault books only wNEAR.
+    #[test]
+    #[should_panic(expected = "mock: wNEAR withdrawn without skip_unwrap_near")]
+    fn withdrawing_wnear_without_skipping_the_unwrap_panics() {
+        let mut contract = funded(2 * UNIT);
+        buy(&mut contract, 2 * UNIT, 1);
+        call_from(vault());
+
+        let _ = contract.withdraw(wnear(), U128(1), None, None);
+    }
+
+    #[test]
+    fn withdrawing_usdc_needs_no_unwrap_flag() {
+        let mut contract = funded(2 * UNIT);
+        call_from(vault());
+
+        assert!(!sent_nothing(contract.withdraw(
+            usdc(),
+            U128(UNIT),
+            None,
+            None
+        )));
     }
 
     #[test]
@@ -465,6 +557,97 @@ mod tests {
         buy(&mut contract, 2 * UNIT, 1);
 
         assert_eq!(balances(&contract), (0, UNIT));
+    }
+
+    fn real_scale() -> MockRef {
+        call_from(mock_ref());
+        let contract = MockRef::init(
+            owner(),
+            usdc(),
+            wnear(),
+            POOL,
+            30,
+            U128(PRICE),
+            U128(MAINNET_SCALE),
+        );
+        call_from(owner());
+        contract
+    }
+
+    #[test]
+    fn a_buy_bridges_the_decimals_of_the_two_tokens() {
+        let contract = real_scale();
+
+        // Two USDC at 6 decimals buy one wNEAR at 24, at a price of 2.
+        assert_eq!(contract.quote(&usdc(), 2_000_000), UNIT);
+    }
+
+    #[test]
+    fn a_hung_deposit_still_lands() {
+        let mut contract = set_up();
+        set_fault(&mut contract, Fault::DepositHang);
+
+        let answer = deposit(&mut contract, UNIT);
+
+        assert!(matches!(answer, PromiseOrValue::Promise(_)));
+        assert_eq!(balances(&contract), (UNIT, 0));
+    }
+
+    #[test]
+    fn a_hung_swap_still_moves_the_balance() {
+        let mut contract = funded(2 * UNIT);
+        set_fault(&mut contract, Fault::SwapHang);
+
+        buy(&mut contract, 2 * UNIT, 1);
+
+        assert_eq!(balances(&contract), (0, UNIT));
+    }
+
+    #[test]
+    fn a_hung_swap_can_stay_unapplied() {
+        let mut contract = funded(2 * UNIT);
+        set_fault(&mut contract, Fault::SwapHangNotApplied);
+
+        buy(&mut contract, 2 * UNIT, 1);
+
+        assert_eq!(balances(&contract), (2 * UNIT, 0));
+    }
+
+    #[test]
+    fn a_hung_withdraw_sends_nothing() {
+        let mut contract = funded(UNIT);
+        set_fault(&mut contract, Fault::WithdrawHang);
+
+        let answer = withdraw_usdc(&mut contract, UNIT);
+
+        assert!(matches!(answer, PromiseOrValue::Promise(_)));
+        assert_eq!(balances(&contract), (UNIT, 0));
+    }
+
+    #[test]
+    fn a_hung_withdraw_can_still_send() {
+        let mut contract = funded(UNIT);
+        set_fault(&mut contract, Fault::WithdrawHangSent);
+
+        let _ = withdraw_usdc(&mut contract, UNIT);
+
+        assert_eq!(balances(&contract), (0, 0));
+    }
+
+    #[test]
+    fn a_hang_fires_once() {
+        let mut contract = set_up();
+        set_fault(&mut contract, Fault::DepositHang);
+        let _ = deposit(&mut contract, UNIT);
+
+        assert_eq!(refund(&mut contract, UNIT), 0);
+    }
+
+    #[test]
+    fn a_sell_bridges_the_decimals_of_the_two_tokens() {
+        let contract = real_scale();
+
+        assert_eq!(contract.quote(&wnear(), UNIT), 2_000_000);
     }
 
     #[test]
@@ -520,10 +703,10 @@ mod tests {
         let mut contract = set_up();
         set_fault(&mut contract, Fault::DepositPartial);
 
-        assert_eq!(deposit(&mut contract, 4 * UNIT), U128(2 * UNIT));
+        assert_eq!(refund(&mut contract, 4 * UNIT), 2 * UNIT);
         assert_eq!(balances(&contract), (2 * UNIT, 0));
 
-        assert_eq!(deposit(&mut contract, UNIT), U128(0));
+        assert_eq!(refund(&mut contract, UNIT), 0);
         assert_eq!(balances(&contract), (3 * UNIT, 0));
     }
 
@@ -644,10 +827,29 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "probe fault")]
+    fn a_probe_fault_breaks_get_deposit() {
+        let mut contract = set_up();
+        set_fault(&mut contract, Fault::ProbeFails);
+
+        contract.get_deposit(vault(), usdc());
+    }
+
+    #[test]
+    fn get_deposit_reads_one_token_and_zero_for_any_other() {
+        let mut contract = set_up();
+        let _ = deposit(&mut contract, UNIT);
+
+        assert_eq!(contract.get_deposit(vault(), usdc()), U128(UNIT));
+        let other_token = account("other-token.testnet");
+        assert_eq!(contract.get_deposit(vault(), other_token), U128(0));
+    }
+
+    #[test]
     fn a_probe_fault_stays_until_cleared() {
         let mut contract = set_up();
         set_fault(&mut contract, Fault::ProbeFails);
-        deposit(&mut contract, UNIT);
+        let _ = deposit(&mut contract, UNIT);
         set_fault(&mut contract, Fault::None);
 
         assert_eq!(balances(&contract), (UNIT, 0));

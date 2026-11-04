@@ -18,6 +18,7 @@ pub mod redeem;
 pub mod reveal;
 pub mod selftest;
 pub mod setup;
+pub mod storage;
 pub mod swap;
 
 #[cfg(test)]
@@ -35,6 +36,10 @@ use crate::swap::{Bucket, Inflight};
 const MILLIS_PER_SECOND: u64 = 1_000;
 const FULL_BPS: u32 = 10_000;
 const MAX_REVEAL_DELAY: u64 = 365 * 24 * 60 * 60;
+/// OutLayer's yield. An earlier abort would let anyone kill every live run.
+const YIELD_TIMEOUT_BLOCKS: u64 = 200;
+/// Past this, `10^gap` no longer fits the u128 that `decimal_scale` returns.
+const MAX_DECIMAL_GAP: u8 = 38;
 const SHA256_HEX_CHARS: usize = 64;
 
 #[near(serializers = [json, borsh])]
@@ -98,6 +103,9 @@ enum StorageKey {
     Allowlist,
     Buckets,
     BucketClaims,
+    Decisions,
+    Registered,
+    OpenClaims,
 }
 
 #[near(contract_state)]
@@ -128,12 +136,16 @@ pub struct Vault {
     pending: IterableMap<AccountId, u128>,
     claimable: LookupMap<(AccountId, Token), u128>,
     allowlist: LookupSet<AccountId>,
+    /// Accounts that paid the registration fee. Permanent, see `storage_unregister`.
+    registered: LookupSet<AccountId>,
     stage: Stage,
     last_nonce: u64,
     decision: Option<Decision>,
     inflight: Option<Inflight>,
     buckets: LookupMap<u64, Bucket>,
     bucket_claims: LookupMap<(u64, AccountId), u128>,
+    /// The nonce of each account's one unpaid bucket claim.
+    open_claims: LookupMap<AccountId, u64>,
     /// What this vault put in its internal Ref account. Anyone can add to that account
     /// with `mft_transfer`, so the ledger is what counts, not the balance Ref reports.
     rhea_usdc: u128,
@@ -145,6 +157,9 @@ pub struct Vault {
     args_hash: String,
     /// The committed parameters, exactly as opened by `reveal`.
     revealed: Option<String>,
+    revealed_salt: Option<String>,
+    /// Slot to the nonce it holds and the bytes that run answered with.
+    decisions: LookupMap<u64, (u64, String)>,
 }
 
 pub(crate) fn to_hex(bytes: &[u8]) -> String {
@@ -191,6 +206,36 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
         "init: abort_after_blocks must be set"
     );
     require!(
+        policy.abort_after_blocks > YIELD_TIMEOUT_BLOCKS,
+        "init: abort_after_blocks must pass the yield timeout"
+    );
+    require!(
+        [
+            policy.cap_bps,
+            policy.epoch_cap_bps,
+            policy.cap_sell_bps,
+            policy.max_risk_bps,
+        ]
+        .iter()
+        .all(|bps| *bps <= FULL_BPS),
+        "init: a bps limit above 100%"
+    );
+    // Added to the clock later, where an overflow would panic inside a callback.
+    require!(
+        [
+            policy.cooldown,
+            policy.decision_ttl,
+            policy.stuck_after,
+            policy.halt_after,
+            policy.timelock,
+        ]
+        .iter()
+        .all(|seconds| *seconds <= MAX_REVEAL_DELAY),
+        "init: a duration above one year"
+    );
+    require!(policy.near_reserve.0 > 0, "init: near_reserve must be set");
+    require!(policy.min_deposit.0 > 0, "init: min_deposit must be set");
+    require!(
         policy.max_execution_seconds > 0,
         "init: max_execution_seconds must be set"
     );
@@ -206,6 +251,10 @@ fn require_sound_config(config: &InitConfig, vault: &AccountId, parent: &Account
     require!(
         config.assets.usdc_decimals <= config.assets.wnear_decimals,
         "init: usdc_decimals above wnear_decimals"
+    );
+    require!(
+        config.assets.wnear_decimals - config.assets.usdc_decimals <= MAX_DECIMAL_GAP,
+        "init: the token decimals are too far apart"
     );
     require!(
         policy.slippage_bps < FULL_BPS,
@@ -301,12 +350,14 @@ impl Vault {
             pending: IterableMap::new(StorageKey::Pending),
             claimable: LookupMap::new(StorageKey::Claimable),
             allowlist,
+            registered: LookupSet::new(StorageKey::Registered),
             stage: Stage::Idle,
             last_nonce: 0,
             decision: None,
             inflight: None,
             buckets: LookupMap::new(StorageKey::Buckets),
             bucket_claims: LookupMap::new(StorageKey::BucketClaims),
+            open_claims: LookupMap::new(StorageKey::OpenClaims),
             rhea_usdc: 0,
             rhea_wnear: 0,
             last_trigger: 0,
@@ -315,6 +366,8 @@ impl Vault {
             sell_window: Window::default(),
             args_hash,
             revealed: None,
+            revealed_salt: None,
+            decisions: LookupMap::new(StorageKey::Decisions),
         }
     }
 
@@ -362,7 +415,7 @@ impl Vault {
     }
 
     pub fn is_allowed(&self, account: AccountId) -> bool {
-        self.allowlist.contains(&account)
+        self.may_deposit(&account)
     }
 
     pub fn total_shares(&self) -> U128 {
@@ -393,6 +446,10 @@ impl Vault {
 impl Vault {
     pub(crate) fn net_deposit(&self, account: &AccountId) -> u128 {
         self.net_deposits.get(account).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn may_deposit(&self, account: &AccountId) -> bool {
+        self.policy.open_deposits || self.allowlist.contains(account)
     }
 
     pub(crate) fn token_account(&self, token: Token) -> AccountId {
@@ -427,5 +484,34 @@ impl Vault {
 
     pub fn set_max_mint_for_tests(&mut self, limit: u32) {
         self.policy.max_mint_per_cycle = limit;
+    }
+
+    /// A swap in flight at `nonce` with nothing traded yet, for tests of what happens around it.
+    pub fn begin_swap_for_tests(&mut self, nonce: u64) {
+        self.inflight = Some(Inflight {
+            nonce,
+            token_in: Token::Usdc,
+            token_out: Token::Wnear,
+            amount_in: U128(0),
+            min_amount_out: U128(0),
+            amount_out: None,
+            shares_snapshot: U128(self.total_shares),
+            shares_burned: U128(0),
+            recovered: U128(0),
+            stuck_since: None,
+        });
+    }
+
+    /// Writes every cached entry out, so `env::storage_usage` counts it. The two sets write
+    /// straight through and keep no cache.
+    pub fn flush_for_tests(&mut self) {
+        self.shares.flush();
+        self.net_deposits.flush();
+        self.pending.flush();
+        self.claimable.flush();
+        self.buckets.flush();
+        self.bucket_claims.flush();
+        self.open_claims.flush();
+        self.decisions.flush();
     }
 }

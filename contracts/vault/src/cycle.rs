@@ -13,6 +13,9 @@ use crate::{now_seconds, Token, Vault, VaultExt};
 const DECISION_INPUT_VERSION: u32 = 1;
 const REQUEST_GAS: Gas = Gas::from_tgas(200);
 const ON_DECISION_GAS: Gas = Gas::from_tgas(30);
+/// Decisions a plain RPC node can still give back after its logs are gone. A slot holds at
+/// most `MAX_DECISION_BYTES`, so the ring costs about 0.7 NEAR of storage when full.
+pub const DECISIONS_KEPT: u64 = 64;
 const MIN_TRIGGER_GAS: Gas = Gas::from_tgas(250);
 const NO_DEPOSIT: NearToken = NearToken::from_yoctonear(0);
 
@@ -155,6 +158,7 @@ impl Vault {
         if let (Ok(_), Ok(bytes)) = (&outcome, &result) {
             // A hold leaves nothing else behind, and replay needs what the run observed.
             let decision = String::from_utf8_lossy(bytes).to_string();
+            self.keep_decision(nonce, decision.clone());
             emit(
                 "decision",
                 &json!({ "nonce": nonce, "decision": decision }).to_string(),
@@ -210,9 +214,24 @@ impl Vault {
     pub fn ops_spent(&self) -> U128 {
         U128(self.ops_window.used(now_seconds(), self.policy.epoch_len))
     }
+
+    /// The exact bytes the run answered with, while its slot still holds them.
+    pub fn published_decision(&self, nonce: u64) -> Option<String> {
+        self.decisions
+            .get(&(nonce % DECISIONS_KEPT))
+            .filter(|(kept, _)| *kept == nonce)
+            .map(|(_, decision)| decision.clone())
+    }
 }
 
 impl Vault {
+    /// Slots are keyed by nonce modulo the ring, so a failed cycle cannot leave an entry that
+    /// nothing evicts and storage stays bounded.
+    pub(crate) fn keep_decision(&mut self, nonce: u64, decision: String) {
+        self.decisions
+            .insert(nonce % DECISIONS_KEPT, (nonce, decision));
+    }
+
     fn expected_decision(&self, nonce: u64) -> Expected<'_> {
         Expected {
             vault: self.vault_id.as_str(),
