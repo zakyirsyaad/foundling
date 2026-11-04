@@ -47,7 +47,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
       {!account ? (
         <section className="grid gap-3 rounded-lg border p-5">
           <p>Connect a NEAR wallet to see your position, deposit or leave.</p>
-          <ConnectButton />
+          <div className="justify-self-start"><ConnectButton /></div>
         </section>
       ) : !p ? (
         <LoadingBlock rows={2} label="Reading your position" />

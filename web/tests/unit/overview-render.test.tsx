@@ -24,6 +24,8 @@ test("Overview shows the stats, the meters and the rules", async () => {
   expect(screen.getAllByRole("meter")).toHaveLength(4);
   expect(screen.getByText("25% · 15 USDC")).toBeInTheDocument();
   expect(screen.getByText("Nothing")).toBeInTheDocument();
+  // 96.40 USDC over 96 USDC of starting shares: the price needs more than two decimals.
+  expect(screen.getByText("1.004166 USDC")).toBeInTheDocument();
 });
 test("Overview with pending history still shows live numbers", async () => {
   const s = await fixtureSnapshot({ inflight: { nonce: 9n, tokenIn: "Usdc", tokenOut: "Wnear", amountIn: 12_400_000n, minAmountOut: 1n, amountOut: null, sharesSnapshot: 1n, sharesBurned: 0n, recovered: 0n, stuckSince: null } });

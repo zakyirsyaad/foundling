@@ -62,7 +62,7 @@ export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSna
       </div>
       <section aria-label="Vault" className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Book" value={usdc(nav0, d)} sub={`${formatUnits(s.book.usdc, d, 2)} USDC + ${formatUnits(s.book.wnear, s.assets.wnearDecimals, 4)} wNEAR`} />
-        <Stat label="Share price" value={usdc(price, d)} />
+        <Stat label="Share price" value={price === null ? "—" : `${formatUnits(price, d, 6)} USDC`} />
         <Stat label={since.label} value={pct(since.changeBps)} sub={`${since.periodDays === null ? "—" : `${since.periodDays} days`} · ${since.cycles} cycles`} />
         <Stat label="In a swap now" value={s.inflight ? `${formatUnits(s.inflight.amountIn, s.inflight.tokenIn === "Usdc" ? d : s.assets.wnearDecimals, 4)} ${s.inflight.tokenIn === "Usdc" ? "USDC" : "wNEAR"}` : "Nothing"} />
       </section>
