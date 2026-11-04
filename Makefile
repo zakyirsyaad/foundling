@@ -1,6 +1,6 @@
 CONTRACTS := vault mock-oracle mock-ref mock-outlayer mock-token
 
-.PHONY: quick wasm sandbox attack-lab
+.PHONY: quick wasm sandbox attack-lab attack-lab-full
 
 # Unit tests and proptest of every contract and the strategy, as CI runs them: --locked,
 # so a stale Cargo.lock fails here and is not rewritten. No sandbox, no wasm build.
@@ -26,5 +26,13 @@ sandbox: wasm
 	cd sandbox && cargo test --locked
 
 # Runs every core attack in tools/attack-registry.json and prints PASS/FAIL/NOT_IMPLEMENTED/ERROR.
+# It builds nothing, so it runs where only Python exists (the CI scaffold job). A sandbox attack
+# whose wasm is missing exits 2 at once and says to run `make wasm`.
 attack-lab:
+	@python3 tools/attack.py run-all
+
+# The same, with the wasm and the sandbox tests built first. Builds inside an attack would
+# count against its 300 s limit and report ERROR for what is only a cold cache.
+attack-lab-full: wasm
+	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	@python3 tools/attack.py run-all
