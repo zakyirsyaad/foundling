@@ -4,11 +4,13 @@ import builtins
 import os
 import subprocess
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from tools.keeper.near_cli import NearCli, NearCliError, run_subprocess, scrub
 
 KEY_FILE = "/keys/keeper.json"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SECRET = "ed25519:" + "5Kq9" * 22
 TX = "9WqzXxJ3kPpd7Hh1m2VnRrYbA4TfLcEu5GsNoDw6iBZy"
 
@@ -102,6 +104,32 @@ class ScrubTest(unittest.TestCase):
         result = cli(Runner(code=1, output=output)).call("v", "m", {}, 300)
         self.assertNotIn(SECRET, result.error)
         self.assertNotIn(KEY_FILE, result.error)
+
+
+class RealOutputTest(unittest.TestCase):
+    """A failure printed by near-cli-rs 0.30.1 itself (tests/fixtures), not one written to fit."""
+
+    PATH = "/nonexistent/no-such-key.json"
+
+    def setUp(self):
+        self.output = (FIXTURES / "near-cli-missing-key-file.txt").read_text()
+
+    def test_the_real_output_really_does_echo_the_key_path_and_color_codes(self):
+        self.assertIn(self.PATH, self.output)
+        self.assertIn("\x1b[", self.output)
+
+    def test_scrub_removes_them_from_the_real_output(self):
+        clean = scrub(self.output, self.PATH)
+        self.assertNotIn(self.PATH, clean)
+        self.assertNotIn("\x1b", clean)
+
+    def test_the_error_text_is_the_failure_and_not_the_source_location(self):
+        result = NearCli("k.test", self.PATH, runner=Runner(code=1, output=self.output)).call("v", "m", {}, 300)
+        self.assertFalse(result.ok)
+        self.assertIn("Access key file not found", result.error)
+        self.assertNotIn(self.PATH, result.error)
+        self.assertNotIn("near-cli-rs", result.error)
+        self.assertNotIn("mod.rs", result.error)
 
 
 class KeyFileTest(unittest.TestCase):

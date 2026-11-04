@@ -1,0 +1,22 @@
+├  Unsigned transaction:
+│    signer_id:    nonexistent-keeper.testnet
+│    receiver_id:  nonexistent-vault.testnet
+│    actions:
+│       -- function call:      
+│                       method name:  advance
+│                       args:         {
+│                                       "nonce": 1
+│                                     }
+│                       gas:          150.0 Tgas
+│                       deposit:      0 NEAR
+│     [0m
+
+Here is your console command if you need to script it or re-run:
+    [33mnear contract call-function as-transaction nonexistent-vault.testnet advance json-args '{"nonce": 1}' prepaid-gas '150.0 Tgas' attached-deposit '0 NEAR' sign-as nonexistent-keeper.testnet network-config testnet sign-with-access-key-file /nonexistent/no-such-key.json send[39m
+
+Error: 
+   0: [91mAccess key file not found![0m
+   1: [91mNo such file or directory (os error 2)[0m
+
+Location:
+   [35m/home/user/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/near-cli-rs-0.30.1/src/transaction_signature_options/sign_with_access_key_file/mod.rs[0m:[35m57[0m

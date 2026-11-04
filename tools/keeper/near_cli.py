@@ -55,9 +55,11 @@ def _error_text(output):
     # near-cli prints the failure after "Error:"; the trace lines below it add nothing.
     lines = output.splitlines()
     start = next((i for i, line in enumerate(lines) if line.startswith("Error:")), 0)
-    kept = [l for l in lines[start:] if not l.startswith(("Location:", "Error:")) and l.strip()]
-    first = lines[start].removeprefix("Error:").strip() if lines else ""
-    return " ".join([first, *kept] if first else kept)[:MAX_ERROR]
+    end = next((i for i, line in enumerate(lines) if i > start and line.startswith("Location:")), len(lines))
+    kept = [line.strip() for line in lines[start:end] if line.strip()]
+    if kept and kept[0].startswith("Error:"):
+        kept[0] = kept[0].removeprefix("Error:").strip()
+    return " ".join(part for part in kept if part)[:MAX_ERROR]
 
 
 class NearCli:
