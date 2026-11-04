@@ -354,8 +354,11 @@ os.killpg = killpg
 SLOW_SPAWN = """
 real_execute_child = subprocess.Popen._execute_child
 def execute_child(self, *args, **kwargs):
-    real_execute_child(self, *args, **kwargs)
-    time.sleep(1.0)
+    print("spawning", flush=True)
+    try:
+        real_execute_child(self, *args, **kwargs)
+    finally:
+        time.sleep(1.0)
 subprocess.Popen._execute_child = execute_child
 """
 
@@ -570,6 +573,16 @@ class AttackCleanupTest(unittest.TestCase):
         time.sleep(0.5)
         self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
         self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
+
+    def test_signal_during_a_failed_spawn_is_reported_not_cannot_run(self):
+        registry = self.registry_of(["bad"])
+        make_script(self.attacks, "bad", 0, body="#!/nonexistent/interpreter\n")
+        proc = self.start(registry, "run", "bad", setup=SLOW_SPAWN)
+        self.wait_for_output("spawning")
+        proc.send_signal(signal.SIGTERM)
+        stderr = self.finish(proc)
+        self.assertEqual(stderr.splitlines(), ["TERMINATED: bad"])
+        self.assertEqual(proc.returncode, 128 + signal.SIGTERM)
 
     def test_first_signal_during_cleanup_does_not_abort_the_kill(self):
         registry = self.registry_of(["hang"])
