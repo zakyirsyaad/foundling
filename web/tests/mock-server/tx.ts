@@ -21,6 +21,10 @@ function put(s: Scenario, contract: string, method: string, args: object, value:
 }
 
 /** Applies a signed call to the scenario, the way the contract would, for the e2e flows. */
+export function txCount(): number {
+  return counter;
+}
+
 export function handleTx(res: http.ServerResponse, s: Scenario, raw: string): void {
   const { signer, fail, txs } = JSON.parse(raw) as { signer: string; fail: string | null; txs: Tx[] };
   if (fail) return send(res, 400, { error: fail });

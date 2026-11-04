@@ -31,10 +31,9 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
     if (hashes.length) {
       dispatch({ type: "sent", hashes });
       dispatch({ type: "settled" });
-      onSettled();
     }
     // Runs once, on mount, to resume a transaction sent before a reload.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   const run = useCallback(
@@ -45,9 +44,9 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
         const txs = steps.map((s) => buildTx(s.name, s.args, ctx));
         const out = await wallet.send(txs);
         const hashes = out.map((o) => o.hash);
+        // Kept until the next page load reads it once, so a reload resumes this status instead of resending.
         persistPending(session(), hashes);
         dispatch({ type: "sent", hashes });
-        takePending(session());
         dispatch({ type: "settled", partial: partial?.() });
       } catch (err) {
         if (err instanceof WalletCancelled) dispatch({ type: "cancelled" });

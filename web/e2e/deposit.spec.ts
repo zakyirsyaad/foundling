@@ -46,6 +46,8 @@ test("with the API down the portfolio works the same", async ({ page, request })
 test("every action has a CLI command", async ({ page, request }) => {
   await useScenario(request, "normal");
   await connect(page);
-  await page.getByText("CLI command").click();
-  await expect(page.locator("code").filter({ hasText: "ft_transfer_call" })).toContainText("network-config testnet sign-with-keychain send");
+  const deposit = page.getByRole("region", { name: "Deposit" });
+  await deposit.getByText("CLI command").click();
+  await expect(deposit.locator("code").filter({ hasText: "ft_transfer_call" })).toContainText("network-config testnet sign-with-keychain send");
+  for (const name of ["Redeem", "Claims"]) await expect(page.getByRole("region", { name }).getByText("CLI command")).toHaveCount(1);
 });
