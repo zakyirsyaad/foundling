@@ -1,4 +1,5 @@
 import { CopyButton } from "@/components/fm/CopyButton";
+import { shellQuote } from "@/lib/format/shell";
 import { Hash } from "@/components/fm/Hash";
 import { Status } from "@/components/fm/Status";
 import type { Network } from "@/config/deployment";
@@ -7,7 +8,7 @@ import { cycleWord } from "@/lib/cycles/outcome";
 import { proofWord, replayWord } from "@/lib/proof/tally";
 
 function verifyCommand(network: Network, vaultId: string, tx: string | undefined): string {
-  return `python3 tools/fetch_proof.py --chain ${network} --vault ${vaultId} --collateral-bin <collateral.bin> --out proof.json ${tx ?? "<trigger_tx>"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
+  return `python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
 }
 
 function TallyLine({ name, t }: { name: string; t: ProofResult["verifier"] }) {

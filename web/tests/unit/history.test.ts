@@ -3,7 +3,7 @@ import { createHistoryClient } from "@/lib/history/client";
 const ok = (data: unknown, meta: unknown = { cursor: null }) => new Response(JSON.stringify({ success: true, data, error: null, meta }), { status: 200 });
 const cycle = (nonce: number) => ({
   nonce: String(nonce), started_at: "2026-11-10T00:00:00Z", finished_at: null, events: [{ name: "cycle_started" }],
-  amount_in: null, amount_out: null, tx_hashes: ["abc"], verifier: null, obs_recheck: null,
+  amount_in: null, amount_out: null, tx_hashes: ["3EzbTudhQmTg1Z2J1n4WbhJf6pX3k7Lq9sV8cR2uY5aB"], verifier: null, obs_recheck: null,
 });
 const client = (f: (url: string) => Response | Promise<Response>, timeoutMs?: number) =>
   createHistoryClient("https://api.example.org", { fetch: (async (u: RequestInfo | URL) => f(String(u))) as typeof fetch, timeoutMs });
@@ -27,7 +27,7 @@ test("rows parse with exact amounts and the cursor", async () => {
   const r = await client(() => ok([row], { cursor: "c2" })).cycles();
   expect(r).toEqual({
     status: "ok", cursor: "c2",
-    data: [{ nonce: 7n, startedAt: "2026-11-10T00:00:00Z", finishedAt: null, events: [{ name: "cycle_started" }], amountIn: 2n ** 128n - 1n, amountOut: null, txHashes: ["abc"], verifier: { pass: 5, skip: 1, fail: 0, state: "done" }, obsRecheck: null }],
+    data: [{ nonce: 7n, startedAt: "2026-11-10T00:00:00Z", finishedAt: null, events: [{ name: "cycle_started" }], amountIn: 2n ** 128n - 1n, amountOut: null, txHashes: ["3EzbTudhQmTg1Z2J1n4WbhJf6pX3k7Lq9sV8cR2uY5aB"], verifier: { pass: 5, skip: 1, fail: 0, state: "done" }, obsRecheck: null }],
   });
 });
 test("the query string carries the filter and the cursor", async () => {

@@ -1,5 +1,6 @@
 import type { Network } from "@/config/deployment";
 import { safeHttpsUrl } from "@/lib/format/safeUrl";
+import { shellQuote } from "@/lib/format/shell";
 import type { LocalProof, SnapshotSource } from "./local";
 
 export interface Fact {
@@ -38,6 +39,7 @@ export function proofFacts(src: SnapshotSource, local: LocalProof, network: Netw
   };
   if (keys !== 0 && src.kind === "sample") keyFact.note = "This rehearsal vault has keys. The final vault is born without them.";
   const codeHex = base58ToHex(s.account.codeHash);
+  const wasmUrl = safeHttpsUrl(s.agent.wasmUrl);
   return [
     keyFact,
     {
@@ -45,15 +47,15 @@ export function proofFacts(src: SnapshotSource, local: LocalProof, network: Netw
       title: "Deployed contract code",
       value: codeHex ? `sha256 ${codeHex}` : `code_hash ${s.account.codeHash}`,
       command: "cd contracts/vault && cargo near build reproducible-wasm && shasum -a 256 target/near/foundling_vault.wasm",
-      note: "The reproducible build runs in Docker.",
+      note: "The reproducible build runs in Docker, at the commit that built this vault.",
     },
     {
       id: "strategy",
       title: "Strategy WASM the vault pins",
       value: `wasm_hash ${s.agent.wasmHash}`,
-      command: `curl -sL '${s.agent.wasmUrl}' | shasum -a 256`,
+      command: wasmUrl ? `curl -sL ${shellQuote(wasmUrl)} | shasum -a 256` : "The pinned binary URL is not https, so no command is offered.",
       note: "To rebuild it from source, run strategy/build.sh at the commit that built this binary.",
-      href: safeHttpsUrl(s.agent.wasmUrl) ?? undefined,
+      href: wasmUrl ?? undefined,
     },
     {
       id: "commitment",

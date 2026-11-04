@@ -1,6 +1,7 @@
 import { NearConnector } from "@hot-labs/near-connect";
 
 import type { DeploymentConfig } from "@/config/deployment";
+import { isNearAccount } from "@/lib/format/shell";
 import type { WalletTx } from "./calls";
 import { type TxOutcome, type WalletApi, WalletCancelled } from "./types";
 
@@ -21,7 +22,9 @@ export function createWallet(cfg: DeploymentConfig, cspNonce: string): WalletApi
   const connector = new NearConnector({ network: cfg.network, cspNonce, autoConnect: true });
   let account: string | null = null;
   const listeners = new Set<(id: string | null) => void>();
-  const emit = (id: string | null) => {
+  // Executor code is third-party and unpinned: an id that is not a NEAR account is never used.
+  const emit = (raw: string | null) => {
+    const id = raw !== null && isNearAccount(raw) ? raw : null;
     account = id;
     for (const l of listeners) l(id);
   };
@@ -37,7 +40,7 @@ export function createWallet(cfg: DeploymentConfig, cspNonce: string): WalletApi
       const wallet = await connector.connect();
       const accounts = await wallet.getAccounts();
       const id = accounts[0]?.accountId;
-      if (!id) throw new WalletCancelled();
+      if (!id || !isNearAccount(id)) throw new WalletCancelled();
       emit(id);
       return id;
     },

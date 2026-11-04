@@ -7,6 +7,8 @@ export const MAX_ROWS = 100;
 
 const amount = z.string().transform((s) => parseU128(s));
 const big = z.string().regex(/^\d+$/).transform((s) => BigInt(s));
+/** A NEAR transaction hash (base58). Anything else from the API is refused: it lands in copyable commands. */
+const txHash = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
 
 export const tallySchema = z.object({ pass: z.number().int().nonnegative(), skip: z.number().int().nonnegative(), fail: z.number().int().nonnegative(), state: z.enum(["queued", "running", "done", "failed_to_build"]) });
 export type Tally = z.infer<typeof tallySchema>;
@@ -15,7 +17,7 @@ export const cycleSchema = z
   .object({
     nonce: big, started_at: z.string(), finished_at: z.string().nullable(),
     events: z.array(z.object({ name: z.string(), code: z.string().optional() })),
-    amount_in: amount.nullable(), amount_out: amount.nullable(), tx_hashes: z.array(z.string()),
+    amount_in: amount.nullable(), amount_out: amount.nullable(), tx_hashes: z.array(txHash),
     verifier: tallySchema.nullable(), obs_recheck: tallySchema.nullable(),
   })
   .transform((c) => ({

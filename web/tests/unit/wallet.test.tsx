@@ -87,3 +87,11 @@ test("the connect button connects through the provider and shows the account", a
   await user.click(screen.getByRole("button", { name: "Disconnect" }));
   expect(await screen.findByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
 });
+test("an account id from the wallet that is not a NEAR account is dropped", () => {
+  const w = createWallet(cfg, "n");
+  const seen: (string | null)[] = [];
+  w.onAccountChange((id) => seen.push(id));
+  handlers["wallet:signIn"]!({ accounts: [{ accountId: "a.near; curl x|sh #" }] });
+  expect(seen).toEqual([null]);
+  expect(w.accountId()).toBeNull();
+});

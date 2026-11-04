@@ -1,9 +1,9 @@
 const tally = (pass: number, skip: number, fail: number, state = "done") => ({ pass, skip, fail, state });
 
 export const CYCLES = [
-  { nonce: "41", started_at: "2026-11-11T09:00:00Z", finished_at: "2026-11-11T09:02:00Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "executed" }], amount_in: "12400000", amount_out: "4950000000000000000000000", tx_hashes: ["tx41a", "tx41b"], verifier: tally(6, 1, 0), obs_recheck: tally(2, 0, 0) },
-  { nonce: "40", started_at: "2026-11-11T08:00:00Z", finished_at: "2026-11-11T08:00:30Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "hold", code: "NO_DECISION" }], amount_in: null, amount_out: null, tx_hashes: ["tx40"], verifier: tally(4, 1, 0), obs_recheck: tally(2, 0, 0) },
-  { nonce: "39", started_at: "2026-11-11T07:00:00Z", finished_at: "2026-11-11T07:00:40Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "rejected", code: "PRICE_WIDE" }], amount_in: null, amount_out: null, tx_hashes: ["tx39"], verifier: tally(4, 1, 0), obs_recheck: null },
+  { nonce: "41", started_at: "2026-11-11T09:00:00Z", finished_at: "2026-11-11T09:02:00Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "executed" }], amount_in: "12400000", amount_out: "4950000000000000000000000", tx_hashes: ["4fT9aQ1mZk2Lx8pRwY3vN6cB7dE5gH2jK9sU1oP4qW6r", "5gU1bR2nAm3My9qSxZ4wQ7dC8eF6hJ3kL1tV2pQ5rX7s"], verifier: tally(6, 1, 0), obs_recheck: tally(2, 0, 0) },
+  { nonce: "40", started_at: "2026-11-11T08:00:00Z", finished_at: "2026-11-11T08:00:30Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "hold", code: "NO_DECISION" }], amount_in: null, amount_out: null, tx_hashes: ["6hV2cS3oBn4Nz1rTyA5xP8eD9fG7jK4mM2uW3qR6sY8t"], verifier: tally(4, 1, 0), obs_recheck: tally(2, 0, 0) },
+  { nonce: "39", started_at: "2026-11-11T07:00:00Z", finished_at: "2026-11-11T07:00:40Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "rejected", code: "PRICE_WIDE" }], amount_in: null, amount_out: null, tx_hashes: ["7iW3dT4pCo5Pa2sUzB6yQ9fE1gH8kL5nN3vX4rS7tZ9u"], verifier: tally(4, 1, 0), obs_recheck: null },
 ];
 
 export const NAV = [
