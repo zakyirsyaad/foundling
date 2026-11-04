@@ -161,6 +161,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test
         run: python3 -m unittest tests.test_attack_lab
+      - name: Test the sandbox attack runner and the make targets
+        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make
 
   keeper:
     name: Keeper bot
