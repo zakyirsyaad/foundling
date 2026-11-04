@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { "@": root } },
+  resolve: { alias: { "@foundling/wallet-mock": `${root}/lib/wallet/mock.ts`, "@": root } },
   test: {
     globals: true,
     setupFiles: ["./tests/setup.ts"],

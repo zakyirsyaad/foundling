@@ -7,6 +7,7 @@ import http from "node:http";
 import { handleApi } from "./api";
 import { handleOneClick } from "./oneclick";
 import { handleRpc } from "./rpc";
+import { handleTx } from "./tx";
 import { scenario } from "./scenarios";
 import { type Scenario, send } from "./state";
 
@@ -32,6 +33,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: current.name });
     }
     if (url.pathname === "/rpc") return handleRpc(res, current, body);
+    if (url.pathname === "/__tx") return handleTx(res, current, body);
     if (url.pathname.startsWith("/api/")) return handleApi(res, current, url);
     if (url.pathname.startsWith("/1click/")) return handleOneClick(res, current, url, body);
     if (url.pathname === "/") return send(res, 200, { ok: true });

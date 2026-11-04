@@ -307,6 +307,18 @@ jobs:
         run: npm run -w web typecheck
       - name: Unit tests with coverage
         run: npm run -w web test:coverage
+      - name: Production bundle has no mock wallet
+        env:
+          FOUNDLING_BUNDLE_CHECK: "1"
+          NEXT_PUBLIC_NETWORK: mainnet
+          NEXT_PUBLIC_VAULT_ID: foundling-vault.near
+          NEXT_PUBLIC_RPC_URLS: https://rpc.mainnet.fastnear.com
+        run: |
+          npm run -w web build
+          if grep -rq "__FOUNDLING_MOCK_WALLET__" web/.next; then
+            echo "::error::the mock wallet reached the production build"
+            exit 1
+          fi
       - name: Install the browser
         run: npx -w web playwright install --with-deps chromium
       - name: End-to-end tests

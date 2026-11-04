@@ -7,7 +7,9 @@ export const USDC = "usdc.foundling.testnet";
 export const WNEAR = "wrap.testnet";
 
 const decisions = Object.fromEntries([41, 40, 39].map((n) => [`published_decision:{"nonce":${n}}`, n === 40 ? null : `{"action":"buy","nonce":${n}}`]));
-const views = { ...vaultViews, ...decisions, published_decision: null, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };
+/** Defaults for any account the tests connect; a /__tx call overrides them per account. */
+const accountDefaults = { shares_of: "0", pending_of: "0", net_deposit_of: "0", claimable_of: "0", storage_balance_of: null, ft_balance_of: "50000000", is_allowed: true, bucket_claim: "0", bucket: null };
+const views = { ...vaultViews, ...accountDefaults, ...decisions, published_decision: null, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };
 
 function base(name: string): Scenario {
   return { name, views, perAccount: {}, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: { api: API_ROUTES } };

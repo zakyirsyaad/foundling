@@ -30,6 +30,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@foundling/wallet-mock": [
+        "./lib/wallet/mock.ts"
       ]
     }
   },
