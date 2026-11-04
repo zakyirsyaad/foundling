@@ -24,3 +24,12 @@ HACKATHON*.md
 .claude/
 spikes/
 .DS_Store
+
+# Web
+.next/
+web/test-results/
+web/playwright-report/
+web/coverage/
+*.tsbuildinfo
+next-env.d.ts
+.superpowers/

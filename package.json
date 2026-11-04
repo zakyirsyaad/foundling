@@ -1,0 +1,10 @@
+{
+  "name": "foundling",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "engines": {
+    "node": ">=24"
+  }
+}
