@@ -42,3 +42,18 @@ async fn setup_policy_the_vault_refuses_makes_init_fail_and_start_say_so() -> an
     assert!(started.is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn setup_policy_that_is_not_an_object_or_names_no_field_is_an_error() -> anyhow::Result<()> {
+    for policy in [json!(null), json!([1]), json!({"epoch_lenn": 600})] {
+        let started = Foundling::launch(Setup {
+            policy: policy.clone(),
+            ..Default::default()
+        })
+        .await;
+
+        let error = started.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains("Setup.policy"), "{policy}: {error:?}");
+    }
+    Ok(())
+}

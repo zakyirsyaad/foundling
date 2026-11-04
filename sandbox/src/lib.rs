@@ -197,10 +197,15 @@ impl Foundling {
             [&usdc, &wnear, &rhea, &oracle, &outlayer],
             setup.open_deposits,
         );
-        if let Some(overrides) = setup.policy.as_object() {
-            for (field, value) in overrides {
-                config["policy"][field] = value.clone();
-            }
+        let overrides = setup.policy.as_object().ok_or_else(|| {
+            anyhow::anyhow!("Setup.policy must be a JSON object, got {}", setup.policy)
+        })?;
+        for (field, value) in overrides {
+            anyhow::ensure!(
+                config["policy"].get(field).is_some(),
+                "Setup.policy names `{field}`, which is not a policy field"
+            );
+            config["policy"][field] = value.clone();
         }
         let init_args = serde_json::to_vec(&json!({ "config": config }))?;
         let init_result = parent
