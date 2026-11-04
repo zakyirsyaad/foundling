@@ -64,14 +64,23 @@ def find_script(attacks_dir, name):
     return None, False
 
 
-_state = {"stop": None}
+_state = {"stop": None, "spawning": False}
 
 
 def stop_on_signal(signum, frame):
     if _state["stop"]:
         return  # already stopping; a second signal must not cut the cleanup short
     _state["stop"] = Stopped("TERMINATED", 128 + signum)
-    raise _state["stop"]
+    if not _state["spawning"]:
+        raise _state["stop"]
+    # Popen has not returned, so there is no proc to kill yet; run_attack raises it.
+
+
+def pending_stop(name):
+    stop = _state["stop"]
+    if stop:
+        stop.name = name
+    return stop
 
 
 def kill_group(proc):
@@ -96,16 +105,22 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     if not executable:
         print(f"NOT_EXECUTABLE: {script} (chmod +x it)", file=sys.stderr)
         return 2, "ERROR"
+    _state["spawning"] = True
     try:
         # Own session so a timeout can kill the whole group, not just the script.
         with subprocess.Popen([str(script)], start_new_session=True) as proc:
             try:
+                _state["spawning"] = False
+                if stop := pending_stop(name):
+                    raise stop
                 code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 code = None
             finally:
                 kill_group(proc)
     except OSError as err:
+        if stop := pending_stop(name):
+            raise stop from None
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
     except KeyboardInterrupt:
@@ -113,6 +128,8 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     except Stopped as stop:
         stop.name = name
         raise
+    finally:
+        _state["spawning"] = False
     if code is None:
         print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"

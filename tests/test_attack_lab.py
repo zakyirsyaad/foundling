@@ -349,6 +349,16 @@ os.killpg = killpg
 """
 
 
+# Popen has forked and exec'd the script, but its constructor has not returned yet.
+SLOW_SPAWN = """
+real_execute_child = subprocess.Popen._execute_child
+def execute_child(self, *args, **kwargs):
+    real_execute_child(self, *args, **kwargs)
+    time.sleep(1.0)
+subprocess.Popen._execute_child = execute_child
+"""
+
+
 class AttackCleanupTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -479,6 +489,17 @@ class AttackCleanupTest(unittest.TestCase):
     def test_sighup_to_the_dispatcher_kills_the_running_attack(self):
         _, script, _ = self.stop_dispatcher_with(signal.SIGHUP)
         self.assert_dies(script, "attack kept running after the dispatcher got SIGHUP")
+
+    def test_signal_while_the_script_is_still_spawning_kills_it(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        proc = self.start(registry, "run", "hang", setup=SLOW_SPAWN)
+        script = self.pid_from(pidfile)
+        proc.send_signal(signal.SIGTERM)
+        stderr = self.finish(proc)
+        self.assert_dies(script, "attack kept running after SIGTERM arrived during Popen")
+        self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
+        self.assertEqual(proc.returncode, 128 + signal.SIGTERM)
 
     def test_second_signal_during_cleanup_does_not_abort_the_kill(self):
         registry = self.registry_of(["hang"])
