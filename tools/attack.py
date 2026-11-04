@@ -30,6 +30,14 @@ class BadRegistry(Exception):
     pass
 
 
+class Stopped(Exception):
+    """The operator or the OS stopped the run; the attack's group is already cleaned up."""
+
+    def __init__(self, label, code, name=None):
+        super().__init__(label)
+        self.label, self.code, self.name = label, code, name
+
+
 def load_registry(path):
     try:
         attacks = json.loads(Path(path).read_text())["attacks"]
@@ -90,6 +98,8 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     except OSError as err:
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
+    except KeyboardInterrupt:
+        raise Stopped("INTERRUPTED", 130, name) from None
     if code is None:
         print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"
@@ -144,9 +154,13 @@ def main(argv):
         for attack in registry:
             print(attack["name"])
         return 0
-    if args.cmd == "run-all":
-        return run_all(registry, args.attacks_dir, args.timeout, args.strict)
-    return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
+    try:
+        if args.cmd == "run-all":
+            return run_all(registry, args.attacks_dir, args.timeout, args.strict)
+        return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
+    except Stopped as stop:
+        print(f"{stop.label}: {stop.name}", file=sys.stderr)
+        return stop.code
 
 
 if __name__ == "__main__":

@@ -424,6 +424,19 @@ class AttackCleanupTest(unittest.TestCase):
         child = self.pid_from(pidfile)
         self.assert_dies(child, "child of a script that exited 0 is still running")
 
+    def test_ctrl_c_prints_one_line_naming_the_attack_and_exits_130(self):
+        registry = self.registry_of(["hang", "after"])
+        pidfile = self.make_hang()
+        marker = self.tmp / "after.ran"
+        make_script(self.attacks, "after", 0, body=f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+        proc = self.start(registry, "run-all")
+        self.pid_from(pidfile)
+        proc.send_signal(signal.SIGINT)
+        stderr = self.finish(proc)
+        self.assertEqual(proc.returncode, 130)
+        self.assertEqual(stderr.splitlines(), ["INTERRUPTED: hang"])
+        self.assertFalse(marker.exists(), "run-all went on to the next attack after Ctrl-C")
+
 
 if __name__ == "__main__":
     unittest.main()
