@@ -30,3 +30,9 @@ test("a test build allows the local mock and does not force https", () => {
   expect(csp).toContain("http://localhost:3199");
   expect(csp).not.toContain("upgrade-insecure-requests");
 });
+test("frame-src lets near-connect hand off to the wallet apps in the manifest", () => {
+  const csp = buildCsp(mainnet, "n", false);
+  const frame = csp.split("; ").find((d) => d.startsWith("frame-src"))!;
+  for (const scheme of ["hotwallet:", "intear:", "meteorwallet:", "near-mobile-wallet:", "intent:"]) expect(frame).toContain(scheme);
+  expect(frame).not.toContain("https:");
+});

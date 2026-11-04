@@ -319,7 +319,8 @@ jobs:
           NEXT_PUBLIC_RPC_URLS: https://rpc.mainnet.fastnear.com
         run: |
           npm run -w web build
-          if grep -rq "__FOUNDLING_MOCK_WALLET__" web/.next; then
+          # Strings that survive minification; the marker comment does not.
+          if grep -rq --exclude='*.map' -e "foundling.mock.account" -e "localhost:3199/__tx" web/.next/static web/.next/server; then
             echo "::error::the mock wallet reached the production build"
             exit 1
           fi

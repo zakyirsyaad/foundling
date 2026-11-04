@@ -20,6 +20,9 @@ export const WALLET_HOSTS = [
   "https://wallet.near.org",
 ] as const;
 
+/** Custom schemes the default manifest's executors open through a hidden iframe (open.nativeApp). */
+export const WALLET_APP_SCHEMES = ["hotwallet:", "intear:", "meteorwallet:", "near-mobile-wallet:", "intent:"] as const;
+
 const origin = (url: string) => new URL(url).origin;
 
 export function buildCsp(cfg: DeploymentConfig, nonce: string, dev: boolean): string {
@@ -34,7 +37,7 @@ export function buildCsp(cfg: DeploymentConfig, nonce: string, dev: boolean): st
     "img-src 'self' data: blob: https:",
     "font-src 'self'",
     `connect-src ${[...connect].join(" ")}`,
-    "frame-src 'self'",
+    `frame-src 'self' ${WALLET_APP_SCHEMES.join(" ")}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

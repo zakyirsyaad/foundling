@@ -3,6 +3,7 @@
 import { type ReactNode, createContext, useContext, useEffect, useState } from "react";
 
 import { config } from "@/config";
+import { pageNonce } from "./nonce";
 import type { WalletApi } from "./types";
 
 interface WalletState {
@@ -19,7 +20,7 @@ async function load(nonce: string): Promise<WalletApi> {
     return createMockWallet();
   }
   const { createWallet } = await import("./connector");
-  return createWallet(config, nonce);
+  return createWallet(config, pageNonce(nonce));
 }
 
 export function WalletProvider({ nonce, children }: { nonce: string; children: ReactNode }) {

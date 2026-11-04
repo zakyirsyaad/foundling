@@ -34,3 +34,4 @@ web/coverage/
 next-env.d.ts
 .superpowers/
 .next-mainnet/
+.next-prodcheck/
