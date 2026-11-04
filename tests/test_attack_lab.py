@@ -343,6 +343,7 @@ sys.exit(attack.main(sys.argv[1:]))
 SLOW_KILLPG = """
 real_killpg = os.killpg
 def killpg(pgid, sig):
+    print("killing", flush=True)
     time.sleep(1.0)
     real_killpg(pgid, sig)
 os.killpg = killpg
@@ -412,6 +413,13 @@ class AttackCleanupTest(unittest.TestCase):
                 return pid
             time.sleep(0.1)
         self.fail(f"{pidfile.name} was never written")
+
+    def wait_for_output(self, text):
+        for _ in range(100):
+            if text in (self.tmp / "out.txt").read_text():
+                return
+            time.sleep(0.1)
+        self.fail(f"dispatcher never printed {text!r}")
 
     def assert_dies(self, pid, message):
         for _ in range(30):
@@ -562,6 +570,17 @@ class AttackCleanupTest(unittest.TestCase):
         time.sleep(0.5)
         self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
         self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
+
+    def test_first_signal_during_cleanup_does_not_abort_the_kill(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        proc = self.start(registry, "run", "hang", "--timeout", "1", setup=SLOW_KILLPG)
+        script = self.pid_from(pidfile)
+        self.wait_for_output("killing")
+        proc.send_signal(signal.SIGTERM)
+        stderr = self.finish(proc)
+        self.assert_dies(script, "a signal during the timeout cleanup left the attack running")
+        self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
 
     def test_second_signal_during_cleanup_does_not_abort_the_kill(self):
         registry = self.registry_of(["hang"])

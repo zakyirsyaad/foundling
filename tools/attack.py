@@ -74,16 +74,16 @@ STOP_SIGNALS = {
     signal.SIGTERM: "TERMINATED",
     signal.SIGHUP: "TERMINATED",
 }
-_state = {"stop": None, "spawning": False}
+_state = {"stop": None, "deferring": False}
 
 
 def stop_on_signal(signum, frame):
     if _state["stop"]:
         return  # already stopping; a second signal must not cut the cleanup short
     _state["stop"] = Stopped(STOP_SIGNALS[signum], 128 + signum)
-    if not _state["spawning"]:
+    if not _state["deferring"]:
         raise _state["stop"]
-    # Popen has not returned, so there is no proc to kill yet; run_attack raises it.
+    # Popen or kill_group is mid-flight; run_attack and kill_group raise it afterwards.
 
 
 def pending_stop(name):
@@ -95,12 +95,18 @@ def pending_stop(name):
 
 def kill_group(proc):
     """SIGKILL the script's whole process group, then reap the script."""
+    _state["deferring"] = True
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        # Gone already; macOS reports a group of zombies as PermissionError.
-        pass
-    proc.wait()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            # Gone already; macOS reports a group of zombies as PermissionError.
+            pass
+        proc.wait()
+    finally:
+        _state["deferring"] = False
+    if _state["stop"]:
+        raise _state["stop"]
 
 
 def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
@@ -115,12 +121,12 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     if not executable:
         print(f"NOT_EXECUTABLE: {script} (chmod +x it)", file=sys.stderr)
         return 2, "ERROR"
-    _state["spawning"] = True
+    _state["deferring"] = True
     try:
         # Own session so a timeout can kill the whole group, not just the script.
         with subprocess.Popen([str(script)], start_new_session=True) as proc:
             try:
-                _state["spawning"] = False
+                _state["deferring"] = False
                 if stop := pending_stop(name):
                     raise stop
                 code = proc.wait(timeout=timeout)
@@ -137,7 +143,7 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
         stop.name = name
         raise
     finally:
-        _state["spawning"] = False
+        _state["deferring"] = False
     if code is None:
         print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"
