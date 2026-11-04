@@ -146,18 +146,28 @@ async fn wallet_of_vault(
         .await
 }
 
-/// Everything a trade would move: the books, shares, Ref's ledger, the vault's wallets and the
-/// two turnover windows. The stage is left out because a cycle changes it legitimately.
-async fn ledger(env: &Foundling) -> anyhow::Result<Value> {
+/// What a trade would move: the books, shares, Ref's ledger and the vault's wallets. The stage
+/// is left out because a cycle changes it legitimately.
+async fn balances(env: &Foundling) -> anyhow::Result<Value> {
     Ok(json!({
         "book": env.view_vault::<Value>("book", json!({})).await?,
         "total_shares": env.view_vault::<String>("total_shares", json!({})).await?,
         "rhea_book": env.view_vault::<Value>("rhea_book", json!({})).await?,
         "wallet_usdc": wallet_of_vault(env, &env.usdc).await?,
         "wallet_wnear": wallet_of_vault(env, &env.wnear).await?,
-        "window_usdc": env.view_vault::<String>("window_used", json!({"token_in": "Usdc"})).await?,
-        "window_wnear": env.view_vault::<String>("window_used", json!({"token_in": "Wnear"})).await?,
     }))
+}
+
+/// `balances` plus the two turnover windows. The windows empty by themselves as the clock moves,
+/// so only compare this across a span shorter than `epoch_len`.
+async fn ledger(env: &Foundling) -> anyhow::Result<Value> {
+    let mut ledger = balances(env).await?;
+    for (field, token) in [("window_usdc", "Usdc"), ("window_wnear", "Wnear")] {
+        ledger[field] = env
+            .view_vault::<Value>("window_used", json!({"token_in": token}))
+            .await?;
+    }
+    Ok(ledger)
 }
 
 /// A hold cycle: it mints the queued deposit and trades nothing, so the next ledger is the
@@ -323,6 +333,129 @@ async fn over_cap() -> anyhow::Result<()> {
     );
 
     run.finish(before, after_one_over)
+}
+
+/// Which of `codes` a refused call names, for a method that refuses by panicking.
+fn refusal<'a>(text: &Option<String>, codes: &[&'a str]) -> Option<&'a str> {
+    let text = text.as_deref()?;
+    codes.iter().copied().find(|code| text.contains(code))
+}
+
+fn refused_text(result: &near_workspaces::result::ExecutionFinalResult) -> Option<String> {
+    result.is_failure().then(|| failures(result))
+}
+
+/// Decision v1 is bound to one vault and one nonce, and every run of the mock OutLayer can be
+/// told to answer with another's. None of these may reach the book.
+#[tokio::test]
+async fn replay() -> anyhow::Result<()> {
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new(
+        "replay",
+        &["NONCE_MISMATCH", "EXPIRED", "FROZEN", "CycleFailed"],
+    );
+    let before = settle_deposit(&env).await?;
+
+    let spent = decide(&env, template("buy_risk", 1_000_000)).await?;
+    let after_trade = balances(&env).await?;
+    run.step(
+        "setup: a real buy executes, which spends its nonce",
+        spent.started,
+        None,
+        json!({"nonce": spent.nonce}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let mut old = template("buy_risk", 1_000_000);
+    old["nonce"] = json!(spent.nonce);
+    let replayed = decide(&env, old).await?;
+    run.step(
+        "the spent decision, replayed with its old nonce",
+        replayed.failed.as_deref() == Some("NONCE_MISMATCH")
+            && !replayed.started
+            && balances(&env).await? == after_trade,
+        replayed.failed.as_deref(),
+        json!({"replayed_nonce": spent.nonce, "cycle_nonce": replayed.nonce, "stage": stage(&env).await?}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let mut foreign = template("buy_risk", 1_000_000);
+    foreign["vault"] = json!("other-vault.test.near");
+    let other_vault = decide(&env, foreign).await?;
+    run.step(
+        "a decision made for another vault",
+        other_vault.failed.as_deref() == Some("NONCE_MISMATCH")
+            && !other_vault.started
+            && balances(&env).await? == after_trade,
+        other_vault.failed.as_deref(),
+        json!({"cycle_nonce": other_vault.nonce}),
+    );
+
+    let stale = refused_text(&execute(&env, spent.nonce).await?);
+    run.step(
+        "execute_decision on a nonce that already ran",
+        refusal(&stale, &["NOT_READY"]).is_some() && balances(&env).await? == after_trade,
+        refusal(&stale, &["NOT_READY"]),
+        json!({"nonce": spent.nonce}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let nothing = cycle(&env, json!("Null")).await?;
+    run.step(
+        "OutLayer answers null",
+        nothing.failed.as_deref() == Some("NULL_RESULT")
+            && !nothing.started
+            && balances(&env).await? == after_trade,
+        nothing.failed.as_deref(),
+        json!({"event": "cycle_failed"}),
+    );
+
+    // A good decision that waits past `decision_ttl` (600 s) before the keeper acts on it.
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    env.set_next(json!({"Decision": {"template": template("buy_risk", 1_000_000)}}))
+        .await?;
+    let late = env.trigger_cycle().await?;
+    anyhow::ensure!(late.is_success(), "{}", failures(&late));
+    let late_nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
+    wait_seconds(&env, 601).await?;
+    let expired = refused_text(&execute(&env, late_nonce).await?);
+    let cleared = env
+        .call_vault(&env.stranger, "expire_decision", json!({}))
+        .await?;
+    run.step(
+        "execute_decision after the decision expired, then anyone clears it",
+        refusal(&expired, &["EXPIRED"]).is_some()
+            && code_of(event_data(&cleared, "cycle_failed")).as_deref() == Some("EXPIRED")
+            && stage(&env).await? == json!("Idle")
+            && balances(&env).await? == after_trade,
+        refusal(&expired, &["EXPIRED"]),
+        json!({"nonce": late_nonce}),
+    );
+
+    // The guardian freezes between the decision and the keeper's call. A freeze cannot land
+    // between `trigger_cycle` and `on_decision` here because the mock answers in one transaction.
+    env.set_next(json!({"Decision": {"template": template("buy_risk", 1_000_000)}}))
+        .await?;
+    let ready = env.trigger_cycle().await?;
+    anyhow::ensure!(ready.is_success(), "{}", failures(&ready));
+    let frozen_nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
+    let frozen = env.call_vault(&env.guardian, "freeze", json!({})).await?;
+    anyhow::ensure!(frozen.is_success(), "{}", failures(&frozen));
+    let blocked = execute(&env, frozen_nonce).await?;
+    let blocked_text = refused_text(&blocked);
+    let traded = events(&blocked)
+        .iter()
+        .any(|e| e["event"] == "swap_started");
+    run.step(
+        "a decision ready when the guardian freezes",
+        refusal(&blocked_text, &["FROZEN"]).is_some()
+            && !traded
+            && balances(&env).await? == after_trade,
+        refusal(&blocked_text, &["FROZEN"]),
+        json!({"nonce": frozen_nonce}),
+    );
+
+    run.finish(before, balances(&env).await?)
 }
 
 async fn window_usdc(env: &Foundling) -> anyhow::Result<u128> {
