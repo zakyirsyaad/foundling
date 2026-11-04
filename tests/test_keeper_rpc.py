@@ -90,6 +90,18 @@ class RequestShapeTest(unittest.TestCase):
         self.assertEqual(params["method_name"], "stage")
         self.assertEqual(json.loads(base64.b64decode(params["args_base64"])), {"a": 1})
 
+    def test_a_view_can_be_pinned_to_a_block_height(self):
+        transport = Transport(view_result("Idle"))
+        self.client(transport).view("vault.test", "stage", block_id=4242)
+        params = transport.payloads[0]["params"]
+        self.assertEqual(params["block_id"], 4242)
+        self.assertNotIn("finality", params)
+
+    def test_a_node_that_lacks_the_pinned_block_is_retried_on_the_next_endpoint(self):
+        transport = Transport(rpc_error("UNKNOWN_BLOCK"), view_result("Idle"))
+        self.assertEqual(self.client(transport).view("v", "stage", block_id=9), "Idle")
+        self.assertEqual(transport.urls, [A, B])
+
     def test_block_returns_height_and_seconds(self):
         header = {"header": {"height": 77, "timestamp": 1_700_000_005_900_000_000}}
         transport = Transport(ok(header))

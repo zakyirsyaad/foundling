@@ -35,13 +35,19 @@ class World:
         self.keeper = KEEPER
         self.policy = {
             "cooldown": 60, "stuck_after": 120, "abort_after_blocks": 450,
-            "decision_ttl": 600, "price_max_age": 120, **policy,
+            "decision_ttl": 600, "price_max_age": 120, "ops_budget": str(10**9), **policy,
         }
+        self.ops_spent = 0
+        self.force_panic = {}  # method -> reason, for failures the model does not know
+        self.outlayer_deposit = 50
+        self.stale_stage = []  # values the next `stage` views return instead of the truth
+        self.stale_blocks = []  # (height, time) pairs the next `block` calls return
+        self.view_log = []  # (account, method, block_id)
         self.feeds = {NEAR_ID: True, USDC_ID: True}
         self.trigger_result = "ready"  # ready | hold | null | never
         self.decision_delay = 10
         self.execute_script = []  # PRICE_UNAVAILABLE | REJECT:<code> | EXECUTED | STUCK
-        self.advance_effective = True
+        self.advance_mode = "success"  # success | noop | stay_stuck
         self.calls = []  # dicts: t, method, args, gas, ok, error, hash
         self.logs = {}
         self.timeline = []
@@ -87,12 +93,17 @@ class World:
 
     # rpc side ---------------------------------------------------------------------------
     def block(self):
+        if self.stale_blocks:
+            return self.stale_blocks.pop(0)
         return self.height, int(self.now)
 
     def tx_logs(self, tx_hash, signer):
         return list(self.logs[tx_hash])
 
-    def view(self, account, method, args=None):
+    def view(self, account, method, args=None, block_id=None):
+        self.view_log.append((account, method, block_id))
+        if method == "stage" and self.stale_stage:
+            return self.stale_stage.pop(0)
         if account == ORACLE and method == "list_prices_no_older_than":
             return {i: ({"price": "1", "conf": "0", "expo": -8, "publish_time": int(self.now)}
                         if self.feeds.get(i) else None) for i in args["price_ids"]}
@@ -104,6 +115,8 @@ class World:
             "policy": lambda: dict(self.policy),
             "is_frozen": lambda: self.frozen,
             "is_halted": lambda: self.halted,
+            "ops_spent": lambda: str(self.ops_spent),
+            "agent": lambda: {"outlayer_deposit": str(self.outlayer_deposit)},
             "oracle": lambda: {"account": ORACLE, "near_id": NEAR_ID, "usdc_id": USDC_ID},
             "roles": lambda: {"governor": "gov.test", "keeper": self.keeper, "guardian": "guard.test"},
         }
@@ -134,6 +147,8 @@ class World:
         self.logs[tx_hash].append(event_line(name, **data))
 
     def _enter(self, method, args, gas):
+        if method in self.force_panic:
+            raise Panic(self.force_panic[method])
         if gas < GAS_FLOORS.get(method, 0):
             raise Panic("LOW_GAS")
         return getattr(self, "_" + method)(args)
@@ -147,7 +162,10 @@ class World:
             raise Panic("HALTED")
         if self.last_trigger and self.now < self.last_trigger + self.policy["cooldown"]:
             raise Panic("COOLDOWN")
+        if self.ops_spent + self.outlayer_deposit > int(self.policy["ops_budget"]):
+            raise Panic("OPS_BUDGET")
         tx = self._new_tx()
+        self.ops_spent += self.outlayer_deposit
         self.last_trigger = self.now
         self.last_nonce += 1
         nonce = self.last_nonce
@@ -215,14 +233,21 @@ class World:
         if not eligible or fields.get("nonce") != nonce:
             raise Panic("NOT_STUCK")
         tx = self._new_tx()
-        if self.advance_effective:
+        if self.advance_mode != "noop":
             attempt = fields.get("attempt", 0) + 1
             self.stage = {"Probing": {"nonce": nonce, "step": fields.get("step", "Swap"),
                                       "attempt": attempt, "stuck_since": int(self.now),
                                       "entered_at": int(self.now)}}
             self._emit(tx, "probing", nonce=nonce, attempt=attempt)
 
+            since = fields.get("since", fields.get("stuck_since", int(self.now)))
+
             def finish():
+                if self.advance_mode == "stay_stuck":
+                    self._emit(tx, "stuck", nonce=nonce, step="Swap")
+                    self.stage = {"Stuck": {"nonce": nonce, "step": "Swap", "attempt": attempt,
+                                            "since": since}}
+                    return
                 self._emit(tx, "executed", nonce=nonce, amount_in="1", amount_out="1")
                 self.stage = "Idle"
 

@@ -114,7 +114,7 @@ class ExecuteTest(unittest.TestCase):
 class RecoveryTest(unittest.TestCase):
     def test_calls_advance_when_stuck_past_threshold(self):
         world = World(stuck_after=120)
-        world.advance_effective = False
+        world.advance_mode = "noop"
         world.set_stage("Swapping", nonce=7, attempt=0, entered_at=int(world.now))
         bot = make_bot(world)
         drive(bot, world, 100)
@@ -201,15 +201,127 @@ class CycleLogTest(unittest.TestCase):
         self.assertEqual(cycle["txs"][0]["hash"], "TX1")
         self.assertEqual(len(world.methods("trigger_cycle")), 1)
 
-    def test_a_failed_call_is_logged_and_not_hammered(self):
+    def test_a_cooldown_panic_backs_off_a_full_cooldown(self):
         world = World(cooldown=3600)
         world.last_trigger = world.now - 10  # a trigger the bot cannot know about
         log = ListLog()
+        drive(make_bot(world, log=log, retry_interval=30), world, 600)
+        self.assertEqual(len([c for c in world.calls if not c["ok"]]), 1, "not retried every 30 s")
+        (failure,) = log.of("call_failed")
+        self.assertIn("COOLDOWN", failure["error"])
+
+    def test_other_failed_calls_retry_once_per_interval(self):
+        world = World(cooldown=60)
+        world.force_panic["trigger_cycle"] = "SOME_NEW_REASON"
+        log = ListLog()
         drive(make_bot(world, log=log, retry_interval=30), world, 60)
-        failed = [c for c in world.calls if not c["ok"]]
-        self.assertEqual(len(failed), 2, "one attempt per retry interval")
+        self.assertEqual(len([c for c in world.calls if not c["ok"]]), 2)
         self.assertEqual(len(log.of("call_failed")), 2)
-        self.assertIn("COOLDOWN", log.of("call_failed")[0]["error"])
+
+    def test_a_resumed_cycle_starts_the_cooldown(self):
+        world = World(cooldown=60)
+        world.set_stage("AwaitingDecision", nonce=1, entered_block=world.height)
+        world.at(10, lambda: setattr(world, "stage", "Idle"))
+        bot = make_bot(world)
+        drive(bot, world, 50)
+        self.assertEqual(world.methods("trigger_cycle"), [])
+        drive(bot, world, 40)
+        self.assertEqual(len(world.methods("trigger_cycle")), 1)
+        self.assertTrue(world.methods("trigger_cycle")[0]["ok"])
+
+    def test_a_stale_idle_read_does_not_close_a_cycle_that_just_started(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        world.decision_delay = 30
+        log = ListLog()
+        bot = make_bot(world, log=log)
+        bot.tick()
+        world.stale_stage = ["Idle"]
+        drive(bot, world, 60)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["resumed"]), ("Hold", False))
+        self.assertEqual(cycle["txs"][0]["hash"], "TX1")
+
+    def test_a_block_older_than_one_already_seen_skips_the_tick(self):
+        world = World()
+        world.set_stage("Swapping", nonce=7, attempt=0, entered_at=int(world.now))
+        bot = make_bot(world)
+        bot.tick()
+        world.stale_blocks = [(world.height - 50, int(world.now) - 50)]
+        calls_before = len(world.view_log)
+        self.assertEqual(bot.tick(), "stale")
+        self.assertEqual(world.view_log[calls_before:], [], "no view is read at a stale height")
+
+    def test_views_are_pinned_to_the_block_the_tick_started_from(self):
+        world = World()
+        bot = make_bot(world)
+        world.view_log.clear()
+        bot.tick()
+        stage_reads = [entry for entry in world.view_log if entry[1] == "stage"]
+        self.assertEqual([entry[2] for entry in stage_reads], [world.height])
+
+    def test_a_cycle_replaced_by_another_is_closed_as_unobserved(self):
+        world = World()
+        world.set_stage("Swapping", nonce=2, attempt=0, entered_at=int(world.now))
+        store = MemoryStore({"vault": VAULT, "last_trigger": 0, "cycle": {
+            "nonce": 1, "started": world.now - 99, "txs": [], "stages": [], "resumed": False}})
+        log = ListLog()
+        make_bot(world, store=store, log=log).tick()
+        self.assertEqual(log.of("cycle")[0]["final_stage"], "Unobserved")
+
+    def test_state_saved_for_another_vault_is_ignored(self):
+        world = World()
+        store = MemoryStore({"vault": "other.test", "last_trigger": 5, "cycle": {
+            "nonce": 9, "started": 0, "txs": [], "stages": [], "resumed": False}})
+        bot = make_bot(world, store=store)
+        self.assertIsNone(bot.state["cycle"])
+        self.assertEqual(bot.state["last_trigger"], 0)
+
+    def test_a_skipped_check_is_not_repeated_every_tick(self):
+        world = World()
+        world.null_feed(NEAR_ID)
+        drive(make_bot(world), world, 60)
+        oracle_reads = [e for e in world.view_log if e[1] == "list_prices_no_older_than"]
+        self.assertLessEqual(len(oracle_reads), 5)
+
+
+class OpsBudgetTest(unittest.TestCase):
+    def test_does_not_trigger_when_the_ops_budget_would_be_exceeded(self):
+        world = World(ops_budget="100")
+        world.ops_spent = 60  # 60 + 50 per cycle > 100
+        log = ListLog()
+        bot = make_bot(world, log=log)
+        drive(bot, world, 30)
+        self.assertEqual(world.methods("trigger_cycle"), [])
+        self.assertEqual(log.of("skip")[0]["reason"], "ops_budget")
+        world.ops_spent = 0
+        drive(bot, world, 30)
+        self.assertEqual(len(world.methods("trigger_cycle")), 1)
+
+
+class AdvanceWindowTest(unittest.TestCase):
+    def test_advance_stays_throttled_when_every_probe_ends_back_in_stuck(self):
+        world = World(stuck_after=600)
+        world.advance_mode = "stay_stuck"
+        world.set_stage("Stuck", nonce=3, step="Swap", attempt=0, since=int(world.now) - 5)
+        drive(make_bot(world), world, 1800)
+        sent = world.methods("advance")
+        self.assertTrue(2 <= len(sent) <= 4, [c["t"] for c in sent])
+        gaps = [b["t"] - a["t"] for a, b in zip(sent, sent[1:])]
+        self.assertTrue(all(gap >= 600 for gap in gaps), gaps)
+
+
+class PriceOutageTest(unittest.TestCase):
+    def test_a_price_outage_until_expiry_is_recorded_as_such(self):
+        world = World(cooldown=3600)
+        world.at(5, world.null_feed)
+        log = ListLog()
+        drive(make_bot(world, log=log), world, 900)
+        self.assertEqual(world.methods("execute_decision"), [])
+        self.assertEqual(len(world.methods("expire_decision")), 1)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["code"]), ("CycleFailed", "EXPIRED"))
+        self.assertGreater(cycle["price_skips"], 0)
 
 
 class ConfigTest(unittest.TestCase):

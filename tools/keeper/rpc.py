@@ -52,10 +52,13 @@ class RpcClient:
                     self.sleep(min(self.base_delay * 2**attempt, self.max_delay))
         raise RpcError(f"{method} failed after {self.attempts} attempts: {last}")
 
-    def view(self, account, method, args=None):
+    def view(self, account, method, args=None, block_id=None):
+        """`block_id` pins the read to a height: a node that has not reached it errors and the
+        call retries on the next endpoint, so two reads in one tick cannot straddle blocks."""
         raw = json.dumps(args or {}).encode()
+        at = {"finality": "final"} if block_id is None else {"block_id": block_id}
         result = self.call("query", {
-            "request_type": "call_function", "finality": "final", "account_id": account,
+            "request_type": "call_function", **at, "account_id": account,
             "method_name": method, "args_base64": base64.b64encode(raw).decode(),
         })
         if "error" in result:

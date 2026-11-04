@@ -24,6 +24,7 @@ EVENT_PREFIX = "EVENT_JSON:"
 COOLDOWN_MARGIN = 2
 NOTE_EVERY = 600
 NONCE_POLL = 2
+SETTLE_GRACE = 30  # an Idle read with no stage seen yet is not trusted for this long after a trigger
 MAX_CLOSE_TRIES = 3
 MAX_CONSECUTIVE_ERRORS = 100
 
@@ -44,6 +45,7 @@ class Config:
     gas_advance: int = 150
     gas_light: int = 50  # abort_stale_cycle and expire_decision have no gas minimum
     retry_interval: int = 30
+    skip_interval: int = 15
     nonce_wait: int = 60
     policy_ttl: int = 60
 
@@ -105,8 +107,13 @@ class Bot:
         self.config, self.rpc, self.near = config, rpc, near
         self.sleep, self.clock, self.log, self.store = sleep, clock, log, store
         saved = store.load()
-        self.state = {"last_trigger": saved.get("last_trigger", 0), "cycle": saved.get("cycle")}
+        if saved.get("vault") != config.vault:
+            saved = {}  # state written for another vault says nothing about this one
+        self.state = {"vault": config.vault, "last_trigger": saved.get("last_trigger", 0),
+                      "cycle": saved.get("cycle")}
         self.errors = 0
+        self._height = 0
+        self._deposit = 0
         self._oracle = None
         self._policy = None
         self._policy_at = 0.0
@@ -119,6 +126,7 @@ class Bot:
         if roles["keeper"] != self.config.keeper_account:
             raise ConfigError(f"the vault's keeper is {roles['keeper']}, not {self.config.keeper_account}")
         self._oracle = self.rpc.view(self.config.vault, "oracle")
+        self._deposit = int(self.rpc.view(self.config.vault, "agent")["outlayer_deposit"])
         self._get_policy(force=True)
 
     def run(self, stop=lambda: False):
@@ -141,8 +149,11 @@ class Bot:
 
     def _tick(self):
         height, now = self.rpc.block()
-        stage = parse_stage(self.rpc.view(self.config.vault, "stage"))
-        self._track(stage)
+        if height < self._height:
+            return "stale"  # this node is behind one already heard from
+        self._height = height
+        stage = parse_stage(self._read("stage"))
+        self._track(stage, now)
         policy = self._get_policy()
         if stage.kind == "Idle":
             return self._idle(now, policy)
@@ -158,17 +169,24 @@ class Bot:
 
     # stages ------------------------------------------------------------------------------
     def _idle(self, now, policy):
-        if self.state["cycle"]:
-            return self._close("Idle")
+        cycle = self.state["cycle"]
+        if cycle:
+            # A node that has not seen the trigger yet also reads Idle.
+            if cycle["stages"] or self.clock() >= cycle["started"] + SETTLE_GRACE:
+                return self._close("Idle")
+            return "wait"
         if now < self.state["last_trigger"] + policy["cooldown"] + COOLDOWN_MARGIN:
             return "wait"
-        if not self._due(("trigger",), now):
+        key = ("trigger",)
+        if not self._due(key, now):
             return "wait"
         for flag, view in (("frozen", "is_frozen"), ("halted", "is_halted")):
-            if self.rpc.view(self.config.vault, view):
-                return self._note("skip", flag)
+            if self._read(view):
+                return self._skip(flag, key, now)
+        if int(self._read("ops_spent")) + self._deposit > int(policy["ops_budget"]):
+            return self._skip("ops_budget", key, now)
         if not self._prices_ok(policy):
-            return self._note("skip", "price_null")
+            return self._skip("price_null", key, now)
         return self._trigger(now)
 
     def _awaiting(self, stage, height, now, policy):
@@ -191,16 +209,21 @@ class Bot:
         if not self._due(key, now):
             return "wait"
         for flag, view in (("frozen", "is_frozen"), ("halted", "is_halted")):
-            if self.rpc.view(self.config.vault, view):
-                return self._note("skip", flag)
+            if self._read(view):
+                return self._skip(flag, key, now)
         if not self._prices_ok(self._get_policy()):
-            return self._note("skip", "price_null")
+            if self.state["cycle"]:
+                self.state["cycle"]["price_skips"] = self.state["cycle"].get("price_skips", 0) + 1
+                self._save()
+            return self._skip("price_null", key, now)
         self._send("execute_decision", {"nonce": nonce}, self.config.gas_execute, key, now,
                    self.config.retry_interval)
         return "execute"
 
     def _advance(self, stage, now, policy, since):
-        key = ("advance", stage.kind, stage.nonce, stage.fields.get("attempt"), since)
+        # Not the attempt: a failed probe lands in Stuck again with attempt + 1 and the same
+        # since, and that is the same window.
+        key = ("advance", stage.nonce, since)
         if not self._due(key, now):
             return "wait"
         self._send("advance", {"nonce": stage.nonce}, self.config.gas_advance, key, now,
@@ -216,15 +239,21 @@ class Bot:
         maybe_landed = (result.error or "").startswith("timeout")
         if not result.ok and not maybe_landed:
             self._call_failed("trigger_cycle", {}, result)
+            if "COOLDOWN" in (result.error or ""):
+                # A trigger the bot did not see: wait one whole cooldown from here.
+                self.state["last_trigger"] = now
+                self._save()
             return "trigger_failed"
         nonce = self._wait_for_nonce(before)
         if nonce is None:
             self._call_failed("trigger_cycle", {}, result, "last_nonce did not move")
             return "trigger_failed"
-        self.state["last_trigger"] = self.rpc.block()[1]
+        height, seen_at = self.rpc.block()
+        self._height = max(self._height, height)
+        self.state["last_trigger"] = max(seen_at, now)
         txs = [{"method": "trigger_cycle", "hash": result.tx_hash}] if result.tx_hash else []
         self.state["cycle"] = {"nonce": nonce, "started": started, "txs": txs, "stages": [],
-                               "resumed": False}
+                               "resumed": False, "price_skips": 0}
         self._save()
         return "trigger"
 
@@ -253,16 +282,18 @@ class Bot:
                         "args": args, "error": reason or result.error})
 
     # cycle bookkeeping ---------------------------------------------------------------------
-    def _track(self, stage):
+    def _track(self, stage, now):
         if stage.kind == "Idle":
             return
         cycle = self.state["cycle"]
         if cycle and cycle["nonce"] != stage.nonce:
-            self._close(stage.kind)
+            self._close("Unobserved")
             cycle = None
         if not cycle:
+            # Someone else's trigger, or one this bot lost track of: its cooldown still runs.
+            self.state["last_trigger"] = max(self.state["last_trigger"], now)
             cycle = self.state["cycle"] = {"nonce": stage.nonce, "started": self.clock(), "txs": [],
-                                           "stages": [], "resumed": True}
+                                           "stages": [], "resumed": True, "price_skips": 0}
         if stage.kind not in cycle["stages"]:
             cycle["stages"].append(stage.kind)
             self._save()
@@ -287,7 +318,8 @@ class Bot:
             "started_at": iso(cycle["started"]), "ended_at": iso(ended),
             "stages_seen": cycle["stages"],
             "stuck": outcome["stuck"] or "Stuck" in cycle["stages"],
-            "price_retries": outcome["price_retries"], "resumed": cycle["resumed"],
+            "price_retries": outcome["price_retries"], "price_skips": cycle.get("price_skips", 0),
+            "resumed": cycle["resumed"],
         })
         self.state["cycle"] = None
         self._next_try.clear()
@@ -295,23 +327,31 @@ class Bot:
         return "closed"
 
     # reads -------------------------------------------------------------------------------
+    def _read(self, method, args=None, account=None):
+        return self.rpc.view(account or self.config.vault, method, args, block_id=self._height or None)
+
     def _get_policy(self, force=False):
         wall = self.clock()
         if force or self._policy is None or wall - self._policy_at >= self.config.policy_ttl:
-            self._policy = self.rpc.view(self.config.vault, "policy")
+            self._policy = self._read("policy")
             self._policy_at = wall
         return self._policy
 
     def _prices_ok(self, policy):
         ids = [self._oracle["near_id"], self._oracle["usdc_id"]]
         try:
-            feeds = self.rpc.view(self._oracle["account"], "list_prices_no_older_than",
-                                  {"price_ids": ids, "age": policy["price_max_age"]})
+            feeds = self._read("list_prices_no_older_than",
+                               {"price_ids": ids, "age": policy["price_max_age"]},
+                               account=self._oracle["account"])
         except ViewError:
             return False
         return all(feeds.get(feed_id) is not None for feed_id in ids)
 
     # small helpers -------------------------------------------------------------------------
+    def _skip(self, reason, key, now):
+        self._next_try[key] = now + self.config.skip_interval
+        return self._note("skip", reason)
+
     def _due(self, key, now):
         return now >= self._next_try.get(key, 0)
 
