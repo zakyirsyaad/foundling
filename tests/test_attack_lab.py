@@ -409,6 +409,21 @@ class AttackCleanupTest(unittest.TestCase):
                 self.assertNotIn("cannot run", stderr)
                 self.assertFalse(marker.exists(), "run-all went on to the next attack after Ctrl-C")
 
+    def test_child_left_behind_by_a_script_that_exits_0_is_killed(self):
+        registry = self.registry_of(["leaver"])
+        pidfile = self.tmp / "child.pid"
+        make_script(
+            self.attacks,
+            "leaver",
+            0,
+            body=f"#!/bin/sh\nsleep 29 >/dev/null 2>&1 &\necho $! > {pidfile}\nexit 0\n",
+        )
+        proc = self.start(registry, "run", "leaver")
+        self.finish(proc)
+        self.assertEqual(proc.returncode, 0)
+        child = self.pid_from(pidfile)
+        self.assert_dies(child, "child of a script that exited 0 is still running")
+
 
 if __name__ == "__main__":
     unittest.main()

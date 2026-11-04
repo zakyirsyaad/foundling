@@ -84,14 +84,14 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
             try:
                 code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
+                code = None
+            finally:
                 kill_group(proc)
-                print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
-                return 2, "ERROR"
-            except KeyboardInterrupt:
-                kill_group(proc)
-                raise
     except OSError as err:
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
+        return 2, "ERROR"
+    if code is None:
+        print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"
     status = {0: "PASS", 1: "FAIL"}.get(code, "ERROR")
     return {"PASS": 0, "FAIL": 1, "ERROR": 2}[status], status
