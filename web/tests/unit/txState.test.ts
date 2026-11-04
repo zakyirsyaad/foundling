@@ -14,18 +14,27 @@ test("a wallet cancel returns to the form", () => {
 test("a contract rejection keeps the raw code next to the sentence", () => {
   expect(txReducer({ kind: "awaiting-wallet" }, { type: "rejected", raw: "Smart contract panicked: NOT_STUCK" })).toMatchObject({ kind: "rejected", raw: "Smart contract panicked: NOT_STUCK" });
 });
-test("pending hashes survive a reload once, then are gone", () => {
+test("pending hashes survive a reload once, for the same page only", () => {
   const store = new Map<string, string>();
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) } as unknown as Storage;
-  persistPending(storage, ["H1", "H2"]);
-  expect(takePending(storage)).toEqual(["H1", "H2"]);
-  expect(takePending(storage)).toEqual([]);
+  persistPending(storage, { path: "/app/portfolio", hashes: ["H1", "H2"] });
+  expect(takePending(storage, "/app")).toBeNull();
+  expect(takePending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: ["H1", "H2"] });
+  expect(takePending(storage, "/app/portfolio")).toBeNull();
+});
+test("a request sent to the wallet before a reload is remembered without hashes", () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) } as unknown as Storage;
+  persistPending(storage, { path: "/app/portfolio", hashes: [] });
+  expect(takePending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: [] });
+  expect(txReducer({ kind: "idle" }, { type: "interrupted" })).toEqual({ kind: "interrupted" });
+  expect(txReducer({ kind: "idle" }, { type: "resumed", hashes: ["H"] })).toEqual({ kind: "sent", hashes: ["H"] });
 });
 test("storage that throws or holds junk is treated as empty", () => {
   const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => {} } as unknown as Storage;
-  expect(() => persistPending(broken, ["H"])).not.toThrow();
-  expect(takePending(broken)).toEqual([]);
-  expect(takePending(null)).toEqual([]);
+  expect(() => persistPending(broken, { path: "/", hashes: ["H"] })).not.toThrow();
+  expect(takePending(broken, "/")).toBeNull();
+  expect(takePending(null, "/")).toBeNull();
   const junk = { getItem: () => "{not json", setItem: () => {}, removeItem: () => {} } as unknown as Storage;
-  expect(takePending(junk)).toEqual([]);
+  expect(takePending(junk, "/")).toBeNull();
 });

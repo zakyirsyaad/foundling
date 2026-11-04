@@ -5,16 +5,39 @@ import { isNearAccount } from "@/lib/format/shell";
 import type { WalletTx } from "./calls";
 import { type TxOutcome, type WalletApi, WalletCancelled } from "./types";
 
-type Outcome = { transaction?: { hash?: string }; transaction_outcome?: { id?: string } };
+type Status = { Failure?: unknown; SuccessValue?: string };
+type Outcome = { transaction?: { hash?: string }; transaction_outcome?: { id?: string }; status?: Status; receipts_outcome?: { outcome?: { status?: Status } }[] };
 
 function hashOf(o: unknown): string {
   const x = o as Outcome;
   return x.transaction?.hash ?? x.transaction_outcome?.id ?? "";
 }
 
+function panicText(failure: unknown): string {
+  const text = JSON.stringify(failure);
+  return /Smart contract panicked: [^"\\]+/.exec(text)?.[0] ?? `Transaction failed: ${text}`;
+}
+
+/** near-connect resolves even when the chain rejected the call; look at every status. */
+function failureOf(o: unknown): string | null {
+  const x = o as Outcome;
+  const failed = [x.status, ...(x.receipts_outcome ?? []).map((r) => r.outcome?.status)].find((st) => st && "Failure" in st);
+  return failed ? panicText(failed.Failure) : null;
+}
+
+function refundedInFull(o: unknown, tx: WalletTx): boolean {
+  const value = (o as Outcome).status?.SuccessValue;
+  if (tx.methodName !== "ft_transfer_call" || !value) return false;
+  try {
+    return JSON.parse(atob(value)) === "0";
+  } catch {
+    return false;
+  }
+}
+
 function isCancel(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /reject|cancel|closed|denied|user/i.test(msg);
+  return /\b(rejected|cancel(?:l?ed)?|closed by user|user closed|denied by user|user rejected)\b/i.test(msg);
 }
 
 /** near-connect with its default wallet manifest (no `manifest` option) and the deployment's network. */
@@ -59,7 +82,9 @@ export function createWallet(cfg: DeploymentConfig, cspNonce: string): WalletApi
             actions: [{ type: "FunctionCall" as const, params: { methodName: t.methodName, args: t.args, gas: t.gas.toString(), deposit: t.deposit.toString() } }],
           })),
         });
-        return outcomes.map((o) => ({ hash: hashOf(o), outcome: o }));
+        const failure = outcomes.map(failureOf).find((f) => f !== null);
+        if (failure) throw new Error(failure);
+        return outcomes.map((o, i) => ({ hash: hashOf(o), outcome: o, refunded: refundedInFull(o, txs[i]!) }));
       } catch (err) {
         if (isCancel(err)) throw new WalletCancelled();
         throw err;

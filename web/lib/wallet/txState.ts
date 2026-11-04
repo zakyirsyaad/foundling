@@ -5,7 +5,8 @@ export type TxState =
   | { kind: "awaiting-wallet" }
   | { kind: "sent"; hashes: string[] }
   | { kind: "done"; hashes: string[] }
-  | { kind: "partial"; hashes: string[]; why: "claim-pending" | "moved-to-claimable" }
+  | { kind: "partial"; hashes: string[]; why: "claim-pending" | "moved-to-claimable" | "refunded" }
+  | { kind: "interrupted" }
   | { kind: "cancelled" }
   | { kind: "rejected"; sentence: string; raw: string };
 
@@ -13,7 +14,9 @@ export type TxEvent =
   | { type: "submit" }
   | { type: "cancelled" }
   | { type: "sent"; hashes: string[] }
-  | { type: "settled"; partial?: "claim-pending" | "moved-to-claimable" }
+  | { type: "settled"; partial?: "claim-pending" | "moved-to-claimable" | "refunded" }
+  | { type: "resumed"; hashes: string[] }
+  | { type: "interrupted" }
   | { type: "rejected"; raw: string };
 
 export function txReducer(state: TxState, ev: TxEvent): TxState {
@@ -30,27 +33,41 @@ export function txReducer(state: TxState, ev: TxEvent): TxState {
     }
     case "rejected":
       return { kind: "rejected", sentence: contractErrorSentence(ev.raw), raw: ev.raw };
+    case "resumed":
+      return { kind: "sent", hashes: ev.hashes };
+    case "interrupted":
+      return { kind: "interrupted" };
   }
 }
 
 const KEY = "foundling.pending-tx";
 
-/** Keeps sent hashes across a wallet redirect or a reload, so the page resumes instead of resending. */
-export function persistPending(store: Storage | null, hashes: string[]): void {
+/** What a page sent to the wallet: saved before the request (no hashes) and again after it. */
+export interface Pending {
+  path: string;
+  hashes: string[];
+}
+
+/** Kept across a wallet redirect or a reload, so the page resumes instead of sending again. */
+export function persistPending(store: Storage | null, pending: Pending): void {
   try {
-    store?.setItem(KEY, JSON.stringify(hashes));
+    store?.setItem(KEY, JSON.stringify(pending));
   } catch {
     // Private mode or blocked storage: the hash is still shown on screen.
   }
 }
 
-export function takePending(store: Storage | null): string[] {
+/** Reads and clears the saved request, but only on the page that sent it. */
+export function takePending(store: Storage | null, path: string): Pending | null {
   try {
     const raw = store?.getItem(KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Pending;
+    if (typeof p?.path !== "string" || !Array.isArray(p.hashes) || !p.hashes.every((h) => typeof h === "string")) return null;
+    if (p.path !== path) return null;
     store?.removeItem(KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) && parsed.every((h) => typeof h === "string") ? parsed : [];
+    return p;
   } catch {
-    return [];
+    return null;
   }
 }

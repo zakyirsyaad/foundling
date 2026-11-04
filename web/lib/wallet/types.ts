@@ -3,6 +3,8 @@ import type { WalletTx } from "./calls";
 export interface TxOutcome {
   hash: string;
   outcome: unknown;
+  /** ft_transfer_call that the receiver returned in full (the deposit was refused, no event). */
+  refunded?: boolean;
 }
 
 export interface WalletApi {

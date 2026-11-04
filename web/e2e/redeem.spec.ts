@@ -34,7 +34,7 @@ test("a reload after signing resumes the status and does not send again", async 
   await expect(page.getByRole("status").filter({ hasText: "Done." })).toBeVisible();
   const afterSend = await count();
   await page.reload();
-  await expect(page.getByRole("status").filter({ hasText: "Done." })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Sent." })).toBeVisible();
   await page.waitForTimeout(500);
   expect(await count()).toBe(afterSend);
 });

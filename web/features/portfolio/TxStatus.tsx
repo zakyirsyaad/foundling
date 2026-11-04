@@ -14,9 +14,11 @@ export function TxStatus({ state }: { state: TxState }) {
     case "partial":
       return (
         <p role="status">
-          Partly done. {state.why === "claim-pending" ? "Part of the payout waits for the running swap; claim it once the swap finishes." : "A transfer failed and moved to claimable; withdraw it below."}
+          {state.why === "refunded" ? "The vault refused the deposit and the USDC came back in full." : `Partly done. ${state.why === "claim-pending" ? "Part of the payout waits for the running swap; claim it once the swap finishes." : "A transfer failed and moved to claimable; withdraw it below."}`}
         </p>
       );
+    case "interrupted":
+      return <p role="alert">A request went to your wallet before this page reloaded. Check your wallet&apos;s activity before you sign again.</p>;
     case "cancelled":
       return <p role="status">Cancelled in your wallet. Nothing was sent.</p>;
     case "rejected":

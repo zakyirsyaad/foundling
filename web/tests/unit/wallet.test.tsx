@@ -95,3 +95,22 @@ test("an account id from the wallet that is not a NEAR account is dropped", () =
   expect(seen).toEqual([null]);
   expect(w.accountId()).toBeNull();
 });
+test("an outcome that failed on chain is thrown with its panic, not returned as done", async () => {
+  const w = createWallet(cfg, "nonce");
+  wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H1" }, status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: NOT_STUCK" } } } } }, receipts_outcome: [] }]);
+  await expect(w.send([tx])).rejects.toThrow("NOT_STUCK");
+  wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H2" }, status: { SuccessValue: "" }, receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: LOW_GAS" } } } } } } }] }]);
+  await expect(w.send([tx])).rejects.toThrow("LOW_GAS");
+});
+test("a deposit the vault refunded in full is marked refunded", async () => {
+  const w = createWallet(cfg, "nonce");
+  const zero = Buffer.from(JSON.stringify("0")).toString("base64");
+  wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H3" }, status: { SuccessValue: zero }, receipts_outcome: [] }]);
+  const out = await w.send([{ ...tx, methodName: "ft_transfer_call" }]);
+  expect(out[0]).toMatchObject({ hash: "H3", refunded: true });
+});
+test("only a real rejection counts as cancelled", async () => {
+  const w = createWallet(cfg, "nonce");
+  wallet.signAndSendTransactions.mockRejectedValueOnce(new Error("user account has insufficient balance"));
+  await expect(w.send([tx])).rejects.not.toBeInstanceOf(WalletCancelled);
+});

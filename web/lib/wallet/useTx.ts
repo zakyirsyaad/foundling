@@ -27,11 +27,10 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
   const [state, dispatch] = useReducer(txReducer, { kind: "idle" });
 
   useEffect(() => {
-    const hashes = takePending(session());
-    if (hashes.length) {
-      dispatch({ type: "sent", hashes });
-      dispatch({ type: "settled" });
-    }
+    // Resume what this page sent before a reload: "Sent" with its hashes, or a warning when the
+    // wallet request went out but no hash came back, so the person checks before signing again.
+    const pending = takePending(session(), window.location.pathname);
+    if (pending) dispatch(pending.hashes.length ? { type: "resumed", hashes: pending.hashes } : { type: "interrupted" });
     // Runs once, on mount, to resume a transaction sent before a reload.
      
   }, []);
@@ -45,13 +44,15 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
       dispatch({ type: "submit" });
       try {
         const txs = steps.map((s) => buildTx(s.name, s.args, ctx));
+        const path = window.location.pathname;
+        persistPending(session(), { path, hashes: [] });
         const out = await wallet.send(txs);
         const hashes = out.map((o) => o.hash);
-        // Kept until the next page load reads it once, so a reload resumes this status instead of resending.
-        persistPending(session(), hashes);
+        persistPending(session(), { path, hashes });
         dispatch({ type: "sent", hashes });
-        dispatch({ type: "settled", partial: partial?.() });
+        dispatch({ type: "settled", partial: out.some((o) => o.refunded) ? "refunded" : partial?.() });
       } catch (err) {
+        takePending(session(), window.location.pathname);
         if (err instanceof WalletCancelled) dispatch({ type: "cancelled" });
         else dispatch({ type: "rejected", raw: err instanceof Error ? err.message : String(err) });
       } finally {
