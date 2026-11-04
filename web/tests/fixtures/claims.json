@@ -1,0 +1,9 @@
+[
+  { "id": "born-without-keys", "claim": "The vault account has no access keys. Nobody can sign for it.", "tracks": ["security"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "pass", "downgrade": "The vault is meant to be born without keys. That check has not run yet." },
+  { "id": "g1-confidentiality", "claim": "The strategy parameters stay sealed until reveal.", "tracks": ["privacy"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "pass", "downgrade": "Sealing is designed, not yet checked on this vault." },
+  { "id": "g2-bounded-loss", "claim": "Each trade stays inside caps the contract enforces.", "tracks": ["security"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "pass", "downgrade": "Caps are in the contract; the live check has not run." },
+  { "id": "g3-exit", "claim": "You can redeem while trading is frozen, halted or stuck.", "tracks": ["defi"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "pass", "downgrade": "Redeem is designed to stay open; the live check has not run." },
+  { "id": "g4-traceability", "claim": "Every cycle links to its transactions and its proof.", "tracks": ["security"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "pass", "downgrade": "Cycle records are planned for this vault." },
+  { "id": "near-intents", "claim": "NEAR Intents (1Click) for deposits from other chains.", "tracks": ["defi"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "skip", "downgrade": "Cross-chain deposits through NEAR Intents are in testing." },
+  { "id": "near-ai-advisor", "claim": "NEAR AI as an advisor that can only lower exposure.", "tracks": ["privacy"], "code_refs": [], "test_refs": [], "evidence": [], "checks": [], "status": "skip", "downgrade": "A NEAR AI advisor is planned and not yet checked." }
+]

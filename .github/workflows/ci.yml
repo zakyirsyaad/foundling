@@ -289,6 +289,48 @@ jobs:
       - name: Build the contracts and run the sandbox tests
         run: make sandbox
 
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Lint
+        run: npm run -w web lint
+      - name: Typecheck
+        run: npm run -w web typecheck
+      - name: Unit tests with coverage
+        run: npm run -w web test:coverage
+      - name: Call table and events match the contract
+        run: npm run -w web check:contract
+      - name: Exit paths do not import the history API
+        run: npm run -w web depcruise
+      - name: Production bundle has no mock wallet
+        env:
+          FOUNDLING_BUNDLE_CHECK: "1"
+          NEXT_PUBLIC_NETWORK: mainnet
+          NEXT_PUBLIC_VAULT_ID: foundling-vault.near
+          NEXT_PUBLIC_RPC_URLS: https://rpc.mainnet.fastnear.com
+        run: |
+          npm run -w web build
+          # Strings that survive minification; the marker comment does not.
+          if grep -rq --exclude='*.map' -e "foundling.mock.account" -e "localhost:3199/__tx" web/.next/static web/.next/server; then
+            echo "::error::the mock wallet reached the production build"
+            exit 1
+          fi
+      - name: Install the browser
+        run: npx -w web playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run -w web e2e
+      - name: Audit
+        run: npm audit --audit-level=high
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-24.04
