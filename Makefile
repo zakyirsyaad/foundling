@@ -31,8 +31,10 @@ sandbox: wasm
 attack-lab:
 	@python3 tools/attack.py run-all
 
-# The same, with the wasm and the sandbox tests built first. Builds inside an attack would
-# count against its 300 s limit and report ERROR for what is only a cold cache.
+# The same, with the wasm and the sandbox tests built first, and one sandbox test run so the neard
+# binary is downloaded now. Builds or a download inside an attack would count against its 300 s
+# limit and report ERROR for what is only a cold cache.
 attack-lab-full: wasm
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
+	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 	@python3 tools/attack.py run-all

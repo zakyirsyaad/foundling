@@ -28,6 +28,12 @@ class AttackLabMakeTest(unittest.TestCase):
         self.assertLess(build, compile_tests)
         self.assertLess(compile_tests, run_all)
 
+    def test_attack_lab_full_runs_a_sandbox_test_first_so_neard_is_downloaded_outside_the_limit(self):
+        plan = dry_run("attack-lab-full")
+        warm = plan.index("--exact")
+        self.assertLess(plan.index("--no-run"), warm)
+        self.assertLess(warm, plan.index("tools/attack.py run-all"))
+
     def test_attack_lab_full_builds_every_contract_the_sandbox_deploys(self):
         loop = dry_run("attack-lab-full").split("; do", 1)[0]
         for contract in ("vault", "mock-oracle", "mock-ref", "mock-outlayer", "mock-token"):
