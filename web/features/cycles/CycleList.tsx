@@ -45,7 +45,7 @@ export function CycleMap({ rows }: { rows: CycleRow[] }) {
 export function CycleTable({ rows }: { rows: CycleRow[] }) {
   if (rows.length === 0) return <p className="text-muted-foreground">No cycles yet. A vault that holds a lot has a short, flat history.</p>;
   return (
-    <table aria-label="Cycles" className="w-full text-sm">
+    <table aria-label="Cycles" className="fm-table text-sm">
       <thead>
         <tr>
           <th scope="col">Cycle</th>
@@ -59,12 +59,12 @@ export function CycleTable({ rows }: { rows: CycleRow[] }) {
       <tbody>
         {rows.map((r) => (
           <tr key={r.nonce.toString()} data-nonce={r.nonce.toString()}>
-            <td className="mono"><Link href={`/app/cycles/${r.nonce}`}>#{r.nonce.toString()}</Link></td>
-            <td className="mono">{r.startedAt.replace("T", " ").slice(0, 16)}</td>
-            <td><Status group="cycle" word={cycleWord(r.events)} /></td>
-            <td><Status group="proof" word={proofWord(r.verifier, r.obsRecheck)} /></td>
-            <td className="mono">{r.amountIn === null ? "—" : `${formatUnits(r.amountIn, 6, 2)} USDC`}</td>
-            <td>{r.txHashes[0] ? <Hash value={r.txHashes[0]} label="transaction hash" /> : "—"}</td>
+            <td data-label="Cycle" className="mono"><Link href={`/app/cycles/${r.nonce}`}>#{r.nonce.toString()}</Link></td>
+            <td data-label="Time" className="mono">{r.startedAt.replace("T", " ").slice(0, 16)}</td>
+            <td data-label="Result"><Status group="cycle" word={cycleWord(r.events)} /></td>
+            <td data-label="Proof"><Status group="proof" word={proofWord(r.verifier, r.obsRecheck)} /></td>
+            <td data-label="Amount" className="mono">{r.amountIn === null ? "—" : `${formatUnits(r.amountIn, 6, 2)} USDC`}</td>
+            <td data-label="Tx">{r.txHashes[0] ? <Hash value={r.txHashes[0]} label="transaction hash" /> : "—"}</td>
           </tr>
         ))}
       </tbody>
@@ -76,7 +76,7 @@ export function PartialTable({ rows }: { rows: PartialCycle[] }) {
   return (
     <div className="grid gap-3">
       <p><span className="fm-status" data-tone="neutral">Partial</span> History is pending. These rows come straight from the vault&apos;s published decisions.</p>
-      <table aria-label="Cycles" className="w-full text-sm">
+      <table aria-label="Cycles" className="fm-table text-sm">
         <thead>
           <tr>
             <th scope="col">Cycle</th>
@@ -86,8 +86,8 @@ export function PartialTable({ rows }: { rows: PartialCycle[] }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.nonce.toString()} data-nonce={r.nonce.toString()}>
-              <td className="mono">#{r.nonce.toString()}</td>
-              <td className="mono">{r.decision ?? "No decision to verify"}</td>
+              <td data-label="Cycle" className="mono">#{r.nonce.toString()}</td>
+              <td data-label="Published decision" className="mono">{r.decision ?? "No decision to verify"}</td>
             </tr>
           ))}
         </tbody>

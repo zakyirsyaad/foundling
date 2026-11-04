@@ -29,7 +29,8 @@ test("Overview with pending history still shows live numbers", async () => {
   const s = await fixtureSnapshot({ inflight: { nonce: 9n, tokenIn: "Usdc", tokenOut: "Wnear", amountIn: 12_400_000n, minAmountOut: 1n, amountOut: null, sharesSnapshot: 1n, sharesBurned: 0n, recovered: 0n, stuckSince: null } });
   read.mockResolvedValue(s);
   await act(async () => render(<Overview initial={s} nav={{ status: "pending", reason: "http" }} />));
-  expect(screen.getByText(/History is pending/)).toBeInTheDocument();
+  expect(screen.getByText(/History is pending. Live numbers/)).toBeInTheDocument();
+  expect(screen.getByText("Last cycle #41. History is pending.")).toBeInTheDocument();
   expect(screen.getByText("12.4 USDC")).toBeInTheDocument();
 });
 test("Overview with no snapshot shows the unreadable banner", async () => {

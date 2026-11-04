@@ -36,7 +36,7 @@ export function TrustView({ snapshot, label }: { snapshot: VaultSnapshot | null;
       </section>
       <section aria-labelledby="losses">
         <h2 id="losses" className="mb-4 text-2xl font-semibold">How you could lose money</h2>
-        <table aria-label="Loss scenarios" className="w-full text-sm">
+        <table aria-label="Loss scenarios" className="fm-table text-sm">
           <thead>
             <tr>
               <th scope="col">Scenario</th>
@@ -47,7 +47,7 @@ export function TrustView({ snapshot, label }: { snapshot: VaultSnapshot | null;
             {LOSS_SCENARIOS.map((l) => (
               <tr key={l.scenario}>
                 <th scope="row">{l.scenario}</th>
-                <td>{l.input}</td>
+                <td data-label="What bounds it">{l.input}</td>
               </tr>
             ))}
           </tbody>

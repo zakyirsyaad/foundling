@@ -57,6 +57,9 @@ const builders: Record<string, () => Scenario> = {
   "oneclick-bad-signature": () => ({ ...base("oneclick-bad-signature"), extra: { api: API_ROUTES, badSignature: true } }),
   "oneclick-bad-echo": () => ({ ...base("oneclick-bad-echo"), extra: { api: API_ROUTES, badEcho: true } }),
   "oneclick-clock-skew": () => ({ ...base("oneclick-clock-skew"), extra: { api: API_ROUTES, clockSkewMs: 30 * 60_000 } }),
+  empty: () => ({ ...base("empty"), views: { ...views, last_nonce: 0, total_shares: "0", book: { usdc: "0", wnear: "0" } }, extra: { api: { ...API_ROUTES, "/api/v1/cycles": [], "/api/v1/nav": [] } } }),
+  "keeper-dead": () => ({ ...base("keeper-dead"), extra: { api: { ...API_ROUTES, "/api/v1/cycles": API_ROUTES["/api/v1/cycles"] && (API_ROUTES["/api/v1/cycles"] as { started_at: string }[]).map((c) => ({ ...c, started_at: "2026-10-01T00:00:00Z" })) } } }),
+  "low-vault-near": () => ({ ...base("low-vault-near"), extra: { api: API_ROUTES, vaultAmount: "1" } }),
   closed: () => ({ ...base("closed"), views: { ...views, policy: { ...policyJson, open_deposits: false } } }),
 };
 

@@ -1,13 +1,15 @@
 "use client";
 
 import { LimitMeter } from "@/components/fm/LimitMeter";
+import { LoadingBlock } from "@/components/fm/LoadingBlock";
 import { Stat } from "@/components/fm/Stat";
 import { Status } from "@/components/fm/Status";
 import type { VaultSnapshot } from "@/lib/chain/types";
 import { useVaultSnapshot } from "@/lib/chain/useVaultSnapshot";
 import { navUsdc, sharePrice } from "@/lib/chain/vault";
 import { formatUnits } from "@/lib/format/units";
-import type { HistoryResult, NavPoint } from "@/lib/history/client";
+import type { CycleRow, HistoryResult, NavPoint } from "@/lib/history/client";
+import { cycleWord } from "@/lib/cycles/outcome";
 import { limitMeters, sharePriceSinceStart, vaultWord } from "@/lib/vault/overview";
 import { SharePriceChart } from "./SharePriceChart";
 import { StuckPanelLive } from "./StuckPanelLive";
@@ -26,8 +28,9 @@ function usdc(v: bigint | null, decimals = USDC): string {
   return v === null ? "—" : `${formatUnits(v, decimals, 2)} USDC`;
 }
 
-export function Overview({ initial, nav }: { initial: VaultSnapshot | null; nav: HistoryResult<NavPoint[]> }) {
-  const { snapshot: s, unreadable, fresh } = useVaultSnapshot(initial);
+export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSnapshot | null; nav: HistoryResult<NavPoint[]>; lastCycle?: CycleRow | null }) {
+  const { snapshot: s, unreadable, fresh, loading } = useVaultSnapshot(initial);
+  if (!s && loading) return <LoadingBlock rows={4} label="Reading the vault" />;
   if (!s) {
     return (
       <div className="grid gap-6">
@@ -63,6 +66,7 @@ export function Overview({ initial, nav }: { initial: VaultSnapshot | null; nav:
         <Stat label={since.label} value={pct(since.changeBps)} sub={`${since.periodDays === null ? "—" : `${since.periodDays} days`} · ${since.cycles} cycles`} />
         <Stat label="In a swap now" value={s.inflight ? `${formatUnits(s.inflight.amountIn, s.inflight.tokenIn === "Usdc" ? d : s.assets.wnearDecimals, 4)} ${s.inflight.tokenIn === "Usdc" ? "USDC" : "wNEAR"}` : "Nothing"} />
       </section>
+      <LastCycle s={s} row={lastCycle} />
       <section aria-labelledby="chart-title" className="rounded-lg border p-5">
         <h2 id="chart-title" className="mb-4 text-lg font-semibold">Share price</h2>
         {nav.status === "ok" ? <SharePriceChart points={nav.data} usdcDecimals={d} /> : <p className="text-sm text-muted-foreground">History is pending. Live numbers above come straight from the chain.</p>}
@@ -85,5 +89,23 @@ export function Overview({ initial, nav }: { initial: VaultSnapshot | null; nav:
         </dl>
       </section>
     </div>
+  );
+}
+
+/** Keeper looks down when no cycle started for this long (WEBSITE §4 State: "No cycle since …"). */
+const QUIET_MIN_SECONDS = 3600n;
+
+function LastCycle({ s, row }: { s: VaultSnapshot; row: CycleRow | null }) {
+  if (!row) return <p className="text-sm">Last cycle #{s.lastNonce.toString()}. History is pending.</p>;
+  const started = BigInt(Math.floor(Date.parse(row.startedAt) / 1000));
+  const quietAfter = [3n * s.policy.cooldown, QUIET_MIN_SECONDS].reduce((a, b) => (a > b ? a : b));
+  const quiet = s.chainTimeSeconds - started > quietAfter;
+  return (
+    <section aria-label="Last cycle" className="flex flex-wrap items-center gap-3 text-sm" data-testid="last-cycle">
+      <span>Last cycle #{row.nonce.toString()}</span>
+      <Status group="cycle" word={cycleWord(row.events)} />
+      <span className="mono text-[13px] text-muted-foreground">{row.startedAt.replace("T", " ").slice(0, 16)} UTC</span>
+      {quiet ? <span>No cycle since {row.startedAt.replace("T", " ").slice(0, 16)} UTC. Deposits wait in the queue; cancelling a deposit and redeem still work.</span> : null}
+    </section>
   );
 }

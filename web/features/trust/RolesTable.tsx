@@ -8,7 +8,7 @@ const ROWS = [
 
 export function RolesTable({ roles }: { roles: Roles }) {
   return (
-    <table aria-label="Roles" className="w-full text-sm">
+    <table aria-label="Roles" className="fm-table text-sm">
       <thead>
         <tr>
           <th scope="col">Role</th>
@@ -21,9 +21,9 @@ export function RolesTable({ roles }: { roles: Roles }) {
         {ROWS.map((r) => (
           <tr key={r.role}>
             <th scope="row">{r.role}</th>
-            <td className="mono">{roles[r.key]}</td>
-            <td>{r.can}</td>
-            <td>{r.cannot}</td>
+            <td data-label="Account" className="mono">{roles[r.key]}</td>
+            <td data-label="Can">{r.can}</td>
+            <td data-label="Cannot">{r.cannot}</td>
           </tr>
         ))}
       </tbody>

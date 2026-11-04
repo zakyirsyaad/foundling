@@ -16,7 +16,7 @@ export const REFRESH_MS = 10_000;
  */
 export function useVaultSnapshot(initial: VaultSnapshot | null) {
   const [snapshot, setSnapshot] = useState<VaultSnapshot | null>(initial);
-  const [failed, setFailed] = useState(initial === null);
+  const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(() => (initial ? initial.fetchedAtMs : 0));
   const busy = useRef(false);
 
@@ -48,6 +48,8 @@ export function useVaultSnapshot(initial: VaultSnapshot | null) {
     };
   }, []);
 
-  const unreadable = snapshot === null || (failed && dataAge(snapshot, now).unreadable);
-  return { snapshot, unreadable, fresh: !failed && snapshot !== null };
+  // No snapshot yet and no failure yet: still loading, which shows a skeleton, not an error.
+  const loading = snapshot === null && !failed;
+  const unreadable = snapshot === null ? failed : failed && dataAge(snapshot, now).unreadable;
+  return { snapshot, loading, unreadable, fresh: !failed && snapshot !== null };
 }

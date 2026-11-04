@@ -2,7 +2,7 @@ import { PARTY_GROUPS } from "@/content/trust";
 
 export function PartiesTable() {
   return (
-    <table aria-label="Who you trust" className="w-full text-sm">
+    <table aria-label="Who you trust" className="fm-table text-sm">
       <thead>
         <tr>
           <th scope="col">Party</th>
@@ -18,8 +18,8 @@ export function PartiesTable() {
           {g.rows.map((r) => (
             <tr key={r.party}>
               <th scope="row">{r.party}</th>
-              <td>{r.could}</td>
-              <td>{r.bounded}</td>
+              <td data-label="What it could do">{r.could}</td>
+              <td data-label="What limits it">{r.bounded}</td>
             </tr>
           ))}
         </tbody>

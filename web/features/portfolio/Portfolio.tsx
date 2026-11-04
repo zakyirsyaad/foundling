@@ -3,6 +3,7 @@
 import { type ReactNode, useMemo } from "react";
 
 import { Banner } from "@/components/fm/Banner";
+import { LoadingBlock } from "@/components/fm/LoadingBlock";
 import { config } from "@/config";
 import type { Position, VaultSnapshot } from "@/lib/chain/types";
 import { usePosition } from "@/lib/chain/usePosition";
@@ -30,13 +31,13 @@ export interface PortfolioSlots {
 }
 
 export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
-  const { snapshot: s, unreadable, fresh } = useVaultSnapshot(null);
+  const { snapshot: s, unreadable, fresh, loading } = useVaultSnapshot(null);
   const { wallet, account } = useWallet();
   const { position: p, gasPrice, reload } = usePosition(account, s);
   const ctx = useMemo(() => buildCtxFor(s), [s]);
   const { state, run } = useTx(wallet, ctx, reload);
   const busy = state.kind === "awaiting-wallet";
-  if (!s) return <VaultBanner s={null} unreadable />;
+  if (!s) return loading ? <LoadingBlock rows={4} label="Reading the vault" /> : <VaultBanner s={null} unreadable />;
   const gate = depositGate(s, p, unreadable);
   return (
     <div className="grid gap-6">
@@ -49,7 +50,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
           <ConnectButton />
         </section>
       ) : !p ? (
-        <p role="status">Reading your position…</p>
+        <LoadingBlock rows={2} label="Reading your position" />
       ) : (
         <>
           <Positions s={s} p={p}>

@@ -17,7 +17,8 @@ test.describe("server HTML", () => {
 test("with the API down the live numbers stay and history is pending", async ({ page, request }) => {
   await useScenario(request, "api-down");
   await page.goto("/app");
-  await expect(page.getByText("History is pending.")).toBeVisible();
+  await expect(page.getByText(/History is pending. Live numbers/)).toBeVisible();
+  await expect(page.getByText("Last cycle #41. History is pending.")).toBeVisible();
   await expect(page.getByText("96.4 USDC").first()).toBeVisible();
 });
 test("a frozen vault shows the Frozen banner", async ({ page, request }) => {

@@ -182,3 +182,18 @@
   .fm-cell[data-word="Reversed"], .fm-cell[data-word="Rejected"], .fm-cell[data-word="Stuck"] { background: var(--warning); border-color: var(--warning); }
   .fm-cell[data-word="Failed"] { background: var(--danger); border-color: var(--danger); }
 }
+
+@layer components {
+  .fm-video-empty { color: var(--foreground); }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .fm-table { width: 100%; border-collapse: collapse; }
+  .fm-table th, .fm-table td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .fm-table thead th { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+  /* Narrow screens: each row becomes a stacked card, each cell labelled (WEBSITE §4 App). */
+  @media (max-width: 639px) {
+    .fm-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .fm-table tr { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .fm-table th, .fm-table td { display: block; padding: 0; border: 0; }
+    .fm-table [data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted-foreground); }
+  }
+}

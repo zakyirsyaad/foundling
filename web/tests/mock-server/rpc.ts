@@ -14,7 +14,7 @@ export function handleRpc(res: http.ServerResponse, s: Scenario, raw: string): v
   if (method === "gas_price") return ok({ gas_price: "100000000" });
   if (method !== "query") return send(res, 200, { jsonrpc: "2.0", id, error: { message: `no ${method}` } });
   const p = params as { request_type: string; account_id: string; method_name?: string; args_base64?: string };
-  if (p.request_type === "view_account") return ok({ amount: "10000000000000000000000000", storage_usage: 1000, code_hash: "11111111111111111111111111111111", block_height: HEIGHT });
+  if (p.request_type === "view_account") return ok({ amount: String(s.extra.vaultAmount ?? "10000000000000000000000000"), storage_usage: 1000, code_hash: "11111111111111111111111111111111", block_height: HEIGHT });
   if (p.request_type === "view_access_key_list") return ok({ keys: Array.from({ length: s.accessKeys }, () => ({})), block_height: HEIGHT });
   const table = s.perAccount[p.account_id] ?? {};
   const name = p.method_name ?? "";

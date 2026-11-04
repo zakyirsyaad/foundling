@@ -1,4 +1,5 @@
 import type { Network } from "@/config/deployment";
+import { safeHttpsUrl } from "@/lib/format/safeUrl";
 import type { LocalProof, SnapshotSource } from "./local";
 
 export interface Fact {
@@ -7,6 +8,8 @@ export interface Fact {
   value: string;
   command: string;
   note?: string;
+  /** An https link to the artifact itself, only when the URL is safe to link. */
+  href?: string;
 }
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -50,6 +53,7 @@ export function proofFacts(src: SnapshotSource, local: LocalProof, network: Netw
       value: `wasm_hash ${s.agent.wasmHash}`,
       command: `curl -sL '${s.agent.wasmUrl}' | shasum -a 256`,
       note: "To rebuild it from source, run strategy/build.sh at the commit that built this binary.",
+      href: safeHttpsUrl(s.agent.wasmUrl) ?? undefined,
     },
     {
       id: "commitment",

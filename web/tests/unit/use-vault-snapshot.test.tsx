@@ -49,8 +49,11 @@ test("failed reads turn unreadable once the data is older than 60 s", async () =
   await act(async () => vi.advanceTimersByTimeAsync(70_000));
   expect(result.current.unreadable).toBe(true);
 });
-test("no initial snapshot is unreadable", () => {
-  read.mockReturnValue(new Promise(() => {}));
+test("with no snapshot yet the hook is loading, not unreadable, until a read fails", async () => {
+  let reject!: (e: Error) => void;
+  read.mockReturnValue(new Promise((_, r) => (reject = r)));
   const { result } = renderHook(() => useVaultSnapshot(null));
-  expect(result.current.unreadable).toBe(true);
+  expect(result.current).toMatchObject({ loading: true, unreadable: false });
+  await act(async () => reject(new Error("down")));
+  expect(result.current).toMatchObject({ loading: false, unreadable: true });
 });
