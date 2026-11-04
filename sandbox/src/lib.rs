@@ -75,6 +75,9 @@ pub struct Setup {
     pub ref_pool_fee_bps: u32,
     /// The vault's `open_deposits` policy. Closed keeps the allowlist of alice alone.
     pub open_deposits: bool,
+    /// Policy fields to replace in the config `init` gets, as a JSON object. `init` still
+    /// checks the result, so a bad combination shows up as a failed `init`.
+    pub policy: Value,
 }
 
 impl Default for Setup {
@@ -82,6 +85,7 @@ impl Default for Setup {
         Self {
             ref_pool_fee_bps: POOL_FEE_BPS,
             open_deposits: false,
+            policy: json!({}),
         }
     }
 }
@@ -188,11 +192,16 @@ impl Foundling {
         set_feed(&parent, &oracle, USDC_FEED, 100_000_000).await?;
 
         let vault_id: AccountId = format!("vault.{}", parent.id()).parse()?;
-        let config = vault_config(
+        let mut config = vault_config(
             [&governor, &keeper, &guardian, &alice],
             [&usdc, &wnear, &rhea, &oracle, &outlayer],
             setup.open_deposits,
         );
+        if let Some(overrides) = setup.policy.as_object() {
+            for (field, value) in overrides {
+                config["policy"][field] = value.clone();
+            }
+        }
         let init_args = serde_json::to_vec(&json!({ "config": config }))?;
         let init_result = parent
             .batch(&vault_id)
