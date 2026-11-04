@@ -85,6 +85,27 @@ async fn contoh() -> anyhow::Result<()> {
 }
 ```
 
+## Tes serangan (Attack Lab)
+
+`tests/attacks_batch1.rs` memuat `over_cap`, `drip`, `replay`, `bad_route`, dan `stale_price`. Tiap tes menyerang vault sandbox, menulis `proofs/attack/<nama>.json`, lalu baru berasersi. `tools/attacks/<nama>` menjalankan `cargo test --test attacks_batch1 <nama> -- --exact --include-ignored` dan membaca proof itu:
+
+| Proof | Exit |
+|---|---|
+| `verdict` `held` dan cargo lulus | 0 (sistem bertahan) |
+| `verdict` `breached` | 1 (serangan berhasil atau kode alasan berbeda) |
+| tanpa proof, proof usang, WASM belum dibangun, atau `expected_codes` berbeda dari registry | 2 (galat alat) |
+
+```
+make attack-lab-full                 # build WASM + kompilasi tes, lalu semua serangan
+python3 tools/attack.py run drip     # satu serangan; butuh `make wasm` lebih dulu
+```
+
+- Proof memuat langkah, kode alasan yang teramati, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run.
+- `Setup { policy: json!({..}) }` menimpa field policy. Serangan yang bergantung pada jam memakai profil testnet SPEC 3.6 (`epoch_len` 600, `cooldown` 60), karena `fast_forward` hanya ±116 blok per detik dan satu blok 0,3 detik: satu `epoch_len` produksi (21.600 detik) butuh ±10 menit, melewati batas 300 detik per serangan.
+- `drip` membaca view `window_used` blok demi blok di sekitar batas dan membuktikan entri keluar tepat pada `at + epoch_len`. Transaksi sendiri mendarat 1-3 blok setelah dikirim, jadi tes transaksi di batas memakai margin 20 detik, dan ketepatan detiknya dibuktikan lewat view.
+- `bad_route` ditandai `#[ignore]` dan dijalankan runner dengan `--include-ignored`: vault tidak pernah memancarkan `ROUTE_NOT_ALLOWED` (Decision v1 tak punya field rute), jadi serangan ini FAIL sampai kontrak atau SPEC berubah. Hapus `#[ignore]` saat itu terjadi.
+- `PRICE_STALE` tidak bisa dipentaskan dengan mock oracle: ia menahan feed (hasil `null`) begitu lag melewati `age`, dan memberi `publish_time = now - lag` bagi yang lolos.
+
 ## Hal yang perlu diingat
 
 - Harness menyimpan salinan JSON `InitConfig` dan `Policy` (`vault_config` di `src/lib.rs`). Bila lead mengubah bentuknya di `contracts/vault`, ubah juga di sini. `start()` akan gagal dengan pesan yang menunjuk ke sana.
