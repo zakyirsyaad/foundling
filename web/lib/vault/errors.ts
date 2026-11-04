@@ -1,4 +1,6 @@
 const SENTENCES: readonly [RegExp, string][] = [
+  [/TOKEN_MISMATCH/, "This website will not sign: its pinned token contracts do not match the vault."],
+  [/NO_WALLET/, "No wallet is connected."],
   [/NOT_STUCK/, "The vault is not stuck yet, so there is nothing to advance. The status has been read again."],
   [/bucket not resolved/i, "That swap has not finished yet. The claim opens once it does."],
   [/LOW_GAS/, "The transaction did not carry enough gas. Try again; the website adds a margin."],

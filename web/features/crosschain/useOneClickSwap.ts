@@ -92,6 +92,29 @@ export function useOneClickSwap(unreadable: boolean) {
     };
   }, [client, live?.swap.depositAddress]);
 
+  // Swaps saved before a reload: read their status too and write a final one back.
+  useEffect(() => {
+    const open = swaps.filter((w) => w.final === null && w.depositAddress && w.depositAddress !== live?.swap.depositAddress);
+    if (open.length === 0) return;
+    let alive = true;
+    const poll = () =>
+      open.forEach((w) =>
+        client.status(String(w.depositAddress)).then(
+          (r) => {
+            if (!alive || r === "not-found") return;
+            if (r.status === "SUCCESS" || r.status === "REFUNDED" || r.status === "FAILED") save({ ...w, final: r.status });
+          },
+          () => {},
+        ),
+      );
+    void poll();
+    const t = setInterval(poll, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [client, swaps, save, live?.swap.depositAddress]);
+
   // The clock, and re-anchoring after the tab was hidden (performance.now can stop while asleep).
   useEffect(() => {
     if (!live) return;
@@ -129,5 +152,5 @@ export function useOneClickSwap(unreadable: boolean) {
   const known: SwapStatus = st === "PENDING_DEPOSIT" || st === "INCOMPLETE_DEPOSIT" || st === "not-found" || st === "unknown" ? st : "other";
   const view = live ? (live.confirmNotSent ? "hide" : addressView({ status: known, remainingMs: rem, marginMs: margin, needsReanchor: live.needsReanchor, reloaded: false })) : "hide";
 
-  return { nowMs: now.date, oc, client, swaps, save, tokens, down, quote, live, setLive, status, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
+  return { listSwaps: () => store.list(), nowMs: now.date, oc, client, swaps, save, tokens, down, quote, live, setLive, status, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
 }

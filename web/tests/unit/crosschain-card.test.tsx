@@ -155,10 +155,52 @@ test("Ethereum warns about fees and a bad checksum blocks the quote", async () =
   expect(screen.getByText(/Not a valid EVM address/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Get a quote" })).toBeDisabled();
 });
+test("the blocking notice never shows the stored address again", async () => {
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xOldStoredAddress", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() + 600_000, createdAtMs: 0, final: null, txHashes: [], declaredNotSent: false }]));
+  const { r } = await renderCard();
+  expect(r.container.textContent).not.toContain("0xOldStoredAddress");
+});
+test("the address closes at the earlier of quote.deadline and the requested deadline", async () => {
+  extra.quoteDeadlineInMs = 60_000;
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Do not send");
+});
+test("a final status is saved once, not in a loop", async () => {
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  await screen.findByTestId("deposit-address");
+  const setItem = vi.spyOn(Storage.prototype, "setItem");
+  api.status = { status: "SUCCESS", swapDetails: { amountOut: "4999800" } };
+  await screen.findByRole("button", { name: "Deposit 4.9998 USDC" }, { timeout: 4000 });
+  await act(async () => new Promise((r) => setTimeout(r, 300)));
+  expect(setItem.mock.calls.length).toBeLessThan(5);
+  setItem.mockRestore();
+});
+test("a second tab that already got an address blocks this one", async () => {
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xOtherTab", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() + 600_000, createdAtMs: 0, final: null, txHashes: [], declaredNotSent: false }]));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Another swap for this account");
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+});
+test("a stored unfinished swap is polled and its final status written back", async () => {
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xStored", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() + 600_000, createdAtMs: 0, final: null, txHashes: [], declaredNotSent: false }]));
+  api.status = { status: "SUCCESS", swapDetails: { amountOut: "1" } };
+  await renderCard();
+  await waitFor(() => expect(screen.getByRole("list", { name: "Earlier swaps" })).toHaveTextContent("SUCCESS"), { timeout: 4000 });
+  expect(screen.queryByText(/A second quote now risks a second send/)).toBeNull();
+});
 test("a pending swap blocks a new quote until the user says nothing was sent", async () => {
   window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xOld", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() + 600_000, createdAtMs: 0, final: null, txHashes: [], declaredNotSent: false }]));
   await renderCard();
-  expect(screen.getByText(/A second quote now risks a second send/)).toBeInTheDocument();
+  expect(await screen.findByText(/A second quote now risks a second send/)).toBeInTheDocument();
   expect(screen.getByRole("list", { name: "Earlier swaps" })).toHaveTextContent("in progress");
   await userEvent.setup().click(screen.getByRole("button", { name: "I have not sent anything to it" }));
   expect(screen.getByLabelText("USDC to send")).toBeInTheDocument();

@@ -12,7 +12,7 @@ import { depositAmount } from "@/lib/crosschain/amount";
 import { isEvmAddress } from "@/lib/crosschain/evm";
 import { flowReducer, initialFlow } from "@/lib/crosschain/flow";
 import { quoteProblems } from "@/lib/crosschain/signature";
-import { blockingSwap } from "@/lib/crosschain/store";
+import { type StoredSwap, blockingSwap } from "@/lib/crosschain/store";
 import { formatUnits, parseUnits } from "@/lib/format/units";
 import { STATUS } from "@/lib/status/table";
 import type { Step } from "@/lib/wallet/useTx";
@@ -83,13 +83,19 @@ export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapsh
 
   async function getAddress() {
     if (!account || amount === null || depositGate(s, p, unreadable).reasons.length) return;
+    // Another tab may have got an address since this one passed the quote step.
+    if (blockingSwap(x.listSwaps(), account, Date.now())) return dispatch({ type: "problem", message: "Another swap for this account may still be waiting for funds. Check it below before asking for a new address." });
     try {
       const { req, res, problem } = await x.quote({ chain, amount, recipient: account, refundTo }, false);
       if (problem) return dispatch({ type: "problem", message: problem });
       const q = res as Quote;
-      const swap = { depositAddress: String(q.quote.depositAddress), recipient: account, chainId: chain.id, deadlineMs: Date.parse(req.deadline), createdAtMs: Date.now(), final: null, txHashes: [], declaredNotSent: false };
+      // The address closes at quote.deadline (signed); never later than what was asked for.
+      const deadlineMs = Math.min(Date.parse(String(q.quote.deadline)), Date.parse(req.deadline));
+      const stamp = Date.parse(String(res.timestamp));
+      if (!Number.isFinite(deadlineMs) || !Number.isFinite(stamp) || !q.quote.depositAddress) return dispatch({ type: "problem", message: "1Click's answer had no usable deadline or address, so none is shown." });
+      const swap = { depositAddress: String(q.quote.depositAddress), recipient: account, chainId: chain.id, deadlineMs, createdAtMs: Date.now(), final: null, txHashes: [], declaredNotSent: false };
       x.save(swap);
-      x.setLive({ swap, request: req, signed: res, anchor: { responseTimestampMs: Date.parse(String(res.timestamp)), perfAtReceipt: performance.now(), dateAtReceipt: Date.now() }, needsReanchor: false, confirmNotSent: false });
+      x.setLive({ swap, request: req, signed: res, anchor: { responseTimestampMs: stamp, perfAtReceipt: performance.now(), dateAtReceipt: Date.now() }, needsReanchor: false, confirmNotSent: false });
       dispatch({ type: "address-verified", swap });
     } catch (err) {
       dispatch({ type: "problem", message: `1Click did not give an address: ${err instanceof Error ? err.message : String(err)}` });
@@ -99,10 +105,14 @@ export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapsh
   const live = x.live;
   const raw = (x.status?.raw ?? {}) as { swapDetails?: { amountOut?: string; refundedAmount?: string; refundReason?: string; depositedAmount?: string } };
   const st = x.status?.status;
-  const finalStatus = st === "SUCCESS" || st === "REFUNDED" || st === "FAILED" ? st : null;
+  const finalStatus: StoredSwap["final"] = st === "SUCCESS" || st === "REFUNDED" || st === "FAILED" ? st : null;
+  const { save, setLive } = x;
   useEffect(() => {
-    if (live && finalStatus && live.swap.final !== finalStatus) x.save({ ...live.swap, final: finalStatus });
-  }, [finalStatus, live, x]);
+    if (!live || !finalStatus || live.swap.final === finalStatus) return;
+    const swap = { ...live.swap, final: finalStatus };
+    save(swap);
+    setLive({ ...live, swap });
+  }, [finalStatus, live, save, setLive]);
 
   return (
     <section aria-labelledby="crosschain-title" className="grid gap-4 rounded-lg border p-5" data-step={flow.step}>
@@ -120,7 +130,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapsh
           <p>{gate.reasons.includes("unreadable") ? "The vault is not readable right now, so no quote is asked for." : "The vault is not taking deposits right now, so no quote is asked for."}</p>
         ) : blocking ? (
           <div className="grid gap-2">
-            <p>A swap for this account may still be waiting for funds at <span className="mono">{blocking.depositAddress}</span>. A second quote now risks a second send.</p>
+            <p>A {x.oc.chains.find((c) => c.id === blocking.chainId)?.label ?? ""} swap for this account, started {new Date(blocking.createdAtMs).toLocaleString()}, may still be waiting for funds. A second quote now risks a second send.</p>
             <button type="button" className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={() => x.save({ ...blocking, declaredNotSent: true })}>I have not sent anything to it</button>
           </div>
         ) : (
@@ -204,7 +214,11 @@ export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapsh
           )}
           <label className="grid gap-1"><span className="fm-label">Origin tx hash (optional, speeds things up)</span><input value={txHash} onChange={(e) => setTxHash(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2" /></label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!txHash} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(() => x.save({ ...live.swap, txHashes: [txHash] }))}>Submit tx hash</button>
+            <button type="button" disabled={!txHash} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(() => {
+              const swap = { ...live.swap, txHashes: [txHash] };
+              x.save(swap);
+              x.setLive({ ...live, swap });
+            })}>Submit tx hash</button>
             <button type="button" className="rounded-md border border-input px-3 py-1.5" onClick={() => download(`1click-quote-${live.swap.depositAddress}.json`, live.signed)}>Download the signed quote</button>
           </div>
         </div>

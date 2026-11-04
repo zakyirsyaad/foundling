@@ -22,7 +22,7 @@ export type SwapStatus = "PENDING_DEPOSIT" | "INCOMPLETE_DEPOSIT" | "not-found" 
 
 /** Whether the deposit address may be shown. A 404 before 1Click knows the address counts as PENDING_DEPOSIT. */
 export function addressView(i: { status: SwapStatus; remainingMs: number; marginMs: number; needsReanchor: boolean; reloaded: boolean }): AddressView {
-  if (i.remainingMs <= i.marginMs) return "do-not-send";
+  if (!Number.isFinite(i.remainingMs) || i.remainingMs <= i.marginMs) return "do-not-send";
   if (i.needsReanchor || i.reloaded) return "hide";
   return i.status === "PENDING_DEPOSIT" || i.status === "INCOMPLETE_DEPOSIT" || i.status === "not-found" ? "show" : "hide";
 }

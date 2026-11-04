@@ -38,7 +38,10 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
 
   const run = useCallback(
     async (steps: Step[], partial?: () => "claim-pending" | "moved-to-claimable" | undefined) => {
-      if (!wallet || !ctx) return;
+      if (!wallet || !ctx) {
+        dispatch({ type: "rejected", raw: !wallet ? "NO_WALLET" : "TOKEN_MISMATCH" });
+        return;
+      }
       dispatch({ type: "submit" });
       try {
         const txs = steps.map((s) => buildTx(s.name, s.args, ctx));

@@ -72,3 +72,10 @@ test("useTx sends, settles, and maps cancel and contract errors", async () => {
   expect(result.current.state).toMatchObject({ kind: "rejected", raw: "Smart contract panicked: NOT_STUCK" });
   expect(settled).toHaveBeenCalledTimes(3);
 });
+test("useTx refuses out loud when there is no build context", async () => {
+  const wallet = { send: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
+  const { result } = renderHook(() => useTx(wallet, null, vi.fn()));
+  await act(async () => result.current.run([{ name: "deposit", args: { amount: "1" } }]));
+  expect(result.current.state).toMatchObject({ kind: "rejected", sentence: expect.stringMatching(/will not sign/) });
+  expect(wallet.send).not.toHaveBeenCalled();
+});

@@ -74,8 +74,10 @@ test("a quote that does not echo the request never shows an address", async ({ p
 });
 test("after a reload the address is gone, the swap is listed, and a second quote is blocked", async ({ page }) => {
   await toAddress(page);
+  const address = (await card(page).getByTestId("deposit-address").innerText()).trim();
   await page.reload();
   await expect(card(page).getByTestId("deposit-address")).toHaveCount(0);
+  await expect(card(page)).not.toContainText(address);
   await expect(card(page).getByRole("list", { name: "Earlier swaps" })).toContainText("in progress");
   await expect(card(page)).toContainText("A second quote now risks a second send.");
 });

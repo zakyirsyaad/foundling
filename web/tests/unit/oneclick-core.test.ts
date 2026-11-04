@@ -84,3 +84,6 @@ test("deposit amount is the smallest of the three", () => {
   expect(depositAmount(10_000_000n, 10_000_000n, 500_000n, 1_000_000n)).toEqual({ amount: 500_000n, excess: 9_500_000n, belowMin: true });
   expect(depositAmount(3n, 10n, 10n, 1n)).toEqual({ amount: 3n, excess: 0n, belowMin: false });
 });
+test("a time that is not a number never shows the address", () => {
+  expect(addressView({ status: "PENDING_DEPOSIT", remainingMs: Number.NaN, marginMs: 120_000, needsReanchor: false, reloaded: false })).toBe("do-not-send");
+});

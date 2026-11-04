@@ -65,7 +65,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
           {ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy }) : null}
         </>
       )}
-      {slots.crossChain && config.oneClick ? slots.crossChain({ s, p, unreadable, run, busy }) : null}
+      {slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy }) : null}
     </div>
   );
 }
