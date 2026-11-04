@@ -9,6 +9,8 @@
 
 use std::path::PathBuf;
 
+use sha2::{Digest, Sha256};
+
 use foundling_sandbox::{
     event_data, events, failures, Foundling, Setup, CHAIN, COMMITMENT, NEAR_FEED, NEAR_PRICE,
     USDC_FEED, WASM_HASH,
@@ -88,8 +90,6 @@ struct Outcome {
     started: bool,
     /// The chain second the swap was debited from the book, which is when the window stamps it.
     started_at: Option<u64>,
-    /// A method refused the call outright, with this text in the failure.
-    refused: Option<String>,
     /// Every account that ran a receipt of the `execute_decision` transaction.
     executors: Vec<String>,
 }
@@ -110,7 +110,6 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
         failed: code_of(event_data(&triggered, "cycle_failed")),
         started: false,
         started_at: None,
-        refused: None,
         executors: Vec::new(),
     };
     let stage: Value = env.view_vault("stage", json!({})).await?;
@@ -122,9 +121,6 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
         outcome.rejected = code_of(event_data(&executed, "rejected"));
         if outcome.started {
             outcome.started_at = Some(second_of(env, &executed, "swap_started").await?);
-        }
-        if executed.is_failure() {
-            outcome.refused = Some(failures(&executed));
         }
         let mut executors: Vec<String> = executed
             .outcomes()
@@ -150,11 +146,12 @@ async fn execute(
         .await
 }
 
-async fn wallet_of_vault(
+async fn wallet_of(
     env: &Foundling,
     token: &near_workspaces::Contract,
+    account: &near_workspaces::AccountId,
 ) -> anyhow::Result<String> {
-    env.view_contract(token, "ft_balance_of", json!({"account_id": env.vault_id}))
+    env.view_contract(token, "ft_balance_of", json!({"account_id": account}))
         .await
 }
 
@@ -165,8 +162,8 @@ async fn balances(env: &Foundling) -> anyhow::Result<Value> {
         "book": env.view_vault::<Value>("book", json!({})).await?,
         "total_shares": env.view_vault::<String>("total_shares", json!({})).await?,
         "rhea_book": env.view_vault::<Value>("rhea_book", json!({})).await?,
-        "wallet_usdc": wallet_of_vault(env, &env.usdc).await?,
-        "wallet_wnear": wallet_of_vault(env, &env.wnear).await?,
+        "wallet_usdc": wallet_of(env, &env.usdc, &env.vault_id).await?,
+        "wallet_wnear": wallet_of(env, &env.wnear, &env.vault_id).await?,
     }))
 }
 
@@ -271,11 +268,19 @@ impl Run {
             .push(json!({"step": label, "held": held, "observed": observed, "detail": detail}));
     }
 
+    /// Evidence that is not a defence: setup and controls. If one of these is wrong the attack
+    /// was never mounted, which is a tool error (no proof), so callers `ensure!` it first.
+    fn context(&mut self, label: &str, detail: Value) {
+        self.steps
+            .push(json!({"step": label, "held": null, "observed": null, "detail": detail}));
+    }
+
     fn note(&mut self, code: &str, why: &str) {
         self.notes.push(json!({"code": code, "note": why}));
     }
 
-    fn finish(self, before: Value, after: Value) -> anyhow::Result<()> {
+    fn finish(self, env: &Foundling, before: Value, after: Value) -> anyhow::Result<()> {
+        let wasm = foundling_sandbox::wasm("vault", "foundling_vault");
         let dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "proofs", "attack"]
             .iter()
             .collect();
@@ -286,6 +291,8 @@ impl Run {
             "expected_codes": self.expected,
             "observed_codes": self.observed,
             "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+            "vault_wasm_sha256": format!("{:x}", Sha256::digest(&wasm)),
+            "policy": env.config["policy"],
             "ledger_before": before,
             "ledger_after": after,
             "steps": self.steps,
@@ -344,19 +351,21 @@ async fn over_cap() -> anyhow::Result<()> {
 
     wait_seconds(&env, COOLDOWN + 1).await?;
     let at_cap = decide(&env, template("buy_risk", cap)).await?;
-    run.step(
-        "control: exactly the cap is not rejected, so the line is the cap itself",
+    anyhow::ensure!(
         at_cap.rejected.is_none() && at_cap.started,
-        None,
+        "control failed: exactly the cap should trade: {at_cap:?}"
+    );
+    run.context(
+        "control: exactly the cap is not rejected, so the line is the cap itself",
         json!({"nonce": at_cap.nonce, "amount_in": cap.to_string()}),
     );
 
-    run.finish(before, after_one_over)
+    run.finish(&env, before, after_one_over)
 }
 
 /// Which of `codes` a refused call names, for a method that refuses by panicking.
-fn refusal<'a>(text: &Option<String>, codes: &[&'a str]) -> Option<&'a str> {
-    let text = text.as_deref()?;
+fn refusal<'a>(text: Option<&str>, codes: &[&'a str]) -> Option<&'a str> {
+    let text = text?;
     codes.iter().copied().find(|code| text.contains(code))
 }
 
@@ -377,10 +386,12 @@ async fn replay() -> anyhow::Result<()> {
 
     let spent = decide(&env, template("buy_risk", 1_000_000)).await?;
     let after_trade = balances(&env).await?;
-    run.step(
-        "setup: a real buy executes, which spends its nonce",
+    anyhow::ensure!(
         spent.started,
-        None,
+        "setup failed: a real buy should execute: {spent:?}"
+    );
+    run.context(
+        "setup: a real buy executes, which spends its nonce",
         json!({"nonce": spent.nonce}),
     );
 
@@ -413,8 +424,8 @@ async fn replay() -> anyhow::Result<()> {
     let stale = refused_text(&execute(&env, spent.nonce).await?);
     run.step(
         "execute_decision on a nonce that already ran",
-        refusal(&stale, &["NOT_READY"]).is_some() && balances(&env).await? == after_trade,
-        refusal(&stale, &["NOT_READY"]),
+        refusal(stale.as_deref(), &["NOT_READY"]).is_some() && balances(&env).await? == after_trade,
+        refusal(stale.as_deref(), &["NOT_READY"]),
         json!({"nonce": spent.nonce}),
     );
 
@@ -436,6 +447,19 @@ async fn replay() -> anyhow::Result<()> {
     let late = env.trigger_cycle().await?;
     anyhow::ensure!(late.is_success(), "{}", failures(&late));
     let late_nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
+    anyhow::ensure!(
+        stage(&env).await?.get("DecisionReady").is_some(),
+        "setup failed: the late decision should be ready"
+    );
+    let wrong = refused_text(&execute(&env, late_nonce + 1).await?);
+    run.step(
+        "execute_decision with the wrong nonce while a decision is ready",
+        refusal(wrong.as_deref(), &["NOT_READY"]).is_some()
+            && stage(&env).await?.get("DecisionReady").is_some()
+            && balances(&env).await? == after_trade,
+        refusal(wrong.as_deref(), &["NOT_READY"]),
+        json!({"ready_nonce": late_nonce, "called_with": late_nonce + 1}),
+    );
     wait_seconds(&env, 601).await?;
     let expired = refused_text(&execute(&env, late_nonce).await?);
     let cleared = env
@@ -443,11 +467,11 @@ async fn replay() -> anyhow::Result<()> {
         .await?;
     run.step(
         "execute_decision after the decision expired, then anyone clears it",
-        refusal(&expired, &["EXPIRED"]).is_some()
+        refusal(expired.as_deref(), &["EXPIRED"]).is_some()
             && code_of(event_data(&cleared, "cycle_failed")).as_deref() == Some("EXPIRED")
             && stage(&env).await? == json!("Idle")
             && balances(&env).await? == after_trade,
-        refusal(&expired, &["EXPIRED"]),
+        refusal(expired.as_deref(), &["EXPIRED"]),
         json!({"nonce": late_nonce}),
     );
 
@@ -467,14 +491,20 @@ async fn replay() -> anyhow::Result<()> {
         .any(|e| e["event"] == "swap_started");
     run.step(
         "a decision ready when the guardian freezes",
-        refusal(&blocked_text, &["FROZEN"]).is_some()
+        refusal(blocked_text.as_deref(), &["FROZEN"]).is_some()
             && !traded
             && balances(&env).await? == after_trade,
-        refusal(&blocked_text, &["FROZEN"]),
-        json!({"nonce": frozen_nonce}),
+        refusal(blocked_text.as_deref(), &["FROZEN"]),
+        json!({"nonce": frozen_nonce, "seen_as": "panic of execute_decision, not a Rejected event"}),
+    );
+    run.note(
+        "FROZEN",
+        "Rejected(FROZEN) from on_price and from on_decision cannot be staged: the mocks answer \
+         inside one transaction, so a freeze cannot land between two receipts. Covered by the \
+         unit tests in contracts/vault/src/tests/swap.rs and flows.rs",
     );
 
-    run.finish(before, balances(&env).await?)
+    run.finish(&env, before, balances(&env).await?)
 }
 
 async fn window_usdc(env: &Foundling) -> anyhow::Result<u128> {
@@ -482,6 +512,20 @@ async fn window_usdc(env: &Foundling) -> anyhow::Result<u128> {
         .view_vault("window_used", json!({"token_in": "Usdc"}))
         .await?;
     Ok(used.parse()?)
+}
+
+/// The head block's second and `window_used` read at that same block. Two separate reads of
+/// the head could straddle a new block, and then the pair would not belong together.
+async fn window_sample(env: &Foundling) -> anyhow::Result<(u64, u128)> {
+    let block = env.worker.view_block().await?;
+    let used: String = env
+        .worker
+        .view(&env.vault_id, "window_used")
+        .args_json(json!({"token_in": "Usdc"}))
+        .block_hash(*block.hash())
+        .await?
+        .json()?;
+    Ok((block.timestamp() / 1_000_000_000, used.parse()?))
 }
 
 /// Buys of 1.5 USDC at NAV 20: each is under the 2 USDC cap, and the window holds two of them
@@ -494,22 +538,21 @@ async fn drip() -> anyhow::Result<()> {
     let before = settle_deposit(&env).await?;
 
     let first = decide(&env, template("buy_risk", CHUNK)).await?;
-    let first_at = first.started_at.unwrap_or_default();
-    run.step(
-        "first chunk is accepted",
-        first.started && first_at > 0,
-        None,
-        json!({"nonce": first.nonce, "second": 0}),
-    );
+    let first_at = first
+        .started_at
+        .ok_or_else(|| anyhow::anyhow!("setup failed: the first chunk should trade: {first:?}"))?;
+    run.context("first chunk is accepted", json!({"nonce": first.nonce}));
 
     wait_until(&env, first_at + EPOCH_LEN / 2).await?;
     let second = decide(&env, template("buy_risk", CHUNK)).await?;
     let after_second = ledger(&env).await?;
-    run.step(
-        "second chunk, half an epoch later, is accepted",
+    anyhow::ensure!(
         second.started && window_usdc(&env).await? == 2 * CHUNK,
-        None,
-        json!({"nonce": second.nonce, "half_an_epoch_in": second.started_at.is_some_and(|at| at - first_at >= EPOCH_LEN / 2), "window": 2 * CHUNK}),
+        "setup failed: the second chunk should trade and fill the window to 3 USDC: {second:?}"
+    );
+    run.context(
+        "second chunk, half an epoch later, is accepted",
+        json!({"nonce": second.nonce, "window": 2 * CHUNK}),
     );
 
     wait_seconds(&env, COOLDOWN + 1).await?;
@@ -540,10 +583,12 @@ async fn drip() -> anyhow::Result<()> {
     // The window is half open: an entry counts while `at + epoch_len > now`. Reading the view
     // block by block shows the exact second the first chunk drops out, and that it does.
     let leaves_at = first_at + EPOCH_LEN;
-    let mut samples = Vec::new();
-    while head_second(&env).await? <= leaves_at + 1 {
-        let second = head_second(&env).await?;
-        let used = window_usdc(&env).await?;
+    let mut samples: Vec<(u64, u128)> = Vec::new();
+    loop {
+        let (second, used) = window_sample(&env).await?;
+        if second > leaves_at + 1 {
+            break;
+        }
         if samples.last().map(|(s, _)| *s) != Some(second) {
             samples.push((second, used));
         }
@@ -557,24 +602,29 @@ async fn drip() -> anyhow::Result<()> {
                 CHUNK
             }
     });
-    let saw_both_sides = samples.iter().any(|(s, _)| *s == leaves_at - 1)
-        && samples.iter().any(|(s, _)| *s == leaves_at);
+    anyhow::ensure!(
+        samples.iter().any(|(s, _)| *s == leaves_at - 1)
+            && samples.iter().any(|(s, _)| *s == leaves_at),
+        "the sampling skipped a second at the edge: {samples:?}"
+    );
     run.step(
         "the first chunk leaves the window at exactly at + epoch_len, not before",
-        edge_ok && saw_both_sides,
+        edge_ok,
         None,
-        json!({"leaves_at": EPOCH_LEN, "samples_around_the_edge": samples.iter().filter(|(second, _)| second.abs_diff(leaves_at) <= 3).map(|(second, used)| (second - first_at, used)).collect::<Vec<_>>()}),
+        json!({"leaves_at": EPOCH_LEN, "samples_around_the_edge": samples.iter().filter(|(second, _)| second.abs_diff(leaves_at) <= 3).map(|(second, used)| (second.saturating_sub(first_at), used)).collect::<Vec<_>>()}),
     );
 
     // Cooldown has passed since `inside`; the first chunk is gone but the second is not.
     wait_until(&env, leaves_at + COOLDOWN).await?;
     let fourth = decide(&env, template("buy_risk", CHUNK)).await?;
     let after_fourth = ledger(&env).await?;
-    run.step(
-        "after the boundary one chunk fits again",
+    anyhow::ensure!(
         fourth.started && window_usdc(&env).await? == 2 * CHUNK,
-        None,
-        json!({"nonce": fourth.nonce, "window": window_usdc(&env).await?.to_string()}),
+        "after the boundary one chunk should fit again: {fourth:?}"
+    );
+    run.context(
+        "after the boundary one chunk fits again",
+        json!({"nonce": fourth.nonce, "window": 2 * CHUNK}),
     );
 
     wait_seconds(&env, COOLDOWN + 1).await?;
@@ -589,7 +639,7 @@ async fn drip() -> anyhow::Result<()> {
         json!({"nonce": fifth.nonce, "after_boundary": head_second(&env).await? > first_at + EPOCH_LEN}),
     );
 
-    run.finish(before, after_fifth)
+    run.finish(&env, before, after_fifth)
 }
 
 /// How old the mock oracle says a feed is. Past `price_max_age` it answers `null`, as the real one does.
@@ -672,13 +722,15 @@ async fn stale_price() -> anyhow::Result<()> {
 
     set_age(&env, USDC_FEED, 100_000_000, 0).await?;
     let recovered = execute(&env, nonce).await?;
-    run.step(
-        "control: with both feeds fresh the same decision trades, without a new run",
+    anyhow::ensure!(
         events(&recovered)
             .iter()
             .any(|e| e["event"] == "swap_started")
             && requests(&env).await? == runs_before,
-        None,
+        "control failed: with fresh feeds the same decision should trade without a new run"
+    );
+    run.context(
+        "control: with both feeds fresh the same decision trades, without a new run",
         json!({"nonce": nonce, "new_runs_paid": requests(&env).await? - runs_before}),
     );
 
@@ -686,7 +738,7 @@ async fn stale_price() -> anyhow::Result<()> {
         "PRICE_STALE",
         "not reachable with the mock oracle; see the test doc",
     );
-    run.finish(before, ledger(&env).await?)
+    run.finish(&env, before, ledger(&env).await?)
 }
 
 /// Decision v1 has no field for a route, a pool, an asset or a receiver, so there is nothing
@@ -785,14 +837,5 @@ async fn bad_route() -> anyhow::Result<()> {
         "contracts/vault never emits it: Decision v1 carries no route, asset or receiver, \
          and unknown fields are ignored. I9 held, but the SPEC's reason code cannot occur",
     );
-    run.finish(before, ledger(&env).await?)
-}
-
-async fn wallet_of(
-    env: &Foundling,
-    token: &near_workspaces::Contract,
-    account: &near_workspaces::AccountId,
-) -> anyhow::Result<String> {
-    env.view_contract(token, "ft_balance_of", json!({"account_id": account}))
-        .await
+    run.finish(&env, before, ledger(&env).await?)
 }
