@@ -372,6 +372,14 @@ attack.run_attack = run_attack
 """
 
 
+# Inside run_attack, but before the script is started and before its try block.
+SLOW_LOOKUP = """
+def find_script(*args, **kwargs):
+    print("looking", flush=True)
+    time.sleep(30)
+attack.find_script = find_script
+"""
+
 # A stop recorded by an earlier main() call in the same process.
 STALE_STOP = """
 attack._state["stop"] = attack.Stopped("TERMINATED", 143)
@@ -591,6 +599,15 @@ class AttackCleanupTest(unittest.TestCase):
         time.sleep(0.5)
         self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
         self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
+
+    def test_stop_before_the_script_starts_still_names_the_attack(self):
+        registry = self.registry_of(["hang"])
+        proc = self.start(registry, "run", "hang", setup=SLOW_LOOKUP)
+        self.wait_for_output("looking")
+        proc.send_signal(signal.SIGINT)
+        stderr = self.finish(proc)
+        self.assertEqual(stderr.splitlines(), ["INTERRUPTED: hang"])
+        self.assertEqual(proc.returncode, 130)
 
     def test_a_stop_left_by_an_earlier_main_call_does_not_leak_into_the_next(self):
         registry = self.registry_of(["ok"])

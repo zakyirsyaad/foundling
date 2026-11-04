@@ -86,13 +86,6 @@ def stop_on_signal(signum, frame):
     # Popen or kill_group is mid-flight; run_attack and kill_group raise it afterwards.
 
 
-def pending_stop(name):
-    stop = _state["stop"]
-    if stop:
-        stop.name = name
-    return stop
-
-
 def kill_group(proc):
     """SIGKILL the script's whole process group, then reap the script."""
     _state["deferring"] = True
@@ -127,15 +120,16 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
         with subprocess.Popen([str(script)], start_new_session=True) as proc:
             try:
                 _state["deferring"] = False
-                if stop := pending_stop(name):
-                    raise stop
+                if _state["stop"]:
+                    raise _state["stop"]
                 code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 code = None
             finally:
                 kill_group(proc)
     except OSError as err:
-        if stop := pending_stop(name):
+        if stop := _state["stop"]:
+            stop.name = name  # a raise inside this handler skips `except Stopped` below
             raise stop from None
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
@@ -211,7 +205,8 @@ def main(argv):
             return run_all(registry, args.attacks_dir, args.timeout, args.strict)
         return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
     except Stopped as stop:
-        print(f"{stop.label}: {stop.name or args.cmd}", file=sys.stderr)
+        name = stop.name or getattr(args, "name", None) or args.cmd
+        print(f"{stop.label}: {name}", file=sys.stderr)
         return stop.code
     finally:
         for sig, handler in previous.items():
