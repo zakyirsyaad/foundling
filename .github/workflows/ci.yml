@@ -307,6 +307,8 @@ jobs:
         run: npm run -w web typecheck
       - name: Unit tests with coverage
         run: npm run -w web test:coverage
+      - name: Call table and events match the contract
+        run: npm run -w web check:contract
       - name: Production bundle has no mock wallet
         env:
           FOUNDLING_BUNDLE_CHECK: "1"
