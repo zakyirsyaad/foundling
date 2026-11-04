@@ -156,6 +156,21 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(len(world.methods("abort_stale_cycle")), 1)
         self.assertEqual(log.of("cycle")[0]["result"], "CycleAborted")
 
+    def test_aborts_a_stale_awaiting_price(self):
+        world = World(cooldown=3600, abort_after_blocks=450)
+        world.price_hang = True  # the oracle callback never arrives
+        log = ListLog()
+        bot = make_bot(world, log=log)
+        drive(bot, world, 400)
+        self.assertEqual(world.kind(), "AwaitingPrice")
+        self.assertEqual(world.methods("abort_stale_cycle"), [])
+        drive(bot, world, 150)
+        self.assertEqual(len(world.methods("abort_stale_cycle")), 1)
+        self.assertEqual(len(world.methods("execute_decision")), 1, "no second execute while it waits")
+        (cycle,) = log.of("cycle")
+        self.assertEqual(cycle["result"], "CycleAborted")
+        self.assertIn("AwaitingPrice", cycle["stages_seen"])
+
     def test_expires_decision_past_expires_at(self):
         world = World()
         world.set_stage("DecisionReady", nonce=4, expires_at=int(world.now) + 100)

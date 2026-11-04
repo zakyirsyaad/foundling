@@ -48,6 +48,8 @@ class World:
         self.decision_delay = 10
         self.execute_script = []  # PRICE_UNAVAILABLE | REJECT:<code> | EXECUTED | STUCK
         self.advance_mode = "success"  # success | noop | stay_stuck
+        self.price_delay = 3  # seconds from execute_decision to the oracle callback
+        self.price_hang = False  # the callback never arrives
         self.calls = []  # dicts: t, method, args, gas, ok, error, hash
         self.logs = {}
         self.timeline = []
@@ -200,8 +202,18 @@ class World:
             raise Panic("FROZEN")
         tx = self._new_tx()
         step = self.execute_script.pop(0) if self.execute_script else "EXECUTED"
+        self.stage = {"AwaitingPrice": {"nonce": nonce, "entered_block": self.height,
+                                        "expires_at": expires_at}}
+        if not self.price_hang:
+            self.at(self.price_delay, lambda: self._price_arrives(tx, nonce, expires_at, step))
+        return tx
+
+    def _price_arrives(self, tx, nonce, expires_at, step):
+        if self.kind() != "AwaitingPrice" or self.fields()["nonce"] != nonce:
+            return
         if step == "PRICE_UNAVAILABLE":
             self._emit(tx, "rejected", nonce=nonce, code="PRICE_UNAVAILABLE")
+            self.stage = {"DecisionReady": {"nonce": nonce, "expires_at": expires_at}}
         elif step.startswith("REJECT:"):
             self._emit(tx, "rejected", nonce=nonce, code=step.split(":", 1)[1])
             self.stage = "Idle"
@@ -212,7 +224,6 @@ class World:
                 self.at(15, lambda: self._swap_done(tx, nonce))
             else:
                 self.at(15, lambda: self._swap_stuck(tx, nonce))
-        return tx
 
     def _swap_done(self, tx, nonce):
         if self.kind() == "Swapping" and self.fields()["nonce"] == nonce:
