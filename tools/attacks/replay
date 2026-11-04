@@ -2,7 +2,12 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _sandbox import main  # noqa: E402
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _sandbox import main
 
-sys.exit(main("replay"))
+    code = main("replay")
+except Exception as err:  # an uncaught exception exits 1, which reads as "attack succeeded"
+    print(f"ERROR: replay: {err!r}", file=sys.stderr)
+    code = 2
+sys.exit(code)
