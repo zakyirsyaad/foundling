@@ -43,7 +43,7 @@ def run(name, root=ROOT, cargo=("cargo",)):
 
     proof_path = root / "proofs" / "attack" / f"{name}.json"
     proof_path.unlink(missing_ok=True)
-    command = [*cargo, "test", "--locked", "--test", TEST_BINARY, name.replace("-", "_"), "--", "--exact"]
+    command = [*cargo, "test", "--locked", "--test", TEST_BINARY, name.replace("-", "_"), "--", "--exact", "--include-ignored"]
     try:
         # cargo's output goes to stderr so stdout stays the dispatcher's status lines.
         code = subprocess.run(command, cwd=root / "sandbox", stdout=sys.stderr).returncode

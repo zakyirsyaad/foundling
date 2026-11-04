@@ -120,9 +120,27 @@ class SandboxRunnerTest(unittest.TestCase):
         call = json.loads(self.log.read_text())
         self.assertEqual(
             call["argv"],
-            ["test", "--locked", "--test", "attacks_batch1", "over_cap", "--", "--exact"],
+            [
+                "test", "--locked", "--test", "attacks_batch1", "over_cap",
+                "--", "--exact", "--include-ignored",
+            ],
         )
         self.assertEqual(Path(call["cwd"]).resolve(), (self.root / "sandbox").resolve())
+
+
+class BatchScriptsTest(unittest.TestCase):
+    def test_each_batch1_attack_has_an_executable_script_that_names_itself(self):
+        registry = {
+            a["name"] for a in json.loads((ROOT / "tools" / "attack-registry.json").read_text())["attacks"]
+        }
+        for name in BATCH1:
+            script = ATTACKS / name
+            self.assertTrue(script.is_file(), name)
+            self.assertTrue(os.access(script, os.X_OK), f"{name} is not executable")
+            text = script.read_text()
+            self.assertTrue(text.startswith("#!/usr/bin/env python3"), name)
+            self.assertIn(f'main("{name}")', text)
+            self.assertIn(name, registry)
 
 
 if __name__ == "__main__":

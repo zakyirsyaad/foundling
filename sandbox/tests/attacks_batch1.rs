@@ -90,6 +90,8 @@ struct Outcome {
     started_at: Option<u64>,
     /// A method refused the call outright, with this text in the failure.
     refused: Option<String>,
+    /// Every account that ran a receipt of the `execute_decision` transaction.
+    executors: Vec<String>,
 }
 
 /// One keeper cycle: ask OutLayer for `answer`, then execute what the vault accepted.
@@ -109,6 +111,7 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
         started: false,
         started_at: None,
         refused: None,
+        executors: Vec::new(),
     };
     let stage: Value = env.view_vault("stage", json!({})).await?;
     if stage.get("DecisionReady").is_some() {
@@ -123,6 +126,14 @@ async fn cycle(env: &Foundling, answer: Value) -> anyhow::Result<Outcome> {
         if executed.is_failure() {
             outcome.refused = Some(failures(&executed));
         }
+        let mut executors: Vec<String> = executed
+            .outcomes()
+            .iter()
+            .map(|outcome| outcome.executor_id.to_string())
+            .collect();
+        executors.sort();
+        executors.dedup();
+        outcome.executors = executors;
     }
     Ok(outcome)
 }
@@ -676,4 +687,112 @@ async fn stale_price() -> anyhow::Result<()> {
         "not reachable with the mock oracle; see the test doc",
     );
     run.finish(before, ledger(&env).await?)
+}
+
+/// Decision v1 has no field for a route, a pool, an asset or a receiver, so there is nothing
+/// to put in `Rejected(ROUTE_NOT_ALLOWED)`: the vault never emits that code, and an agent
+/// that adds such fields has them ignored. What this proves is I9, that no receipt of the
+/// trade runs anywhere but the registered accounts. The code step below is the SPEC's
+/// expectation and fails for as long as the vault cannot produce it.
+// Ignored in `cargo test` so `make sandbox` stays green: the failure is a gap between the SPEC and
+// the vault, not a regression. `tools/attacks/bad-route` runs it with `--include-ignored` and
+// reports FAIL. Remove this when the vault emits the code or the SPEC drops it.
+#[ignore = "SPEC gap: the vault never emits ROUTE_NOT_ALLOWED"]
+#[tokio::test]
+async fn bad_route() -> anyhow::Result<()> {
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new("bad-route", &["ROUTE_NOT_ALLOWED"]);
+    let before = settle_deposit(&env).await?;
+    // The keeper signs the call, so its own account runs the receipt that converts the transaction.
+    let registered: Vec<String> = [
+        env.keeper.id().as_str(),
+        env.vault_id.as_str(),
+        env.usdc.id().as_str(),
+        env.wnear.id().as_str(),
+        env.rhea.id().as_str(),
+        env.oracle.id().as_str(),
+    ]
+    .iter()
+    .map(|account| account.to_string())
+    .collect();
+    let attacker = env.stranger.id().to_string();
+
+    let nonce: u64 = env.view_vault::<u64>("last_nonce", json!({})).await? + 1;
+    let poisoned = json!({
+        "v": 1, "vault": env.vault_id, "chain": CHAIN, "nonce": nonce,
+        "action": "buy_risk", "amount_in": "1000000", "ref_price": NEAR_PRICE.to_string(),
+        "commitment": COMMITMENT, "wasm_hash": WASM_HASH,
+        "receiver_id": attacker, "token_out": attacker, "pool_id": 1,
+        "route": [{"pool_id": 1, "token_in": env.usdc.id(), "token_out": attacker}],
+    })
+    .to_string();
+    let smuggled = cycle(&env, json!({"Raw": {"payload": poisoned}})).await?;
+    let leaked: Vec<&String> = smuggled
+        .executors
+        .iter()
+        .filter(|account| !registered.contains(account))
+        .collect();
+    let attacker_holds = [
+        wallet_of(&env, &env.usdc, env.stranger.id()).await?,
+        wallet_of(&env, &env.wnear, env.stranger.id()).await?,
+    ];
+    let code = smuggled.rejected.clone().or(smuggled.failed.clone());
+    run.step(
+        "a decision that names a receiver, a pool and a route of the attacker's choosing",
+        leaked.is_empty()
+            && attacker_holds == ["0", "0"]
+            && (smuggled.started || code.as_deref() == Some("ROUTE_NOT_ALLOWED")),
+        code.as_deref(),
+        json!({
+            "nonce": nonce,
+            "traded_over_the_registered_route": smuggled.started,
+            "accounts_that_ran_a_receipt": smuggled.executors,
+            "outside_the_registered_set": leaked,
+            "attacker_balances": attacker_holds,
+        }),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let after_trade = balances(&env).await?;
+    let nonce = nonce + 1;
+    let transfer = json!({
+        "v": 1, "vault": env.vault_id, "chain": CHAIN, "nonce": nonce,
+        "action": "transfer_out", "amount_in": "1000000", "ref_price": NEAR_PRICE.to_string(),
+        "commitment": COMMITMENT, "wasm_hash": WASM_HASH, "receiver_id": attacker,
+    })
+    .to_string();
+    let unknown = cycle(&env, json!({"Raw": {"payload": transfer}})).await?;
+    let code_unknown = unknown.rejected.clone().or(unknown.failed.clone());
+    run.step(
+        "an action that is not buy or sell",
+        code_unknown.is_some()
+            && !unknown.started
+            && unknown.executors.is_empty()
+            && balances(&env).await? == after_trade,
+        code_unknown.as_deref(),
+        json!({"nonce": nonce}),
+    );
+
+    let saw = run.observed.iter().any(|code| code == "ROUTE_NOT_ALLOWED");
+    run.step(
+        "Rejected(ROUTE_NOT_ALLOWED) is emitted for an unregistered route",
+        saw,
+        None,
+        json!({"observed_codes": run.observed}),
+    );
+    run.note(
+        "ROUTE_NOT_ALLOWED",
+        "contracts/vault never emits it: Decision v1 carries no route, asset or receiver, \
+         and unknown fields are ignored. I9 held, but the SPEC's reason code cannot occur",
+    );
+    run.finish(before, ledger(&env).await?)
+}
+
+async fn wallet_of(
+    env: &Foundling,
+    token: &near_workspaces::Contract,
+    account: &near_workspaces::AccountId,
+) -> anyhow::Result<String> {
+    env.view_contract(token, "ft_balance_of", json!({"account_id": account}))
+        .await
 }
