@@ -69,8 +69,13 @@ class RpcClient:
         header = self.call("block", {"finality": "final"})["header"]
         return header["height"], header["timestamp"] // 10**9
 
-    def tx_logs(self, tx_hash, signer):
+    def tx_logs(self, tx_hash, signer, executor=None):
+        """Logs of every receipt in the tx tree. With `executor`, only that account's own: the
+        tree also holds OutLayer, the oracle, Ref and the tokens, and any of them can print
+        a line shaped like a vault event."""
         status = self.call("EXPERIMENTAL_tx_status", {
             "tx_hash": tx_hash, "sender_account_id": signer, "wait_until": "FINAL"})
         outcomes = [status["transaction_outcome"], *status["receipts_outcome"]]
-        return [log for item in outcomes for log in item["outcome"]["logs"]]
+        return [log for item in outcomes
+                if executor is None or item["outcome"].get("executor_id") == executor
+                for log in item["outcome"]["logs"]]

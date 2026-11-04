@@ -123,6 +123,19 @@ class RequestShapeTest(unittest.TestCase):
             {"tx_hash": "HASH", "sender_account_id": "keeper.test", "wait_until": "FINAL"},
         )
 
+    def test_tx_logs_can_keep_only_the_logs_of_one_executor(self):
+        def receipt(executor, log):
+            return {"outcome": {"executor_id": executor, "logs": [log]}}
+
+        status = {
+            "transaction_outcome": receipt("keeper.test", "signer"),
+            "receipts_outcome": [receipt("vault.test", "mine"), receipt("evil.test", "forged"),
+                                 receipt("vault.test", "mine too")],
+        }
+        transport = Transport(ok(status))
+        logs = self.client(transport).tx_logs("HASH", "keeper.test", executor="vault.test")
+        self.assertEqual(logs, ["mine", "mine too"])
+
 
 if __name__ == "__main__":
     unittest.main()
