@@ -56,6 +56,16 @@ def find_script(attacks_dir, name):
     return None, False
 
 
+def kill_group(proc):
+    """SIGKILL the script's whole process group, then reap the script."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        # Gone already; macOS reports a group of zombies as PermissionError.
+        pass
+    proc.wait()
+
+
 def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     """Run one attack and return (exit_code, status)."""
     if name not in {a["name"] for a in registry}:
@@ -74,13 +84,11 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
             try:
                 code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+                kill_group(proc)
                 print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
                 return 2, "ERROR"
             except KeyboardInterrupt:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+                kill_group(proc)
                 raise
     except OSError as err:
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)

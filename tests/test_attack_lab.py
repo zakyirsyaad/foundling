@@ -314,5 +314,101 @@ class AttackLabTest(unittest.TestCase):
         self.assertEqual(sum(int(c) for c in counts.groups()), len(CORE_ATTACKS))
 
 
+# Runs the real dispatcher, but os.killpg first kills the group and then reports
+# an error, the way it does when the group is already gone (ProcessLookupError)
+# or is all zombies on macOS (PermissionError). The race cannot be hit reliably.
+RACING_KILLPG_HARNESS = """
+import os, sys
+sys.path.insert(0, {tools!r})
+import attack
+real_killpg = os.killpg
+def killpg(pgid, sig):
+    real_killpg(pgid, sig)
+    raise {error}("group already gone")
+os.killpg = killpg
+sys.exit(attack.main(sys.argv[1:]))
+"""
+
+
+class AttackCleanupTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.attacks = self.tmp / "attacks"
+        self.attacks.mkdir()
+
+    def registry_of(self, names):
+        return write_registry(self.tmp / "r.json", names)
+
+    def start(self, registry, *args, racing_error=None):
+        argv = ["--registry", str(registry), "--attacks-dir", str(self.attacks), *args]
+        if racing_error:
+            harness = RACING_KILLPG_HARNESS.format(tools=str(ATTACK_PY.parent), error=racing_error)
+            cmd = [sys.executable, "-c", harness, *argv]
+        else:
+            cmd = [sys.executable, str(ATTACK_PY), *argv]
+        out = open(self.tmp / "out.txt", "w")
+        err = open(self.tmp / "err.txt", "w")
+        self.addCleanup(out.close)
+        self.addCleanup(err.close)
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=out, stderr=err)
+        self.addCleanup(proc.kill)
+        return proc
+
+    def finish(self, proc):
+        proc.wait(timeout=10)
+        return (self.tmp / "err.txt").read_text()
+
+    def pid_from(self, pidfile):
+        for _ in range(50):
+            if pidfile.exists() and pidfile.read_text().strip():
+                pid = int(pidfile.read_text())
+                self.addCleanup(AttackLabTest.kill_quietly, pid)
+                return pid
+            time.sleep(0.1)
+        self.fail(f"{pidfile.name} was never written")
+
+    def assert_dies(self, pid, message):
+        for _ in range(30):
+            if not AttackLabTest.alive(pid):
+                return
+            time.sleep(0.1)
+        self.fail(message)
+
+    def make_hang(self, name="hang"):
+        pidfile = self.tmp / f"{name}.pid"
+        make_script(
+            self.attacks, name, 0, body=f"#!/bin/sh\necho $$ > {pidfile}\nexec sleep 29\n"
+        )
+        return pidfile
+
+    def test_timeout_is_reported_when_killpg_finds_the_group_gone(self):
+        registry = self.registry_of(["slow"])
+        self.make_hang("slow")
+        for error in ("ProcessLookupError", "PermissionError"):
+            with self.subTest(error=error):
+                proc = self.start(registry, "run", "slow", "--timeout", "1", racing_error=error)
+                stderr = self.finish(proc)
+                self.assertIn("TIMEOUT: slow", stderr)
+                self.assertNotIn("cannot run", stderr)
+
+    def test_ctrl_c_is_not_swallowed_when_killpg_finds_the_group_gone(self):
+        registry = self.registry_of(["hang", "after"])
+        pidfile = self.make_hang()
+        marker = self.tmp / "after.ran"
+        make_script(self.attacks, "after", 0, body=f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+        for error in ("ProcessLookupError", "PermissionError"):
+            with self.subTest(error=error):
+                marker.unlink(missing_ok=True)
+                pidfile.unlink(missing_ok=True)
+                proc = self.start(registry, "run-all", racing_error=error)
+                self.pid_from(pidfile)
+                proc.send_signal(signal.SIGINT)
+                stderr = self.finish(proc)
+                self.assertNotIn("cannot run", stderr)
+                self.assertFalse(marker.exists(), "run-all went on to the next attack after Ctrl-C")
+
+
 if __name__ == "__main__":
     unittest.main()
