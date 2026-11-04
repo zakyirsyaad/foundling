@@ -100,7 +100,11 @@ make attack-lab-full                 # build WASM + kompilasi tes, lalu semua se
 python3 tools/attack.py run drip     # satu serangan; butuh `make wasm` lebih dulu
 ```
 
-- Proof memuat langkah, kode alasan yang teramati, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run.
+- Proof memuat langkah, kode alasan yang teramati, policy yang dipakai, hash SHA-256 `foundling_vault.wasm`, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). `proofs/attack/` di-gitignore: hash WASM non-reproducible berbeda antar mesin, dan tiap run menulis ulang berkasnya. Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run di mesin yang sama.
+- Langkah `held: true/false` adalah pertahanan vault. Langkah `held: null` adalah prasyarat atau kontrol: bila salah, tes berhenti sebelum proof ditulis dan runner melapor 2, bukan 1.
+- `ledger_before` dan `ledger_after` tidak selalu sama: `drip` dan `replay` memuat trade sah di tengah. Bukti "buku tidak berubah" ada per langkah (`ledger_unchanged`, atau perbandingan dengan buku sebelum serangan itu).
+- `FROZEN` di `replay` teramati sebagai panic `execute_decision`, bukan event `Rejected`. Cabang `on_price` dan `settle_decision` tidak bisa dipentaskan karena mock menjawab dalam satu transaksi; keduanya ditutup tes unit kontrak.
+- `make attack-lab` tidak membangun apa pun. Di mesin dengan WASM yang sudah ada, ia menjalankan serangan sungguhan, dan `tests.test_attack_lab` ikut menjalankannya (±4 menit).
 - `Setup { policy: json!({..}) }` menimpa field policy. Serangan yang bergantung pada jam memakai profil testnet SPEC 3.6 (`epoch_len` 600, `cooldown` 60), karena `fast_forward` hanya ±116 blok per detik dan satu blok 0,3 detik: satu `epoch_len` produksi (21.600 detik) butuh ±10 menit, melewati batas 300 detik per serangan.
 - `drip` membaca view `window_used` blok demi blok di sekitar batas dan membuktikan entri keluar tepat pada `at + epoch_len`. Transaksi sendiri mendarat 1-3 blok setelah dikirim, jadi tes transaksi di batas memakai margin 20 detik, dan ketepatan detiknya dibuktikan lewat view.
 - `bad_route` ditandai `#[ignore]` dan dijalankan runner dengan `--include-ignored`: vault tidak pernah memancarkan `ROUTE_NOT_ALLOWED` (Decision v1 tak punya field rute), jadi serangan ini FAIL sampai kontrak atau SPEC berubah. Hapus `#[ignore]` saat itu terjadi.
