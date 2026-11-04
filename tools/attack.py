@@ -28,6 +28,7 @@ DEFAULT_REGISTRY = HERE / "attack-registry.json"
 DEFAULT_ATTACKS_DIR = HERE / "attacks"
 STATUSES = ("PASS", "FAIL", "NOT_IMPLEMENTED", "ERROR")
 ATTACK_TIMEOUT_SECONDS = 300
+KILL_GRACE_SECONDS = 5
 ATTACK_NAME = re.compile(r"[a-z][a-z0-9-]*")
 
 
@@ -95,7 +96,13 @@ def kill_group(proc):
         except (ProcessLookupError, PermissionError):
             # Gone already; macOS reports a group of zombies as PermissionError.
             pass
-        proc.wait()
+        try:
+            proc.wait(timeout=KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            # The group kill did not take (a refused EPERM is swallowed above); the
+            # script is our child, so signal it directly rather than wait forever.
+            proc.kill()
+            proc.wait()
     finally:
         _state["deferring"] = False
     if _state["stop"]:

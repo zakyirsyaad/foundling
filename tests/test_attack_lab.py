@@ -372,6 +372,14 @@ attack.run_attack = run_attack
 """
 
 
+# killpg reports EPERM but kills nothing, as for a group the OS will not let us signal.
+KILLPG_REFUSES = """
+def killpg(pgid, sig):
+    raise PermissionError("not permitted")
+os.killpg = killpg
+attack.KILL_GRACE_SECONDS = 0.5
+"""
+
 # Inside run_attack, but before the script is started and before its try block.
 SLOW_LOOKUP = """
 def find_script(*args, **kwargs):
@@ -599,6 +607,16 @@ class AttackCleanupTest(unittest.TestCase):
         time.sleep(0.5)
         self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
         self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
+
+    def test_script_is_killed_directly_when_killpg_is_refused(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        proc = self.start(registry, "run", "hang", "--timeout", "1", setup=KILLPG_REFUSES)
+        script = self.pid_from(pidfile)
+        stderr = self.finish(proc)
+        self.assert_dies(script, "attack survived although killpg was refused")
+        self.assertIn("TIMEOUT: hang", stderr)
+        self.assertEqual(proc.returncode, 2)
 
     def test_stop_before_the_script_starts_still_names_the_attack(self):
         registry = self.registry_of(["hang"])
