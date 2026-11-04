@@ -1,4 +1,15 @@
+import { type NodePgDatabase, drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+
+import * as schema from "./schema";
+
+export type Db = NodePgDatabase<typeof schema>;
+
+/** A pooled Drizzle client. `max` stays small: the VPS runs the API and the worker side by side. */
+export function db(url: string, max = 5): { db: Db; pool: pg.Pool } {
+  const pool = new pg.Pool({ connectionString: url, max });
+  return { db: drizzle(pool, { schema }), pool };
+}
 
 /** True when Postgres at `url` answers `select 1`. */
 export async function pingDb(url: string): Promise<boolean> {
