@@ -201,9 +201,11 @@ def main(argv):
     # The script runs in its own session, so a signal sent to the dispatcher
     # never reaches it. Turn the signals into an exception so the group is killed.
     # A signal inherited as ignored (nohup, a background job) stays ignored.
+    _state.update(stop=None, deferring=False)
+    previous = {}
     for sig in STOP_SIGNALS:
         if signal.getsignal(sig) != signal.SIG_IGN:
-            signal.signal(sig, stop_on_signal)
+            previous[sig] = signal.signal(sig, stop_on_signal)
     try:
         if args.cmd == "run-all":
             return run_all(registry, args.attacks_dir, args.timeout, args.strict)
@@ -211,6 +213,9 @@ def main(argv):
     except Stopped as stop:
         print(f"{stop.label}: {stop.name or args.cmd}", file=sys.stderr)
         return stop.code
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

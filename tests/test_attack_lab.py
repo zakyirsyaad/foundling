@@ -333,7 +333,7 @@ sys.exit(attack.main(sys.argv[1:]))
 # Runs the real dispatcher after `setup` has patched the attack module, to open
 # a timing window that cannot be hit reliably from outside.
 PATCHED_DISPATCHER = """
-import os, subprocess, sys, time
+import os, signal, subprocess, sys, time
 sys.path.insert(0, {tools!r})
 import attack
 {setup}
@@ -369,6 +369,24 @@ def run_attack(*args, **kwargs):
     print("ready", flush=True)
     time.sleep(30)
 attack.run_attack = run_attack
+"""
+
+
+# A stop recorded by an earlier main() call in the same process.
+STALE_STOP = """
+attack._state["stop"] = attack.Stopped("TERMINATED", 143)
+"""
+
+# Reports whether main() put the signal handlers back the way it found them.
+REPORT_HANDLERS = """
+real_main = attack.main
+def main(argv):
+    before = {s: signal.getsignal(s) for s in attack.STOP_SIGNALS}
+    code = real_main(argv)
+    after = {s: signal.getsignal(s) for s in attack.STOP_SIGNALS}
+    print("restored" if before == after else "leaked", flush=True)
+    return code
+attack.main = main
 """
 
 
@@ -573,6 +591,20 @@ class AttackCleanupTest(unittest.TestCase):
         time.sleep(0.5)
         self.assertIsNone(proc.poll(), "dispatcher quit on SIGHUP although it was started ignoring it")
         self.assertTrue(AttackLabTest.alive(script), "attack was killed by an ignored SIGHUP")
+
+    def test_a_stop_left_by_an_earlier_main_call_does_not_leak_into_the_next(self):
+        registry = self.registry_of(["ok"])
+        make_script(self.attacks, "ok", 0)
+        proc = self.start(registry, "run", "ok", setup=STALE_STOP)
+        self.finish(proc)
+        self.assertEqual(proc.returncode, 0)
+
+    def test_main_puts_the_signal_handlers_back(self):
+        registry = self.registry_of(["ok"])
+        make_script(self.attacks, "ok", 0)
+        proc = self.start(registry, "run", "ok", setup=REPORT_HANDLERS)
+        self.finish(proc)
+        self.assertEqual((self.tmp / "out.txt").read_text().split()[-1], "restored")
 
     def test_signal_during_a_failed_spawn_is_reported_not_cannot_run(self):
         registry = self.registry_of(["bad"])
