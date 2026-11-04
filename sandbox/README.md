@@ -89,4 +89,3 @@ async fn contoh() -> anyhow::Result<()> {
 
 - Harness menyimpan salinan JSON `InitConfig` dan `Policy` (`vault_config` di `src/lib.rs`). Bila lead mengubah bentuknya di `contracts/vault`, ubah juga di sini. `start()` akan gagal dengan pesan yang menunjuk ke sana.
 - Tes memakai `reveal_after` = jam sistem + 30 hari. Tes yang memaju-cepatkan blok lebih dari itu harus mengaturnya sendiri.
-- CI belum menjalankan crate `sandbox`, `mock-outlayer`, dan `mock-token`.

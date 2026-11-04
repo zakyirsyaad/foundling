@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-"""Attack Lab dispatcher: `foundling attack list|run <name>|run-all`.
+"""Attack Lab dispatcher: `foundling attack list | run NAME [--timeout S] | run-all [--timeout S] [--strict]`.
 
 Exit codes per attack: 0 = system held, 1 = attack succeeded or reason code
 differed, 2 = tool or network error. An attack without a script under
-tools/attacks/ is NOT_IMPLEMENTED and exits 2.
+tools/attacks/ is NOT_IMPLEMENTED and exits 2. To implement one, add an
+executable tools/attacks/<name>[.sh|.py] that follows the same exit codes.
+A script that does not exit within --timeout seconds is killed with its
+children and counts as ERROR. run-all --strict also exits 2 on NOT_IMPLEMENTED.
+Every script runs in its own process group, and the group is killed when the
+script ends however it ends, so background children do not outlive the attack.
+SIGINT, SIGTERM and SIGHUP stop the run after that cleanup: stderr gets one
+`INTERRUPTED: <name>` or `TERMINATED: <name>` line and the exit code is 128 plus
+the signal number (130, 143, 129). A signal inherited as ignored (nohup) stays ignored.
 """
 import argparse
 import json
+import math
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -18,11 +28,20 @@ DEFAULT_REGISTRY = HERE / "attack-registry.json"
 DEFAULT_ATTACKS_DIR = HERE / "attacks"
 STATUSES = ("PASS", "FAIL", "NOT_IMPLEMENTED", "ERROR")
 ATTACK_TIMEOUT_SECONDS = 300
+KILL_GRACE_SECONDS = 5
 ATTACK_NAME = re.compile(r"[a-z][a-z0-9-]*")
 
 
 class BadRegistry(Exception):
     pass
+
+
+class Stopped(Exception):
+    """The operator or the OS stopped the run; the attack's group is already cleaned up."""
+
+    def __init__(self, label, code):
+        super().__init__(label)
+        self.label, self.code, self.name = label, code, None
 
 
 def load_registry(path):
@@ -51,6 +70,45 @@ def find_script(attacks_dir, name):
     return None, False
 
 
+STOP_SIGNALS = {
+    signal.SIGINT: "INTERRUPTED",
+    signal.SIGTERM: "TERMINATED",
+    signal.SIGHUP: "TERMINATED",
+}
+_state = {"stop": None, "deferring": False}
+
+
+def stop_on_signal(signum, frame):
+    if _state["stop"]:
+        return  # already stopping; a second signal must not cut the cleanup short
+    _state["stop"] = Stopped(STOP_SIGNALS[signum], 128 + signum)
+    if not _state["deferring"]:
+        raise _state["stop"]
+    # Popen or kill_group is mid-flight; run_attack and kill_group raise it afterwards.
+
+
+def kill_group(proc):
+    """SIGKILL the script's whole process group, then reap the script."""
+    _state["deferring"] = True
+    try:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            # Gone already; macOS reports a group of zombies as PermissionError.
+            pass
+        try:
+            proc.wait(timeout=KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            # The group kill did not take (a refused EPERM is swallowed above); the
+            # script is our child, so signal it directly rather than wait forever.
+            proc.kill()
+            proc.wait()
+    finally:
+        _state["deferring"] = False
+    if _state["stop"]:
+        raise _state["stop"]
+
+
 def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     """Run one attack and return (exit_code, status)."""
     if name not in {a["name"] for a in registry}:
@@ -63,13 +121,32 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
     if not executable:
         print(f"NOT_EXECUTABLE: {script} (chmod +x it)", file=sys.stderr)
         return 2, "ERROR"
+    _state["deferring"] = True
     try:
-        code = subprocess.run([str(script)], timeout=timeout).returncode
-    except subprocess.TimeoutExpired:
-        print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
-        return 2, "ERROR"
+        # Own session so a timeout can kill the whole group, not just the script.
+        with subprocess.Popen([str(script)], start_new_session=True) as proc:
+            try:
+                _state["deferring"] = False
+                if _state["stop"]:
+                    raise _state["stop"]
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                code = None
+            finally:
+                kill_group(proc)
     except OSError as err:
+        if stop := _state["stop"]:
+            stop.name = name  # a raise inside this handler skips `except Stopped` below
+            raise stop from None
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
+        return 2, "ERROR"
+    except Stopped as stop:
+        stop.name = name
+        raise
+    finally:
+        _state["deferring"] = False
+    if code is None:
+        print(f"TIMEOUT: {name} (no exit after {timeout}s)", file=sys.stderr)
         return 2, "ERROR"
     status = {0: "PASS", 1: "FAIL"}.get(code, "ERROR")
     return {"PASS": 0, "FAIL": 1, "ERROR": 2}[status], status
@@ -90,19 +167,27 @@ def run_all(registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS, strict=False)
     return 0
 
 
+def seconds(text):
+    value = float(text)
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"must be a finite number above 0, got {text!r}")
+    return value
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="foundling attack")
     parser.add_argument("--registry", default=DEFAULT_REGISTRY)
     parser.add_argument("--attacks-dir", default=DEFAULT_ATTACKS_DIR)
-    parser.add_argument("--timeout", type=float, default=ATTACK_TIMEOUT_SECONDS)
-    parser.add_argument(
-        "--strict", action="store_true", help="run-all: NOT_IMPLEMENTED exits 2"
-    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
-    sub.add_parser("run-all")
+    run_all_parser = sub.add_parser("run-all")
+    run_all_parser.add_argument(
+        "--strict", action="store_true", help="NOT_IMPLEMENTED exits 2"
+    )
     run_parser = sub.add_parser("run")
     run_parser.add_argument("name")
+    for p in (run_all_parser, run_parser):
+        p.add_argument("--timeout", type=seconds, default=ATTACK_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
 
     try:
@@ -114,9 +199,25 @@ def main(argv):
         for attack in registry:
             print(attack["name"])
         return 0
-    if args.cmd == "run-all":
-        return run_all(registry, args.attacks_dir, args.timeout, args.strict)
-    return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
+    # The script runs in its own session, so a signal sent to the dispatcher
+    # never reaches it. Turn the signals into an exception so the group is killed.
+    # A signal inherited as ignored (nohup, a background job) stays ignored.
+    _state.update(stop=None, deferring=False)
+    previous = {}
+    for sig in STOP_SIGNALS:
+        if signal.getsignal(sig) != signal.SIG_IGN:
+            previous[sig] = signal.signal(sig, stop_on_signal)
+    try:
+        if args.cmd == "run-all":
+            return run_all(registry, args.attacks_dir, args.timeout, args.strict)
+        return run_attack(args.name, registry, args.attacks_dir, args.timeout)[0]
+    except Stopped as stop:
+        name = stop.name or getattr(args, "name", None) or args.cmd
+        print(f"{stop.label}: {name}", file=sys.stderr)
+        return stop.code
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
