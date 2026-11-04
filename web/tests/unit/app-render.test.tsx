@@ -24,7 +24,7 @@ test("the banner picks the most serious vault state", async () => {
   rerender(<VaultBanner s={{ ...s, account: { ...s.account, amount: 0n } }} unreadable={false} />);
   expect(screen.getByRole("status")).toHaveTextContent("below its reserve");
   rerender(<VaultBanner s={s} unreadable />);
-  expect(screen.getByRole("status")).toHaveTextContent("Showing block #201");
+  expect(screen.getByRole("status")).toHaveTextContent("Showing block #200");
   rerender(<VaultBanner s={null} unreadable />);
   expect(screen.getByRole("status")).toHaveTextContent("No RPC answered");
   rerender(<VaultBanner s={s} unreadable={false} />);

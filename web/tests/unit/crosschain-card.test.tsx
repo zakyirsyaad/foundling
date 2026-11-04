@@ -33,6 +33,7 @@ vi.mock("@/lib/crosschain/client", () => ({
 }));
 
 import { CrossChainCard } from "@/features/crosschain/CrossChainCard";
+import { config } from "@/config";
 
 const REFUND = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const pos: Position = { account: "alice.near", shares: 0n, pending: 0n, netDeposit: 0n, claimable: { usdc: 0n, wnear: 0n }, registered: { vault: false, usdc: false, wnear: true }, balances: { usdc: 10_000_000n, usdcE: 0n, near: 10n ** 24n }, allowed: true };
@@ -50,7 +51,8 @@ async function renderCard(p: Position = pos, run = vi.fn(), unreadable = false) 
   const s = await fixtureSnapshot();
   let r!: ReturnType<typeof render>;
   await act(async () => {
-    r = render(<CrossChainCard s={s} p={p} unreadable={unreadable} run={run} busy={false} />);
+    const ctx = { config, assets: s.assets, storageMin: { vault: s.storageMin, usdc: s.tokenStorageMin.usdc, wnear: s.tokenStorageMin.wnear } };
+    r = render(<CrossChainCard s={s} p={p} unreadable={unreadable} run={run} busy={false} ctx={ctx} gasPrice={100_000_000n} />);
   });
   return { r, run, s };
 }
@@ -76,6 +78,7 @@ test("the full guided flow: quote, register, address, SUCCESS, deposit", async (
   const { run, r } = await renderCard();
   const user = await fillAndQuote();
   expect(await screen.findByText("Arrives (about)")).toBeInTheDocument();
+  expect(screen.queryByTestId("near-need")).toBeNull();
   await user.click(screen.getByRole("button", { name: "Register" }));
   expect(run).toHaveBeenCalledWith([{ name: "register_vault", args: {} }, { name: "register_usdc", args: {} }]);
   const s = await fixtureSnapshot();
@@ -232,4 +235,10 @@ test("a swap can be looked up by its deposit address", async () => {
   await user.type(screen.getByLabelText("Deposit address"), "0xabc");
   await user.click(screen.getByRole("button", { name: "Look up" }));
   await waitFor(() => expect(screen.getByTestId("lookup-result")).toHaveTextContent("Not known to 1Click yet."));
+});
+
+test("the prepare step states the NEAR the registrations need", async () => {
+  await renderCard({ ...pos, balances: { ...pos.balances, near: 0n } });
+  await fillAndQuote();
+  expect(await screen.findByTestId("near-need")).toHaveTextContent(/more NEAR/);
 });

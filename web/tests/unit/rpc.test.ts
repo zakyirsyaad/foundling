@@ -91,3 +91,10 @@ test("reads the final block, an account, access keys and the gas price", async (
   expect(await rpc.accessKeyCount("v.near")).toEqual({ value: 2, blockHeight: 122n });
   expect(await rpc.gasPrice()).toBe(100000000n);
 });
+test("a provider-side RPC error moves to the next URL; an unknown account does not", async () => {
+  const internal = new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" }, message: "x" } }), { status: 200 });
+  const { f, calls } = fakeFetch([() => internal.clone(), () => viewOk(9)]);
+  const r = await createRpcClient(["https://a", "https://b"], { fetch: f }).view("v.near", "m", {}, (x) => x);
+  expect(r.value).toBe(9);
+  expect(calls).toHaveLength(2);
+});

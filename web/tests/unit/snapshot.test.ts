@@ -39,7 +39,7 @@ test("reads a full snapshot inside the call budget", async () => {
   const s = await readVaultSnapshot(rpc, "vault.near", () => 1234);
   expect(rpc.calls).toBeLessThanOrEqual(27);
   expect(s).toMatchObject({
-    vaultId: "vault.near", blockHeight: 201n, chainTimeSeconds: 1800000000n, fetchedAtMs: 1234,
+    vaultId: "vault.near", blockHeight: 200n, chainTimeSeconds: 1800000000n, fetchedAtMs: 1234,
     stage: { kind: "Idle" }, lastNonce: 41n, totalShares: 96_000_000_000_000n, accessKeys: 0,
     storageMin: 15_000_000_000_000_000_000_000n, price: { near: 250_000_000n, usdc: 100_000_000n },
     revealed: false, setupDone: true,
@@ -76,4 +76,13 @@ test("reads a position across the vault and both tokens", async () => {
     account: "alice.near", shares: 5n, pending: 2n, netDeposit: 7n, claimable: { usdc: 1n, wnear: 1n },
     registered: { vault: true, usdc: false, wnear: true }, balances: { usdc: 3_000_000n, usdcE: 9n, near: 10n ** 25n }, allowed: true,
   });
+});
+test("a snapshot carries the oldest block any of its views came from", async () => {
+  const rpc = fakeRpc(vaultViews);
+  const view = rpc.view.bind(rpc);
+  rpc.view = (async (c: string, m: string, a: object, p: (r: unknown) => unknown) => {
+    const r = await view(c, m, a, p);
+    return m === "stage" ? { ...r, blockHeight: 150n } : r;
+  }) as typeof rpc.view;
+  expect((await readVaultSnapshot(rpc, "vault.near")).blockHeight).toBe(150n);
 });

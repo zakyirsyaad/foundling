@@ -25,9 +25,9 @@ export function buildCtxFor(s: VaultSnapshot | null): BuildCtx | null {
 }
 
 export interface PortfolioSlots {
-  exits?: (args: { s: VaultSnapshot; p: Position; ctx: BuildCtx; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
-  stuck?: (args: { s: VaultSnapshot; fresh: boolean; canSign: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
-  crossChain?: (args: { s: VaultSnapshot; p: Position | null; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
+  exits?: (args: { s: VaultSnapshot; p: Position; ctx: BuildCtx; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean; gasPrice: bigint }) => ReactNode;
+  stuck?: (args: { s: VaultSnapshot; fresh: boolean; canSign: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean; ctx: BuildCtx | null; near: bigint | null; gasPrice: bigint }) => ReactNode;
+  crossChain?: (args: { s: VaultSnapshot; p: Position | null; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean; ctx: BuildCtx; gasPrice: bigint }) => ReactNode;
 }
 
 export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
@@ -43,7 +43,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
     <div className="grid gap-6">
       <VaultBanner s={s} unreadable={unreadable} />
       {!ctx ? <Banner tone="danger" title="Token mismatch">This website pins different token contracts than the vault reports, so it will not ask your wallet to sign anything.</Banner> : null}
-      {slots.stuck ? slots.stuck({ s, fresh, canSign: Boolean(account && ctx), run, busy }) : null}
+      {slots.stuck ? slots.stuck({ s, fresh, canSign: Boolean(account && ctx), run, busy, ctx, near: p?.balances.near ?? null, gasPrice }) : null}
       {!account ? (
         <section className="grid gap-3 rounded-lg border p-5">
           <p>Connect a NEAR wallet to see your position, deposit or leave.</p>
@@ -62,10 +62,10 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
           </Positions>
           <TxStatus state={state} />
           {ctx ? <DepositForm s={s} p={p} gasPrice={gasPrice} reasons={gate.reasons} ctx={ctx} network={config.network} busy={busy} onSubmit={(steps) => run(steps)} /> : null}
-          {ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy }) : null}
+          {ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy, gasPrice }) : null}
         </>
       )}
-      {slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy }) : null}
+      {slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy, ctx, gasPrice }) : null}
     </div>
   );
 }

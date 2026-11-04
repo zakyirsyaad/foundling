@@ -19,6 +19,8 @@ import type { Step } from "@/lib/wallet/useTx";
 import { useWallet } from "@/lib/wallet/WalletProvider";
 import { depositGate } from "@/lib/vault/deposit";
 import { ConnectButton } from "@/features/vault/ConnectButton";
+import { NearNeed } from "@/features/portfolio/NearNeed";
+import { type BuildCtx, buildTx } from "@/lib/wallet/calls";
 import { useOneClickSwap } from "./useOneClickSwap";
 
 const USDC_DECIMALS = 6;
@@ -34,7 +36,7 @@ function download(name: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
-export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapshot; p: Position | null; unreadable: boolean; run: (steps: Step[]) => void; busy: boolean }) {
+export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPrice = 0n }: { s: VaultSnapshot; p: Position | null; unreadable: boolean; run: (steps: Step[]) => void; busy: boolean; ctx?: BuildCtx | null; gasPrice?: bigint }) {
   const { account } = useWallet();
   const x = useOneClickSwap(unreadable);
   const [flow, dispatch] = useReducer(flowReducer, initialFlow);
@@ -170,6 +172,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy }: { s: VaultSnapsh
           </dl>
           {p && (!p.registered.vault || !p.registered.usdc) ? (
             <div className="grid gap-2">
+              {ctx ? <NearNeed txs={[...(!p.registered.vault ? [buildTx("register_vault", {}, ctx)] : []), ...(!p.registered.usdc ? [buildTx("register_usdc", {}, ctx)] : [])]} near={p.balances.near} gasPrice={gasPrice} /> : null}
               <p>Before any money moves, register this account{!p.registered.vault ? " with the vault (one-time, non-refundable)" : ""}{!p.registered.usdc ? " and with USDC on NEAR" : ""}.</p>
               <button type="button" disabled={busy} onClick={() => run([...(!p.registered.vault ? [{ name: "register_vault" as const, args: {} }] : []), ...(!p.registered.usdc ? [{ name: "register_usdc" as const, args: {} }] : [])])} className="justify-self-start rounded-md border border-input px-3 py-1.5">Register</button>
             </div>

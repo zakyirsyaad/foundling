@@ -79,3 +79,22 @@ test("useTx refuses out loud when there is no build context", async () => {
   expect(result.current.state).toMatchObject({ kind: "rejected", sentence: expect.stringMatching(/will not sign/) });
   expect(wallet.send).not.toHaveBeenCalled();
 });
+test("a refresh with the same last nonce keeps older claims on screen", async () => {
+  const { s, ctx } = await setup();
+  find.mockResolvedValueOnce({ rows: [{ nonce: 40n, amount: 5n, resolved: true }], next: 24n }).mockResolvedValueOnce({ rows: [{ nonce: 20n, amount: 1n, resolved: true }], next: null });
+  const user = userEvent.setup();
+  let r!: ReturnType<typeof render>;
+  await act(async () => {
+    r = render(<Claims s={s} p={pos} ctx={ctx} run={vi.fn()} busy={false} />);
+  });
+  await user.click(await screen.findByRole("button", { name: "Search older cycles" }));
+  await screen.findByText(/Cycle 20/);
+  await act(async () => r.rerender(<Claims s={{ ...s, blockHeight: s.blockHeight + 10n, fetchedAtMs: s.fetchedAtMs + 10_000 }} p={pos} ctx={ctx} run={vi.fn()} busy={false} />));
+  expect(screen.getByText(/Cycle 20/)).toBeInTheDocument();
+  expect(find).toHaveBeenCalledTimes(2);
+});
+test("redeem states the NEAR it needs for gas and registration", async () => {
+  const { s, ctx } = await setup();
+  render(<RedeemForm s={s} p={{ ...pos, balances: { ...pos.balances, near: 0n } }} ctx={ctx} run={vi.fn()} busy={false} unreadable={false} gasPrice={100_000_000n} />);
+  expect(screen.getByTestId("near-need")).toHaveTextContent(/You need .* more NEAR/);
+});

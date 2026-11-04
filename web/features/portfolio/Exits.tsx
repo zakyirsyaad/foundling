@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Banner } from "@/components/fm/Banner";
 import { config } from "@/config";
@@ -12,6 +12,7 @@ import type { Step, useTx } from "@/lib/wallet/useTx";
 import { type ClaimRow, findClaims } from "@/lib/vault/claims";
 import { canRedeem, redeemEstimate, redeemPrereqs } from "@/lib/vault/redeem";
 import { CliCommand } from "./CliCommand";
+import { NearNeed } from "./NearNeed";
 
 type Run = ReturnType<typeof useTx>["run"];
 
@@ -23,7 +24,7 @@ function parseShares(text: string): bigint | null {
   }
 }
 
-export function RedeemForm({ s, p, ctx, run, busy, unreadable }: { s: VaultSnapshot; p: Position; ctx: BuildCtx; run: Run; busy: boolean; unreadable: boolean }) {
+export function RedeemForm({ s, p, ctx, run, busy, unreadable, gasPrice = 0n }: { s: VaultSnapshot; p: Position; ctx: BuildCtx; run: Run; busy: boolean; unreadable: boolean; gasPrice?: bigint }) {
   const [text, setText] = useState("");
   const shares = text === "" ? p.shares : parseShares(text);
   const est = shares === null || shares > p.shares ? null : redeemEstimate(s.book, shares, s.totalShares);
@@ -42,6 +43,7 @@ export function RedeemForm({ s, p, ctx, run, busy, unreadable }: { s: VaultSnaps
         {est ? `About ${formatUnits(est.usdc, s.assets.usdcDecimals, 2)} USDC and ${formatUnits(est.wnear, s.assets.wnearDecimals, 4)} wNEAR` : "Enter a share amount you hold."}
       </p>
       {swapping ? <p className="text-[13px]">A swap is running. Part of your payout becomes a claim you can take once it finishes.</p> : null}
+      <NearNeed txs={steps.map((st) => buildTx(st.name, st.args, ctx))} near={p.balances.near} gasPrice={gasPrice} />
       {prereqs.length ? <p className="text-[13px]">Your account is first registered with the token contracts, so the payout cannot get stuck in claimable.</p> : null}
       <p className="text-[13px] text-muted-foreground">Redeem works while the vault is frozen, halted or stuck. It still depends on the USDC and wNEAR contracts. You receive USDC and wNEAR; unwrap wNEAR to NEAR in your wallet or with `near contract call-function as-transaction wrap.near near_withdraw`.</p>
       <button type="button" disabled={busy || !est || !canRedeem(est)} onClick={() => run(steps, () => (swapping ? "claim-pending" : undefined))} className="justify-self-start rounded-md border border-input px-4 py-2 font-medium disabled:opacity-50" data-variant="exit">
@@ -56,20 +58,27 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
   const [rows, setRows] = useState<ClaimRow[]>([]);
   const [next, setNext] = useState<bigint | null>(null);
   const [scanned, setScanned] = useState(false);
+  // The scan reads the latest snapshot but re-runs only when the cycle count or the account changes,
+  // so a 10 s refresh neither wipes claims loaded with "Search older" nor repeats 16 RPC calls.
+  const latest = useRef(s);
+  useEffect(() => {
+    latest.current = s;
+  }, [s]);
   const scan = useCallback(
     (from: bigint, append: boolean) =>
-      findClaims(createRpcClient(config.rpcUrls), s, p.account, from)
+      findClaims(createRpcClient(config.rpcUrls), latest.current, p.account, from)
         .then((r) => {
           setRows((prev) => (append ? [...prev, ...r.rows] : r.rows));
           setNext(r.next);
         })
         .catch(() => setNext(null))
         .finally(() => setScanned(true)),
-    [s, p.account],
+    [p.account],
   );
+  const lastNonce = s.lastNonce;
   useEffect(() => {
     let alive = true;
-    findClaims(createRpcClient(config.rpcUrls), s, p.account, s.lastNonce)
+    findClaims(createRpcClient(config.rpcUrls), latest.current, p.account, lastNonce)
       .then((r) => {
         if (!alive) return;
         setRows(r.rows);
@@ -80,7 +89,7 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
     return () => {
       alive = false;
     };
-  }, [s, p.account]);
+  }, [lastNonce, p.account]);
   const tokens = [
     { token: "Usdc" as const, amount: p.claimable.usdc, label: "USDC", decimals: s.assets.usdcDecimals },
     { token: "Wnear" as const, amount: p.claimable.wnear, label: "wNEAR", decimals: s.assets.wnearDecimals },
@@ -120,7 +129,7 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
   );
 }
 
-export function Exits(props: { s: VaultSnapshot; p: Position; ctx: BuildCtx; run: Run; busy: boolean; unreadable: boolean }) {
+export function Exits(props: { s: VaultSnapshot; p: Position; ctx: BuildCtx; run: Run; busy: boolean; unreadable: boolean; gasPrice?: bigint }) {
   return (
     <>
       <RedeemForm {...props} />

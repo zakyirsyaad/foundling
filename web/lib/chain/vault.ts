@@ -40,7 +40,10 @@ function anchorFrom(raw: unknown, nearId: string, usdcId: string): Anchor | null
 }
 
 export async function readVaultSnapshot(rpc: RpcClient, vaultId: string, now: () => number = Date.now): Promise<VaultSnapshot> {
-  const v = <T>(method: string, parse: (raw: unknown) => T, args: object = {}) => rpc.view(vaultId, method, args, parse).then((r) => r.value);
+  // Each view may come from a different provider; the snapshot is only as new as its oldest answer.
+  const heights: bigint[] = [];
+  const seen = <T>(r: { value: T; blockHeight: bigint }) => (heights.push(r.blockHeight), r.value);
+  const v = <T>(method: string, parse: (raw: unknown) => T, args: object = {}) => rpc.view(vaultId, method, args, parse).then(seen);
   const [block, stage, inflight, policy, assets, roles, book, totalShares, lastNonce, opsSpent, usedUsdc, usedWnear, frozen, halted, setupDone, selftestPassed, storageMin, agent, revealed, keeperChange, guardianChange, oracle, account, accessKeys] =
     await Promise.all([
       rpc.finalBlock(),
@@ -65,20 +68,20 @@ export async function readVaultSnapshot(rpc: RpcClient, vaultId: string, now: ()
       v("keeper_change", (r) => roleChangeSchema.parse(r)),
       v("guardian_change", (r) => roleChangeSchema.parse(r)),
       v("oracle", (r) => oracleSchema.parse(r)),
-      rpc.viewAccount(vaultId).then((r) => r.value),
-      rpc.accessKeyCount(vaultId).then((r) => r.value),
+      rpc.viewAccount(vaultId).then(seen),
+      rpc.accessKeyCount(vaultId).then(seen),
     ]);
-  const bounds = (token: string) => rpc.view(token, "storage_balance_bounds", {}, (r) => storageBoundsSchema.parse(r)).then((r) => r.value);
+  const bounds = (token: string) => rpc.view(token, "storage_balance_bounds", {}, (r) => storageBoundsSchema.parse(r)).then(seen);
   const [usdcMin, wnearMin, price] = await Promise.all([
     bounds(assets.usdc),
     bounds(assets.wnear),
     rpc
       .view(oracle.account, "list_prices_no_older_than", { price_ids: [oracle.nearId, oracle.usdcId], age: Number(policy.priceMaxAge) }, (r) => anchorFrom(r, oracle.nearId, oracle.usdcId))
-      .then((r) => r.value),
+      .then(seen),
   ]);
   return {
     vaultId,
-    blockHeight: block.height,
+    blockHeight: heights.reduce((a, b) => (a < b ? a : b), block.height),
     chainTimeSeconds: block.timestampSeconds,
     fetchedAtMs: now(),
     stage, inflight, policy, assets, roles, book, totalShares, lastNonce, opsSpent,

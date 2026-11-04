@@ -44,6 +44,8 @@ const DEFAULT_TIMEOUT_MS = 4000;
 const DEFAULT_BUDGET = 40;
 const NANOS_PER_SECOND = 1_000_000_000n;
 
+const PROVIDER_ERRORS = new Set(["INTERNAL_ERROR", "TIMEOUT_ERROR", "UNKNOWN_BLOCK", "NO_SYNCED_BLOCKS", "NOT_SYNCED_YET", "GARBAGE_COLLECTED_BLOCK"]);
+
 /** A retryable endpoint failure: the next URL may still answer. */
 class EndpointFailed extends Error {}
 
@@ -82,7 +84,12 @@ async function post(fetchFn: typeof fetch, url: string, body: object, timeoutMs:
     ]);
     if (!res.ok) throw new EndpointFailed(`HTTP ${res.status}`);
     const json = (await Promise.race([res.json(), timeout])) as RpcEnvelope;
-    if (json.error) throw new ContractViewError(json.error.cause?.name ?? json.error.message ?? "RPC error");
+    if (json.error) {
+      const cause = json.error.cause?.name ?? json.error.message ?? "RPC error";
+      // These depend on the provider (overloaded, lagging, not synced): another URL may answer.
+      if (PROVIDER_ERRORS.has(cause)) throw new EndpointFailed(cause);
+      throw new ContractViewError(cause);
+    }
     if (!json.result) throw new EndpointFailed("empty RPC result");
     return json.result;
   } catch (err) {

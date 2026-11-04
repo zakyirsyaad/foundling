@@ -7,6 +7,8 @@ import { CALLS, type CallName, DEFAULT_GAS_TGAS, GAS_MARGIN_TGAS } from "@/lib/w
 import { cliCommand } from "@/lib/wallet/cli";
 import type { Step } from "@/lib/wallet/useTx";
 import { recoveryAction } from "@/lib/vault/recovery";
+import { NearNeed } from "@/features/portfolio/NearNeed";
+import { type BuildCtx, buildTx } from "@/lib/wallet/calls";
 
 /** A transaction can land a few blocks after it is signed, so warn this long before the halt clock runs out. */
 export const HALT_MARGIN_SECONDS = 30n;
@@ -22,7 +24,7 @@ function cli(s: VaultSnapshot, name: CallName, args: object): string {
 }
 
 /** "Vault stuck" panel, RPC only (WEBSITE §3 Pemulihan). Shared by /app and /app/portfolio. */
-export function StuckPanel({ s, fresh, run, busy, canSign }: { s: VaultSnapshot; fresh: boolean; run: (steps: Step[]) => void; busy: boolean; canSign: boolean }) {
+export function StuckPanel({ s, fresh, run, busy, canSign, ctx = null, near = null, gasPrice = 0n }: { s: VaultSnapshot; fresh: boolean; run: (steps: Step[]) => void; busy: boolean; canSign: boolean; ctx?: BuildCtx | null; near?: bigint | null; gasPrice?: bigint }) {
   const a = recoveryAction(s.stage, s.inflight, s.policy, s.chainTimeSeconds, s.blockHeight);
   if (!a.advance && !a.abortStale && !a.expireDecision) return null;
   const nonce = "nonce" in s.stage ? Number(s.stage.nonce) : 0;
@@ -53,6 +55,7 @@ export function StuckPanel({ s, fresh, run, busy, canSign }: { s: VaultSnapshot;
         </button>
         {!fresh ? <span className="text-[13px]">Waiting for a fresh read</span> : null}
       </div>
+      {ctx && near !== null ? <NearNeed txs={[buildTx(action.name, action.args, ctx)]} near={near} gasPrice={gasPrice} /> : null}
       <div className="fm-code">
         <code className="break-all">{cmd}</code>
         <CopyButton text={cmd} label="Copy command" />
