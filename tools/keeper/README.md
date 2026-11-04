@@ -84,7 +84,7 @@ python3 -m unittest tests.test_keeper_rpc tests.test_keeper_near tests.test_keep
   tests.test_keeper_soak tests.test_keeper_cli
 ```
 
-Tanpa jaringan. Vault dan RPC dipalsukan oleh `tests/keeper_fakes.py` (model kecil tahap-tahap vault, bukan kontrak sungguhan).
+Tanpa jaringan. Vault dan RPC dipalsukan oleh `tests/keeper_fakes.py` (model kecil tahap-tahap vault, termasuk `AwaitingPrice`, probe yang kembali ke `Stuck`, dan pembacaan basi; bukan kontrak sungguhan). Satu-satunya masukan dari program asli adalah `tests/fixtures/near-cli-missing-key-file.txt`, keluaran near-cli-rs 0.30.1 untuk keyfile yang tidak ada; ia menunjukkan bahwa near-cli mencetak ulang seluruh perintah termasuk jalur keyfile, itulah sebabnya keluarannya di-scrub.
 
 ## Belum dibuktikan
 
