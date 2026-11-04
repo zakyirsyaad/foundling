@@ -7,6 +7,11 @@ tools/attacks/ is NOT_IMPLEMENTED and exits 2. To implement one, add an
 executable tools/attacks/<name>[.sh|.py] that follows the same exit codes.
 A script that does not exit within --timeout seconds is killed with its
 children and counts as ERROR. run-all --strict also exits 2 on NOT_IMPLEMENTED.
+Every script runs in its own process group, and the group is killed when the
+script ends however it ends, so background children do not outlive the attack.
+SIGINT, SIGTERM and SIGHUP stop the run after that cleanup: stderr gets one
+`INTERRUPTED: <name>` or `TERMINATED: <name>` line and the exit code is 128 plus
+the signal number (130, 143, 129). A signal inherited as ignored (nohup) stays ignored.
 """
 import argparse
 import json

@@ -501,6 +501,24 @@ class AttackCleanupTest(unittest.TestCase):
         _, script, _ = self.stop_dispatcher_with(signal.SIGHUP)
         self.assert_dies(script, "attack kept running after the dispatcher got SIGHUP")
 
+    def test_signals_to_the_dispatcher_kill_the_attacks_children_too(self):
+        registry = self.registry_of(["spawner"])
+        pidfile = self.tmp / "child.pid"
+        make_script(
+            self.attacks,
+            "spawner",
+            0,
+            body=f"#!/bin/sh\nsleep 29 >/dev/null 2>&1 &\necho $! > {pidfile}\nwait\n",
+        )
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                pidfile.unlink(missing_ok=True)
+                proc = self.start(registry, "run", "spawner")
+                child = self.pid_from(pidfile)
+                proc.send_signal(sig)
+                self.finish(proc)
+                self.assert_dies(child, f"child of the attack survived {sig.name}")
+
     def test_signal_while_the_script_is_still_spawning_kills_it(self):
         registry = self.registry_of(["hang"])
         pidfile = self.make_hang()
