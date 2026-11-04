@@ -18,14 +18,14 @@ Dari root repo. Berhenti dengan Ctrl-C; state tersimpan, jadi menjalankan ulang 
 | `FOUNDLING_VAULT` | `--vault` | Akun vault. Wajib. |
 | `FOUNDLING_KEEPER_ACCOUNT` | `--keeper-account` | Akun penanda tangan (`sign-as`). Wajib. |
 | `FOUNDLING_KEEPER_KEY_FILE` | `--key-file` | Jalur keyfile. Wajib. Hanya diserahkan ke near-cli; bot tidak pernah membukanya. |
-| `FOUNDLING_NETWORK` | `--network` | `testnet` (bawaan). `mainnet` ditolak tanpa `--allow-mainnet`. |
+| `FOUNDLING_NETWORK` | `--network` | `testnet` (bawaan). Jaringan lain apa pun (`mainnet`, `localnet`, …) ditolak tanpa `--allow-mainnet`. |
 | `FOUNDLING_RPC_URLS` | `--rpc-urls` | Dipisah koma, minimal dua. Bawaan hanya untuk testnet. |
 | `FOUNDLING_KEEPER_LOG` | `--log` | Log JSONL, bawaan `keeper-soak.jsonl`. |
 | `FOUNDLING_KEEPER_STATE` | `--state` | State restart, bawaan `<log>.state.json`. |
 
-Opsi lain: `--poll-interval` (5 s), `--retry-interval` (30 s), `--gas-trigger` (300), `--gas-execute` (300), `--gas-advance` (150) dalam TGas. Gas di bawah minimum kontrak (250, 240, 110; dari `cycle.rs`, `swap.rs`, `recovery.rs`) ditolak, dan sebuah tes menjaga angka itu sama dengan sumber Rust.
+Opsi lain: `--poll-interval` (5 s), `--retry-interval` (30 s), `--gas-trigger` (300), `--gas-execute` (300), `--gas-advance` (150) dalam TGas, `--max-call-failures` (12). Gas di bawah minimum kontrak (250, 240, 110; dari `cycle.rs`, `swap.rs`, `recovery.rs`) ditolak, dan sebuah tes menjaga angka itu sama dengan sumber Rust.
 
-Saldo akun keeper harus menutup gas yang dibeli di muka, 0,001 NEAR per TGas (SPEC §3.1): 0,3 NEAR untuk satu `trigger_cycle` pada 300 TGas, selisihnya dikembalikan.
+Gas dibeli di muka seharga 0,001 NEAR per TGas dan selisihnya dikembalikan (SPEC §3.1): satu `trigger_cycle` pada 300 TGas menahan 0,3 NEAR. Batasnya adalah allowance function-call key (bila ada) dan saldo akun keeper, jadi keduanya harus lebih dari itu dengan ruang untuk beberapa siklus. Panggilan yang gagal tetap membakar gas, itulah sebabnya kegagalan berulang dibatasi (di bawah).
 
 ## Cara kerja
 
@@ -35,14 +35,16 @@ Tiap tick membaca satu `block` final (tinggi dan waktu chain) dan `stage()`, lal
 |---|---|
 | `Idle` | Menutup siklus yang terbuka (setelah satu tahap non-Idle terlihat, atau 30 detik sejak trigger, karena node yang tertinggal juga membaca Idle). Lalu bila cooldown dari `policy()` lewat, vault tidak beku/halt, `ops_spent() + outlayer_deposit` masih di bawah `ops_budget`, dan kedua feed harga non-null: `trigger_cycle`. Pengecekan yang gagal diulang tiap 15 detik, bukan tiap tick. |
 | `AwaitingDecision`, `AwaitingPrice` | Menunggu. Bila `entered_block + abort_after_blocks` terlewati: `abort_stale_cycle`. |
-| `DecisionReady` | Bila `expires_at` terlewati: `expire_decision`. Bila belum dan feed non-null: `execute_decision(nonce)`. `Rejected(PRICE_UNAVAILABLE)` mengembalikan tahap ini, jadi eksekusi diulang tiap `--retry-interval` tanpa `trigger_cycle` baru. |
+| `DecisionReady` | Bila `expires_at` terlewati: `expire_decision`. Bila belum (dan vault tidak beku/halt): `execute_decision(nonce)`, tanpa pengecekan oracle di sisi bot. Feed null dijawab vault dengan `Rejected(PRICE_UNAVAILABLE)`, yang tercatat di chain dan mengembalikan tahap ini, jadi eksekusi diulang tiap `--retry-interval` tanpa `trigger_cycle` baru, sampai `expires_at`. |
 | `Stuck`, atau `Depositing`/`Swapping`/`Withdrawing`/`Probing` lewat `stuck_after` | `advance(nonce)` tepat sekali per jendela `stuck_after`, per `(nonce, since)`. Probe yang gagal kembali ke `Stuck` dengan `attempt` naik tetapi `since` sama, jadi tetap jendela yang sama. |
 
-Panggilan `trigger_cycle` yang ditolak `COOLDOWN` (trigger yang tidak terlihat bot) membuat bot menunggu satu cooldown penuh. Panggilan lain yang ditolak diulang tiap `--retry-interval`.
+Panggilan `trigger_cycle` yang ditolak `COOLDOWN` (trigger yang tidak terlihat bot) membuat bot menunggu satu cooldown penuh.
 
-Semua view dalam satu tick dipatok ke tinggi blok `block()` tick itu; node yang belum sampai ke blok itu memberi error dan dicoba di endpoint berikutnya. Blok yang lebih tua dari yang sudah terlihat membuat tick dilewati.
+Kegagalan panggilan dibatasi supaya tidak menguras gas: tiap kegagalan beruntun pada method yang sama menggandakan jedanya (`--retry-interval`, 2×, 4×, … sampai 10 menit), dihitung dari akhir panggilan, dan jeda itu disimpan di state sehingga restart tidak menghapusnya. Setelah 3 kegagalan satu method, bot bertanya `roles()` ke vault; bila keepernya sudah bukan akun ini (rotasi), bot berhenti dengan kode 2. Setelah `--max-call-failures` kegagalan beruntun, bot berhenti dengan kode 1. Satu panggilan yang berhasil mengosongkan hitungannya.
 
-Pengecekan feed memakai view yang sama dengan vault: `list_prices_no_older_than({price_ids, age: price_max_age})` pada akun `oracle()`.
+Semua view dalam satu tick dipatok ke tinggi blok `block()` tick itu; node yang belum sampai ke blok itu memberi error dan dicoba di endpoint berikutnya. Blok yang lebih tua dari yang sudah terlihat membuat tick dilewati dan dicatat (`"kind":"error"`, `stale_block`); bila enam tick beruntun begitu, bacaan lama dianggap pencilan dan batas direset, supaya satu pembacaan blok yang keliru tidak menghentikan bot selamanya.
+
+Pengecekan feed sebelum `trigger_cycle` memakai view yang sama dengan vault: `list_prices_no_older_than({price_ids, age: price_max_age})` pada akun `oracle()`.
 
 ## Log
 
@@ -51,10 +53,10 @@ Satu baris JSON per siklus selesai (`"kind":"cycle"`):
 ```
 {"kind":"cycle","vault":"…","nonce":12,"final_stage":"Idle","result":"Hold","code":"NO_DECISION",
  "txs":[{"method":"trigger_cycle","hash":"…"}],"duration_s":14.0,"started_at":"…","ended_at":"…",
- "stages_seen":["AwaitingDecision"],"stuck":false,"price_retries":0,"price_skips":0,"resumed":false}
+ "stages_seen":["AwaitingDecision"],"stuck":false,"price_retries":0,"failed_calls":0,"resumed":false}
 ```
 
-`result` dan `code` dibaca dari event `EVENT_JSON` pada transaksi siklus itu sendiri: `Hold`, `CycleFailed`, `Rejected`, `Executed`, `SwapReverted`, `CycleAborted`, atau `Unknown` bila event tidak ditemukan. `price_retries` menghitung `Rejected(PRICE_UNAVAILABLE)` yang diulang; `price_skips` menghitung pengecekan oracle sebelum `execute_decision` yang menahan panggilan karena feed null. `resumed: true` berarti bot mengambil alih siklus yang tidak dimulainya (state hilang), jadi `txs` kosong dan hasilnya `Unknown`. Siklus yang diakhiri pihak lain (siapa saja boleh memanggil `advance`, `abort_stale_cycle`, `expire_decision`) juga bisa `Unknown`, karena eventnya tidak ada di tx milik bot. State restart hanya dipakai bila ditulis untuk vault yang sama.
+`result` dan `code` dibaca dari event `EVENT_JSON` pada transaksi siklus itu sendiri, hanya dari receipt yang dieksekusi akun vault (pohon transaksi juga memuat OutLayer, oracle, Ref, dan token, yang bisa mencetak baris berbentuk event vault); event cacat dilewati: `Hold`, `CycleFailed`, `Rejected`, `Executed`, `SwapReverted`, `CycleAborted`, atau `Unknown` bila event tidak ditemukan. `price_retries` menghitung `Rejected(PRICE_UNAVAILABLE)` yang diulang; `failed_calls` menghitung panggilan bot dalam siklus itu yang ditolak. `resumed: true` berarti bot mengambil alih siklus yang tidak dimulainya (state hilang), jadi `txs` kosong dan hasilnya `Unknown`. Siklus yang diakhiri pihak lain (siapa saja boleh memanggil `advance`, `abort_stale_cycle`, `expire_decision`) juga bisa `Unknown`, karena eventnya tidak ada di tx milik bot. State restart hanya dipakai bila ditulis untuk vault yang sama.
 
 Baris lain di berkas yang sama, bukan siklus: `"kind":"skip"` (alasan tidak memicu: `price_null`, `frozen`, `halted`; dicatat saat alasan berubah atau tiap 10 menit), `"kind":"call_failed"` (panggilan ditolak, dengan teks kesalahan yang sudah dibersihkan dari kunci), `"kind":"error"` (RPC gagal).
 
@@ -66,12 +68,12 @@ python3 -m tools.keeper summary keeper-soak.jsonl [--min-cycles 1]
 
 Keluar dengan kode 0 (LULUS) atau 1 (GAGAL). Yang diharapkan (SPEC §3.7): `Hold(NO_DECISION)`, `Rejected(PRICE_UNAVAILABLE)`, `Rejected(PRICE_WIDE)`, dan `CycleFailed(NULL_RESULT)`. `Executed` diizinkan. GAGAL bila ada:
 
-- siklus dengan hasil lain, termasuk `CycleFailed` selain `NULL_RESULT` (juga `EXPIRED`, kecuali siklus itu punya `price_skips` atau `price_retries` > 0: feed null yang bertahan melewati `decision_ttl` berakhir di `EXPIRED`, dan itu dihitung sebagai `PRICE_UNAVAILABLE` yang diharapkan), `SwapReverted`, `CycleAborted`, dan `Unknown`;
+- siklus dengan hasil lain, termasuk `CycleFailed` selain `NULL_RESULT` (juga `EXPIRED`, kecuali siklus itu punya `price_retries` > 0 dan `failed_calls` = 0: feed null yang bertahan melewati `decision_ttl` ditolak `PRICE_UNAVAILABLE` berulang lalu berakhir di `EXPIRED`, dan itu dihitung sebagai `PRICE_UNAVAILABLE` yang diharapkan; panggilan yang gagal sendiri mencabut pengecualian itu), `SwapReverted`, `CycleAborted`, dan `Unknown`;
 - siklus yang pernah `Stuck`, walau akhirnya pulih;
 - baris log rusak;
 - siklus kurang dari `--min-cycles`.
 
-Baris `error` (RPC gagal) dan `call_failed` ditampilkan jumlahnya tetapi tidak menggagalkan soak. Keluarannya mendaftar nonce dan alasan tiap siklus tak terduga.
+Baris `error` (RPC gagal) dan `call_failed` ditampilkan jumlahnya, dengan peringatan bila ada panggilan gagal, tetapi tidak menggagalkan soak. Keluarannya mendaftar nonce dan alasan tiap siklus tak terduga.
 
 ## Kunci
 
