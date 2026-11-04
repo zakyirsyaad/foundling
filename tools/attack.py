@@ -33,9 +33,9 @@ class BadRegistry(Exception):
 class Stopped(Exception):
     """The operator or the OS stopped the run; the attack's group is already cleaned up."""
 
-    def __init__(self, label, code, name=None):
+    def __init__(self, label, code):
         super().__init__(label)
-        self.label, self.code, self.name = label, code, name
+        self.label, self.code, self.name = label, code, None
 
 
 def load_registry(path):
@@ -64,13 +64,18 @@ def find_script(attacks_dir, name):
     return None, False
 
 
+STOP_SIGNALS = {
+    signal.SIGINT: "INTERRUPTED",
+    signal.SIGTERM: "TERMINATED",
+    signal.SIGHUP: "TERMINATED",
+}
 _state = {"stop": None, "spawning": False}
 
 
 def stop_on_signal(signum, frame):
     if _state["stop"]:
         return  # already stopping; a second signal must not cut the cleanup short
-    _state["stop"] = Stopped("TERMINATED", 128 + signum)
+    _state["stop"] = Stopped(STOP_SIGNALS[signum], 128 + signum)
     if not _state["spawning"]:
         raise _state["stop"]
     # Popen has not returned, so there is no proc to kill yet; run_attack raises it.
@@ -123,8 +128,6 @@ def run_attack(name, registry, attacks_dir, timeout=ATTACK_TIMEOUT_SECONDS):
             raise stop from None
         print(f"ERROR: cannot run {script}: {err}", file=sys.stderr)
         return 2, "ERROR"
-    except KeyboardInterrupt:
-        raise Stopped("INTERRUPTED", 130, name) from None
     except Stopped as stop:
         stop.name = name
         raise
@@ -187,7 +190,7 @@ def main(argv):
     # The script runs in its own session, so a signal sent to the dispatcher
     # never reaches it. Turn the signals into an exception so the group is killed.
     # A signal inherited as ignored (nohup, a background job) stays ignored.
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    for sig in STOP_SIGNALS:
         if signal.getsignal(sig) != signal.SIG_IGN:
             signal.signal(sig, stop_on_signal)
     try:

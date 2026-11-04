@@ -359,6 +359,15 @@ subprocess.Popen._execute_child = execute_child
 """
 
 
+# Stands in for the gap between two attacks, when no script is running.
+IDLE_BETWEEN_ATTACKS = """
+def run_attack(*args, **kwargs):
+    print("ready", flush=True)
+    time.sleep(30)
+attack.run_attack = run_attack
+"""
+
+
 class AttackCleanupTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -442,6 +451,8 @@ class AttackCleanupTest(unittest.TestCase):
                 proc.send_signal(signal.SIGINT)
                 stderr = self.finish(proc)
                 self.assertNotIn("cannot run", stderr)
+                self.assertEqual(stderr.splitlines(), ["INTERRUPTED: hang"])
+                self.assertEqual(proc.returncode, 130)
                 self.assertFalse(marker.exists(), "run-all went on to the next attack after Ctrl-C")
 
     def test_child_left_behind_by_a_script_that_exits_0_is_killed(self):
@@ -500,6 +511,28 @@ class AttackCleanupTest(unittest.TestCase):
         self.assert_dies(script, "attack kept running after SIGTERM arrived during Popen")
         self.assertEqual(stderr.splitlines(), ["TERMINATED: hang"])
         self.assertEqual(proc.returncode, 128 + signal.SIGTERM)
+
+    def test_ctrl_c_between_attacks_is_one_line_not_a_traceback(self):
+        registry = self.registry_of(["hang"])
+        proc = self.start(registry, "run-all", setup=IDLE_BETWEEN_ATTACKS)
+        for _ in range(50):
+            if "ready" in (self.tmp / "out.txt").read_text():
+                break
+            time.sleep(0.1)
+        proc.send_signal(signal.SIGINT)
+        stderr = self.finish(proc)
+        self.assertEqual(stderr.splitlines(), ["INTERRUPTED: run-all"])
+        self.assertEqual(proc.returncode, 130)
+
+    def test_ctrl_c_while_the_script_is_still_spawning_kills_it(self):
+        registry = self.registry_of(["hang"])
+        pidfile = self.make_hang()
+        proc = self.start(registry, "run", "hang", setup=SLOW_SPAWN)
+        script = self.pid_from(pidfile)
+        proc.send_signal(signal.SIGINT)
+        stderr = self.finish(proc)
+        self.assert_dies(script, "attack kept running after Ctrl-C arrived during Popen")
+        self.assertEqual(stderr.splitlines(), ["INTERRUPTED: hang"])
 
     def test_sighup_stays_ignored_when_started_under_nohup(self):
         registry = self.registry_of(["hang"])
