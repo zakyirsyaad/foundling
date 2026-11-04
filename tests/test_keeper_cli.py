@@ -147,6 +147,23 @@ class FailureTest(Workspace):
         self.assertIn("near CLI", stderr)
         self.assertNotIn("Traceback", stderr)
 
+    def test_giving_up_after_repeated_failures_is_exit_1_with_a_message(self):
+        world = World(cooldown=60)
+        world.force_panic["trigger_cycle"] = "SOME_NEW_REASON"
+        code, stderr = self.run_main(["run", "--max-call-failures", "3"], self.environ(), world,
+                                     world_runner(world), seconds=5000)
+        self.assertEqual(code, 1)
+        self.assertIn("calls in a row failed", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_a_rotated_keeper_is_exit_2_with_a_message(self):
+        world = World(cooldown=60)
+        world.force_panic["trigger_cycle"] = "NOT_KEEPER"
+        world.at(40, lambda: setattr(world, "keeper", "someone.else.test"))
+        code, stderr = self.run_main(["run"], self.environ(), world, world_runner(world), seconds=5000)
+        self.assertEqual(code, 2)
+        self.assertIn("keeper is now someone.else.test", stderr)
+
     def test_a_corrupt_state_file_ends_with_a_message_and_exit_2(self):
         (self.path / "state.json").write_text("{broken")
         world = World()

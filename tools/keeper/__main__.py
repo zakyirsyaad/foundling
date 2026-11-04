@@ -7,7 +7,7 @@ import sys
 import time
 from urllib.parse import urlparse
 
-from .bot import Bot, Config, ConfigError
+from .bot import Bot, Config, ConfigError, GiveUp
 from .logstore import FileStore, JsonlLog, StateError
 from .near_cli import NearCli, NearCliError, run_subprocess
 from .rpc import RpcClient, RpcError
@@ -44,6 +44,7 @@ def build_parser():
     run.add_argument("--gas-execute", type=int)
     run.add_argument("--gas-advance", type=int)
     run.add_argument("--retry-interval", type=int)
+    run.add_argument("--max-call-failures", type=int, help="stop after this many failed calls in a row")
     summary = commands.add_parser("summary", help="judge a soak log")
     summary.add_argument("log")
     summary.add_argument("--min-cycles", type=int, default=1)
@@ -67,7 +68,8 @@ def resolve(args, environ):
     if len(set(urls)) < 2:
         raise ConfigError("at least two RPC endpoints are needed: set FOUNDLING_RPC_URLS")
     overrides = {name: getattr(args, name) for name in
-                 ("poll_interval", "gas_trigger", "gas_execute", "gas_advance", "retry_interval")
+                 ("poll_interval", "gas_trigger", "gas_execute", "gas_advance", "retry_interval",
+                  "max_call_failures")
                  if getattr(args, name) is not None}
     config = Config(vault=vault, keeper_account=account, network=network,
                     allow_mainnet=args.allow_mainnet, **overrides)
@@ -125,10 +127,10 @@ def main(argv=None, environ=None, stderr=None, *, rpc=None, runner=None, sleep=N
         bot.run(stop or (lambda: False))
     except KeyboardInterrupt:
         return 130
-    except NearCliError as exc:
+    except (NearCliError, ConfigError) as exc:
         print(f"error: {exc}", file=stderr)
         return 2
-    except RpcError as exc:
+    except (GiveUp, RpcError) as exc:
         print(f"error: {exc}", file=stderr)
         return 1
     return 0
