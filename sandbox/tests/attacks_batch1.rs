@@ -10,7 +10,8 @@
 use std::path::PathBuf;
 
 use foundling_sandbox::{
-    event_data, events, failures, Foundling, Setup, CHAIN, COMMITMENT, NEAR_PRICE, WASM_HASH,
+    event_data, events, failures, Foundling, Setup, CHAIN, COMMITMENT, NEAR_FEED, NEAR_PRICE,
+    USDC_FEED, WASM_HASH,
 };
 use near_workspaces::types::NearToken;
 use serde_json::{json, Value};
@@ -233,6 +234,7 @@ struct Run {
     held: bool,
     steps: Vec<Value>,
     observed: Vec<String>,
+    notes: Vec<Value>,
 }
 
 impl Run {
@@ -243,6 +245,7 @@ impl Run {
             held: true,
             steps: Vec::new(),
             observed: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -255,6 +258,10 @@ impl Run {
         }
         self.steps
             .push(json!({"step": label, "held": held, "observed": observed, "detail": detail}));
+    }
+
+    fn note(&mut self, code: &str, why: &str) {
+        self.notes.push(json!({"code": code, "note": why}));
     }
 
     fn finish(self, before: Value, after: Value) -> anyhow::Result<()> {
@@ -271,6 +278,7 @@ impl Run {
             "ledger_before": before,
             "ledger_after": after,
             "steps": self.steps,
+            "not_exercised": self.notes,
         });
         std::fs::write(
             dir.join(format!("{}.json", self.attack)),
@@ -571,4 +579,101 @@ async fn drip() -> anyhow::Result<()> {
     );
 
     run.finish(before, after_fifth)
+}
+
+/// How old the mock oracle says a feed is. Past `price_max_age` it answers `null`, as the real one does.
+async fn set_age(env: &Foundling, feed: &str, price: u128, lag_seconds: u64) -> anyhow::Result<()> {
+    let result = env
+        .parent
+        .call(env.oracle.id(), "set_feed")
+        .args_json(json!({
+            "price_id": feed,
+            "feed": {"price": price.to_string(), "conf": "10000", "expo": -8, "lag_seconds": lag_seconds},
+        }))
+        .transact()
+        .await?;
+    anyhow::ensure!(result.is_success(), "set_feed: {}", failures(&result));
+    Ok(())
+}
+
+async fn requests(env: &Foundling) -> anyhow::Result<u64> {
+    env.view_contract(&env.outlayer, "request_count", json!({}))
+        .await
+}
+
+/// A decision waits in `DecisionReady` while the price is missing, and nothing trades on a
+/// price the oracle will not vouch for. `price_max_age` is 120 s, so a feed 121 s old is `null`.
+/// The mock cannot show `PRICE_STALE`: it dates a feed `now - lag` and withholds it when the lag
+/// passes the age, so no feed it returns is older than the vault allows.
+#[tokio::test]
+async fn stale_price() -> anyhow::Result<()> {
+    const STALE: u64 = 121;
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new("stale-price", &["PRICE_UNAVAILABLE", "PRICE_STALE"]);
+    let before = settle_deposit(&env).await?;
+
+    set_age(&env, NEAR_FEED, NEAR_PRICE, STALE).await?;
+    env.set_next(json!({"Decision": {"template": template("buy_risk", 1_000_000)}}))
+        .await?;
+    let triggered = env.trigger_cycle().await?;
+    anyhow::ensure!(triggered.is_success(), "{}", failures(&triggered));
+    let nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
+    let ready = stage(&env).await?;
+    let runs_before = requests(&env).await?;
+
+    let stale_near = execute(&env, nonce).await?;
+    let code = code_of(event_data(&stale_near, "rejected"));
+    run.step(
+        "NEAR/USD feed 121 s old",
+        code.as_deref() == Some("PRICE_UNAVAILABLE")
+            && !events(&stale_near)
+                .iter()
+                .any(|e| e["event"] == "swap_started")
+            && stage(&env).await? == ready
+            && ledger(&env).await? == before,
+        code.as_deref(),
+        json!({"nonce": nonce, "stage": ready}),
+    );
+
+    let again = execute(&env, nonce).await?;
+    let code = code_of(event_data(&again, "rejected"));
+    run.step(
+        "the keeper retries and the feed is still stale",
+        code.as_deref() == Some("PRICE_UNAVAILABLE")
+            && stage(&env).await? == ready
+            && requests(&env).await? == runs_before,
+        code.as_deref(),
+        json!({"nonce": nonce, "new_runs_paid": requests(&env).await? - runs_before}),
+    );
+
+    set_age(&env, NEAR_FEED, NEAR_PRICE, 0).await?;
+    set_age(&env, USDC_FEED, 100_000_000, STALE).await?;
+    let stale_usdc = execute(&env, nonce).await?;
+    let code = code_of(event_data(&stale_usdc, "rejected"));
+    run.step(
+        "USDC/USD feed 121 s old with NEAR/USD fresh",
+        code.as_deref() == Some("PRICE_UNAVAILABLE")
+            && stage(&env).await? == ready
+            && ledger(&env).await? == before,
+        code.as_deref(),
+        json!({"nonce": nonce}),
+    );
+
+    set_age(&env, USDC_FEED, 100_000_000, 0).await?;
+    let recovered = execute(&env, nonce).await?;
+    run.step(
+        "control: with both feeds fresh the same decision trades, without a new run",
+        events(&recovered)
+            .iter()
+            .any(|e| e["event"] == "swap_started")
+            && requests(&env).await? == runs_before,
+        None,
+        json!({"nonce": nonce, "new_runs_paid": requests(&env).await? - runs_before}),
+    );
+
+    run.note(
+        "PRICE_STALE",
+        "not reachable with the mock oracle; see the test doc",
+    );
+    run.finish(before, ledger(&env).await?)
 }
