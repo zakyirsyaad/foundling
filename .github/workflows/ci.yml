@@ -331,6 +331,44 @@ jobs:
       - name: Audit
         run: npm audit --audit-level=high
 
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: foundling_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:ci-only@localhost:5432/foundling_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: |
+          npm run -w @foundling/db typecheck
+          npm run -w @foundling/indexer typecheck
+          npm run -w @foundling/api typecheck
+      - name: Tests with coverage
+        run: |
+          npm run -w @foundling/db test
+          npm run -w @foundling/indexer test:coverage
+          npm run -w @foundling/api test:coverage
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-24.04
