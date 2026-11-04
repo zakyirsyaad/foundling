@@ -8,6 +8,7 @@ const testEnv = {
   NEXT_PUBLIC_NETWORK: "testnet",
   NEXT_PUBLIC_VAULT_ID: "vault.foundling.testnet",
   NEXT_PUBLIC_RPC_URLS: `${MOCK}/rpc`,
+  NEXT_PUBLIC_API_ORIGIN: `${MOCK}/api`,
   NEXT_PUBLIC_USDC_ID: "usdc.foundling.testnet",
   NEXT_PUBLIC_WNEAR_ID: "wrap.testnet",
   NEXT_PUBLIC_TEST_BUILD: "1",

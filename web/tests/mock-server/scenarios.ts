@@ -1,4 +1,5 @@
 import { assetsJson, policyJson, vaultViews } from "../fixtures/vault";
+import { API_ROUTES } from "./api-fixtures";
 import type { Scenario } from "./state";
 
 export const VAULT = "vault.foundling.testnet";
@@ -8,7 +9,7 @@ export const WNEAR = "wrap.testnet";
 const views = { ...vaultViews, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };
 
 function base(name: string): Scenario {
-  return { name, views, perAccount: {}, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: {} };
+  return { name, views, perAccount: {}, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: { api: API_ROUTES } };
 }
 
 const builders: Record<string, () => Scenario> = {
