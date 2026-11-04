@@ -175,3 +175,10 @@
   .fm-theme button[aria-checked="true"] { background: var(--accent); color: var(--foreground); }
   .fm-code { position: relative; display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); font-size: 13px; line-height: 1.6; overflow-x: auto; }
 }
+
+@layer components {
+  .fm-cell { background: var(--muted); }
+  .fm-cell[data-word="Executed"] { background: var(--success); border-color: var(--success); }
+  .fm-cell[data-word="Reversed"], .fm-cell[data-word="Rejected"], .fm-cell[data-word="Stuck"] { background: var(--warning); border-color: var(--warning); }
+  .fm-cell[data-word="Failed"] { background: var(--danger); border-color: var(--danger); }
+}

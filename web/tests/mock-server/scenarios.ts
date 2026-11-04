@@ -6,7 +6,8 @@ export const VAULT = "vault.foundling.testnet";
 export const USDC = "usdc.foundling.testnet";
 export const WNEAR = "wrap.testnet";
 
-const views = { ...vaultViews, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };
+const decisions = Object.fromEntries([41, 40, 39].map((n) => [`published_decision:{"nonce":${n}}`, n === 40 ? null : `{"action":"buy","nonce":${n}}`]));
+const views = { ...vaultViews, ...decisions, published_decision: null, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };
 
 function base(name: string): Scenario {
   return { name, views, perAccount: {}, accessKeys: 0, rpcDown: false, apiDown: false, oneClickDown: false, extra: { api: API_ROUTES } };
