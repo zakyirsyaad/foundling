@@ -25,7 +25,7 @@ export function buildCtxFor(s: VaultSnapshot | null): BuildCtx | null {
 
 export interface PortfolioSlots {
   exits?: (args: { s: VaultSnapshot; p: Position; ctx: BuildCtx; unreadable: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
-  stuck?: (args: { s: VaultSnapshot; fresh: boolean; ctx: BuildCtx | null; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
+  stuck?: (args: { s: VaultSnapshot; fresh: boolean; canSign: boolean; run: ReturnType<typeof useTx>["run"]; busy: boolean }) => ReactNode;
   crossChain?: (args: { s: VaultSnapshot; p: Position | null; unreadable: boolean }) => ReactNode;
 }
 
@@ -42,7 +42,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
     <div className="grid gap-6">
       <VaultBanner s={s} unreadable={unreadable} />
       {!ctx ? <Banner tone="danger" title="Token mismatch">This website pins different token contracts than the vault reports, so it will not ask your wallet to sign anything.</Banner> : null}
-      {slots.stuck ? slots.stuck({ s, fresh, ctx, run, busy }) : null}
+      {slots.stuck ? slots.stuck({ s, fresh, canSign: Boolean(account && ctx), run, busy }) : null}
       {!account ? (
         <section className="grid gap-3 rounded-lg border p-5">
           <p>Connect a NEAR wallet to see your position, deposit or leave.</p>

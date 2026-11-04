@@ -1,7 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 import { LimitMeter } from "@/components/fm/LimitMeter";
 import { Stat } from "@/components/fm/Stat";
 import { Status } from "@/components/fm/Status";
@@ -12,6 +10,7 @@ import { formatUnits } from "@/lib/format/units";
 import type { HistoryResult, NavPoint } from "@/lib/history/client";
 import { limitMeters, sharePriceSinceStart, vaultWord } from "@/lib/vault/overview";
 import { SharePriceChart } from "./SharePriceChart";
+import { StuckPanelLive } from "./StuckPanelLive";
 import { VaultBanner } from "./VaultBanner";
 
 const USDC = 6;
@@ -27,8 +26,8 @@ function usdc(v: bigint | null, decimals = USDC): string {
   return v === null ? "—" : `${formatUnits(v, decimals, 2)} USDC`;
 }
 
-export function Overview({ initial, nav, stuckPanel }: { initial: VaultSnapshot | null; nav: HistoryResult<NavPoint[]>; stuckPanel?: ReactNode }) {
-  const { snapshot: s, unreadable } = useVaultSnapshot(initial);
+export function Overview({ initial, nav }: { initial: VaultSnapshot | null; nav: HistoryResult<NavPoint[]> }) {
+  const { snapshot: s, unreadable, fresh } = useVaultSnapshot(initial);
   if (!s) {
     return (
       <div className="grid gap-6">
@@ -46,6 +45,7 @@ export function Overview({ initial, nav, stuckPanel }: { initial: VaultSnapshot 
   return (
     <div className="grid gap-8">
       <VaultBanner s={s} unreadable={unreadable} />
+      <StuckPanelLive s={s} fresh={fresh} onSettled={() => {}} />
       <div className="flex flex-wrap items-center gap-3 text-sm" data-testid="stage-bar">
         <Status group="vault" word={word} />
         <span className="mono text-[13px]">Stage: {s.stage.kind}</span>
@@ -84,7 +84,6 @@ export function Overview({ initial, nav, stuckPanel }: { initial: VaultSnapshot 
           <div><dt className="fm-label">Sell limit</dt><dd className="mono">{s.policy.capSellBps / 100}% of wNEAR</dd></div>
         </dl>
       </section>
-      {stuckPanel}
     </div>
   );
 }

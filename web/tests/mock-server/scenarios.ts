@@ -43,6 +43,12 @@ const builders: Record<string, () => Scenario> = {
   }),
   claimable: () => ({ ...base("claimable"), perAccount: { [VAULT]: { ...holder, 'claimable_of:{"account":"alice.testnet","token":"Usdc"}': "2000000" } } }),
   "unregistered-holder": () => ({ ...base("unregistered-holder"), perAccount: { [VAULT]: holder } }),
+  stuck: () => ({
+    ...base("stuck"),
+    views: { ...views, inflight: { ...inflightRunning, stuck_since: Math.floor(Date.now() / 1000) - 100 }, stage: { Stuck: { nonce: 9, step: "Swap", attempt: 1, since: Math.floor(Date.now() / 1000) - 100 } } },
+    perAccount: { [VAULT]: holder },
+  }),
+  "awaiting-stale": () => ({ ...base("awaiting-stale"), views: { ...views, policy: { ...policyJson, abort_after_blocks: 100 }, stage: { AwaitingDecision: { nonce: 42, entered_block: 1 } } } }),
   closed: () => ({ ...base("closed"), views: { ...views, policy: { ...policyJson, open_deposits: false } } }),
 };
 
