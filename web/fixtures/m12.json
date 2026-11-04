@@ -1,0 +1,167 @@
+{
+  "vaultId": "vault.fdl-m12-0d1276.testnet",
+  "blockHeight": {
+    "$bigint": "276208440"
+  },
+  "chainTimeSeconds": {
+    "$bigint": "1793803275"
+  },
+  "fetchedAtMs": 1793803278347,
+  "stage": {
+    "kind": "Idle"
+  },
+  "inflight": null,
+  "policy": {
+    "capBps": 1000,
+    "epochCapBps": 10000,
+    "capUsdc": {
+      "$bigint": "15000000"
+    },
+    "epochCapUsdc": {
+      "$bigint": "30000000"
+    },
+    "capWnear": {
+      "$bigint": "4000000000000000000000000"
+    },
+    "epochCapWnear": {
+      "$bigint": "8000000000000000000000000"
+    },
+    "capSellBps": 5000,
+    "dustWnear": {
+      "$bigint": "10000000000000000000000"
+    },
+    "maxRiskBps": 5000,
+    "epochLen": {
+      "$bigint": "600"
+    },
+    "cooldown": {
+      "$bigint": "60"
+    },
+    "slippageBps": 150,
+    "priceMaxAge": {
+      "$bigint": "120"
+    },
+    "priceMaxConfBps": 50,
+    "refDevBps": 200,
+    "decisionTtl": {
+      "$bigint": "600"
+    },
+    "abortAfterBlocks": {
+      "$bigint": "450"
+    },
+    "stuckAfter": {
+      "$bigint": "40"
+    },
+    "haltAfter": {
+      "$bigint": "600"
+    },
+    "maxExecutionSeconds": {
+      "$bigint": "45"
+    },
+    "opsBudget": {
+      "$bigint": "600000000000000000000000"
+    },
+    "nearReserve": {
+      "$bigint": "300000000000000000000000"
+    },
+    "tvlCap": {
+      "$bigint": "100000000"
+    },
+    "perUserCap": {
+      "$bigint": "50000000"
+    },
+    "minDeposit": {
+      "$bigint": "1000000"
+    },
+    "maxMintPerCycle": 8,
+    "timelock": {
+      "$bigint": "120"
+    },
+    "openDeposits": false
+  },
+  "assets": {
+    "usdc": "usdc6f.fdl-m6-4e50d1.testnet",
+    "wnear": "wrap.testnet",
+    "rhea": "ref.fdl-m12-0d1276.testnet",
+    "poolId": {
+      "$bigint": "1103"
+    },
+    "poolFeeBps": 30,
+    "usdcDecimals": 6,
+    "wnearDecimals": 24
+  },
+  "roles": {
+    "governor": "gov.fdl-m3-738321.testnet",
+    "keeper": "keep.fdl-m3-738321.testnet",
+    "guardian": "guard.fdl-m3-738321.testnet"
+  },
+  "book": {
+    "usdc": {
+      "$bigint": "0"
+    },
+    "wnear": {
+      "$bigint": "0"
+    }
+  },
+  "totalShares": {
+    "$bigint": "0"
+  },
+  "lastNonce": {
+    "$bigint": "7"
+  },
+  "opsSpent": {
+    "$bigint": "0"
+  },
+  "windowUsed": {
+    "usdc": {
+      "$bigint": "0"
+    },
+    "wnear": {
+      "$bigint": "0"
+    }
+  },
+  "frozen": false,
+  "halted": false,
+  "setupDone": true,
+  "selftestPassed": true,
+  "accessKeys": 1,
+  "account": {
+    "amount": {
+      "$bigint": "5277661756128422199999977"
+    },
+    "storageUsage": {
+      "$bigint": "359215"
+    },
+    "codeHash": "CnXSGkkwFLk9gtnvyWTouPvLWgTb787DKPaRzyq8npNc"
+  },
+  "storageMin": {
+    "$bigint": "0"
+  },
+  "tokenStorageMin": {
+    "usdc": {
+      "$bigint": "1250000000000000000000"
+    },
+    "wnear": {
+      "$bigint": "1250000000000000000000"
+    }
+  },
+  "agent": {
+    "wasmHash": "29793d184b9fa4ef4a447020ff0a5f86cb9f1442109d0af139d92fbfac178f15",
+    "wasmUrl": "https://raw.githubusercontent.com/zakyirsyaad/sp1a-wasm/ac10dea39f303d4b108a79a902bad4fbe90a4b4d/foundling-strategy-rehearsal.wasm",
+    "commitment": "d25105ed991e50fdbcf897c6ec2f5ffada4405ccab5c59737f8abc3a1281ac17",
+    "revealAfter": {
+      "$bigint": "1793556573"
+    }
+  },
+  "revealed": true,
+  "keeperChange": null,
+  "guardianChange": null,
+  "price": {
+    "near": {
+      "$bigint": "210000000"
+    },
+    "usdc": {
+      "$bigint": "100000000"
+    }
+  }
+}
