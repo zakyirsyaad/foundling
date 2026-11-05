@@ -1,0 +1,494 @@
+{
+  "id": "aeab606e-aa26-49ad-8738-a0c807dd7832",
+  "prevId": "322c2d42-4c77-4eb8-a5ee-93ea68b446ea",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.cycles": {
+      "name": "cycles",
+      "schema": "",
+      "columns": {
+        "vault_id": {
+          "name": "vault_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closing": {
+          "name": "closing",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trigger_tx": {
+          "name": "trigger_tx",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_tx": {
+          "name": "decision_tx",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_in": {
+          "name": "amount_in",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_out": {
+          "name": "amount_out",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_block": {
+          "name": "last_block",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "cycles_vault_id_nonce_pk": {
+          "name": "cycles_vault_id_nonce_pk",
+          "columns": [
+            "vault_id",
+            "nonce"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.events": {
+      "name": "events",
+      "schema": "",
+      "columns": {
+        "vault_id": {
+          "name": "vault_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receipt_id": {
+          "name": "receipt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "log_index": {
+          "name": "log_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block_height": {
+          "name": "block_height",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receipt_index": {
+          "name": "receipt_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block_time": {
+          "name": "block_time",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account": {
+          "name": "account",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "events_order": {
+          "name": "events_order",
+          "columns": [
+            {
+              "expression": "vault_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "block_height",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "receipt_index",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "log_index",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "events_nonce": {
+          "name": "events_nonce",
+          "columns": [
+            {
+              "expression": "vault_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "events_vault_id_receipt_id_log_index_pk": {
+          "name": "events_vault_id_receipt_id_log_index_pk",
+          "columns": [
+            "vault_id",
+            "receipt_id",
+            "log_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.nav_points": {
+      "name": "nav_points",
+      "schema": "",
+      "columns": {
+        "vault_id": {
+          "name": "vault_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block_height": {
+          "name": "block_height",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "book_usdc": {
+          "name": "book_usdc",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "book_wnear": {
+          "name": "book_wnear",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_shares": {
+          "name": "total_shares",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "oracle_near": {
+          "name": "oracle_near",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "oracle_usdc": {
+          "name": "oracle_usdc",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "nav_points_vault_id_nonce_pk": {
+          "name": "nav_points_vault_id_nonce_pk",
+          "columns": [
+            "vault_id",
+            "nonce"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.proofs": {
+      "name": "proofs",
+      "schema": "",
+      "columns": {
+        "vault_id": {
+          "name": "vault_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bundle": {
+          "name": "bundle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_measurements": {
+          "name": "approved_measurements",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verifier": {
+          "name": "verifier",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "obs_recheck": {
+          "name": "obs_recheck",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "replay": {
+          "name": "replay",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'sealed'"
+        },
+        "verifier_state": {
+          "name": "verifier_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "obs_state": {
+          "name": "obs_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "first_attempt_at": {
+          "name": "first_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revealed_applied": {
+          "name": "revealed_applied",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "verifier_commit": {
+          "name": "verifier_commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "proofs_due": {
+          "name": "proofs_due",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "proofs_vault_id_nonce_pk": {
+          "name": "proofs_vault_id_nonce_pk",
+          "columns": [
+            "vault_id",
+            "nonce"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sync_state": {
+      "name": "sync_state",
+      "schema": "",
+      "columns": {
+        "vault_id": {
+          "name": "vault_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tip": {
+          "name": "tip",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "heartbeat_at": {
+          "name": "heartbeat_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
