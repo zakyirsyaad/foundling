@@ -87,27 +87,29 @@ async fn contoh() -> anyhow::Result<()> {
 
 ## Tes serangan (Attack Lab)
 
-`tests/attacks_batch1.rs` memuat `over_cap`, `drip`, `replay`, `bad_route`, dan `stale_price`. Tiap tes menyerang vault sandbox, menulis `proofs/attack/<nama>.json`, lalu baru berasersi. `tools/attacks/<nama>` menjalankan `cargo test --test attacks_batch1 <nama> -- --exact --include-ignored` dan membaca proof itu:
+`tests/attacks_batch1.rs` memuat `over_cap`, `drip`, `replay`, `bad_route`, dan `stale_price`. Tiap tes menyerang vault sandbox, menulis proof `<nama>.json`, lalu baru berasersi. `tools/attacks/<nama>` menjalankan `cargo test --test attacks_batch1 <nama> -- --exact` dan membaca proof itu:
 
 | Proof | Exit |
 |---|---|
 | `verdict` `held` dan cargo lulus | 0 (sistem bertahan) |
-| `verdict` `breached` | 1 (serangan berhasil atau kode alasan berbeda) |
-| tanpa proof, proof usang, WASM belum dibangun, atau `expected_codes` berbeda dari registry | 2 (galat alat) |
+| `verdict` `breached`, atau kode yang teramati (`observed_codes`) di luar `codes` registry untuk serangan itu | 1 (serangan berhasil atau kode alasan berbeda) |
+| tanpa proof, proof usang, WASM belum dibangun atau lebih tua dari sumbernya (`src/`, `Cargo.toml`, `Cargo.lock`), atau `expected_codes` berbeda dari registry | 2 (galat alat) |
 
 ```
-make attack-lab-full                 # build WASM + kompilasi tes, lalu semua serangan
+make attack-lab-full                 # build WASM + kompilasi tes, lalu semua serangan (proof ke proofs/attack/local)
+make attack-proofs                   # vault dari build reproducible (Docker), proof ke proofs/attack untuk di-commit
 python3 tools/attack.py run drip     # satu serangan; butuh `make wasm` lebih dulu
 ```
 
-- Proof memuat langkah, kode alasan yang teramati, policy yang dipakai, hash SHA-256 `foundling_vault.wasm`, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). `proofs/attack/` di-gitignore: hash WASM non-reproducible berbeda antar mesin, dan tiap run menulis ulang berkasnya. Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run di mesin yang sama.
+- Proof memuat langkah, kode alasan yang teramati, policy yang dipakai, hash SHA-256 `foundling_vault.wasm`, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). Run biasa menulis ke `proofs/attack/local/` (di-gitignore), karena hash WASM non-reproducible berbeda antar mesin. `proofs/attack/<nama>.json` adalah bukti yang dirujuk klaim README (SPEC 9.3) dan hanya ditulis `make attack-proofs` dari build vault reproducible; `FOUNDLING_PROOF_DIR` menggantikan lokasi keduanya. Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run dengan WASM yang sama.
+- Hanya kode yang tercantum di `codes` registry yang boleh masuk `observed`; langkah yang menolak dengan teks panic di luar daftar SPEC (mis. `NOT_READY`) mencatatnya di `detail`, dan `null` dari OutLayer tercatat sebagai `CycleFailed` dengan `NULL_RESULT` di `detail`.
 - Langkah `held: true/false` adalah pertahanan vault. Langkah `held: null` adalah prasyarat atau kontrol: bila salah, tes berhenti sebelum proof ditulis dan runner melapor 2, bukan 1.
 - `ledger_before` dan `ledger_after` tidak selalu sama: `drip` dan `replay` memuat trade sah di tengah. Bukti "buku tidak berubah" ada per langkah (`ledger_unchanged`, atau perbandingan dengan buku sebelum serangan itu).
 - `FROZEN` di `replay` teramati sebagai panic `execute_decision`, bukan event `Rejected`. Cabang `on_price` dan `settle_decision` tidak bisa dipentaskan karena mock menjawab dalam satu transaksi; keduanya ditutup tes unit kontrak.
 - `make attack-lab` tidak membangun apa pun. Di mesin dengan WASM yang sudah ada, ia menjalankan serangan sungguhan, dan `tests.test_attack_lab` ikut menjalankannya (±4 menit).
 - `Setup { policy: json!({..}) }` menimpa field policy. Serangan yang bergantung pada jam memakai profil testnet SPEC 3.6 (`epoch_len` 600, `cooldown` 60), karena `fast_forward` hanya ±116 blok per detik dan satu blok 0,3 detik: satu `epoch_len` produksi (21.600 detik) butuh ±10 menit, melewati batas 300 detik per serangan.
 - `drip` membaca view `window_used` blok demi blok di sekitar batas dan membuktikan entri keluar tepat pada `at + epoch_len`. Transaksi sendiri mendarat 1-3 blok setelah dikirim, jadi tes transaksi di batas memakai margin 20 detik, dan ketepatan detiknya dibuktikan lewat view.
-- `bad_route` ditandai `#[ignore]` dan dijalankan runner dengan `--include-ignored`: vault tidak pernah memancarkan `ROUTE_NOT_ALLOWED` (Decision v1 tak punya field rute), jadi serangan ini FAIL sampai kontrak atau SPEC berubah. Hapus `#[ignore]` saat itu terjadi.
+- `bad_route` membuktikan I9 dan tidak punya kode `Rejected`: Decision v1 tak punya field rute, aset, atau penerima, jadi field sodoran diabaikan dan trade hanya lewat akun terdaftar. Keputusan lead: SPEC dan registry yang berubah, bukan vault. Aksi tak dikenal adalah `CycleFailed(MALFORMED)`.
 - `PRICE_STALE` tidak bisa dipentaskan dengan mock oracle: ia menahan feed (hasil `null`) begitu lag melewati `age`, dan memberi `publish_time = now - lag` bagi yang lolos.
 
 ## Hal yang perlu diingat

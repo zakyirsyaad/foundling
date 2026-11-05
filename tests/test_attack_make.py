@@ -43,5 +43,18 @@ class AttackLabMakeTest(unittest.TestCase):
         self.assertNotIn("--strict", dry_run("attack-lab-full"))
 
 
+    def test_attack_proofs_builds_the_vault_reproducibly_and_writes_the_committed_proofs(self):
+        plan = dry_run("attack-proofs")
+        reproducible = plan.index("cargo near build reproducible-wasm")
+        run_all = plan.index("tools/attack.py run-all")
+        self.assertLess(reproducible, run_all)
+        self.assertIn("FOUNDLING_PROOF_DIR=", plan[run_all - 120 : run_all])
+        self.assertIn("proofs/attack", plan[run_all - 120 : run_all])
+        # The mocks are built the usual way; only the vault is the audited artifact.
+        loop = plan.split("; do", 1)[0]
+        self.assertNotIn("vault", loop.split())
+        for mock in ("mock-oracle", "mock-ref", "mock-outlayer", "mock-token"):
+            self.assertIn(mock, loop.split())
+
 if __name__ == "__main__":
     unittest.main()

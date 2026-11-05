@@ -1,6 +1,7 @@
 CONTRACTS := vault mock-oracle mock-ref mock-outlayer mock-token
+MOCKS := mock-oracle mock-ref mock-outlayer mock-token
 
-.PHONY: quick wasm sandbox attack-lab attack-lab-full
+.PHONY: quick wasm sandbox attack-lab attack-lab-full attack-proofs
 
 # Unit tests and proptest of every contract and the strategy, as CI runs them: --locked,
 # so a stale Cargo.lock fails here and is not rewritten. No sandbox, no wasm build.
@@ -38,3 +39,17 @@ attack-lab-full: wasm
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 	@python3 tools/attack.py run-all
+
+# Regenerates the committed proofs/attack/*.json (the evidence files claims.json points at) from a
+# run on the vault built reproducibly in the pinned image, like CI's "Vault reproducible" job. It
+# needs Docker and a committed checkout, and the audited vault is the only reproducible build: the
+# mocks are built the usual way. A plain `make attack-lab` writes to the ignored proofs/attack/local.
+attack-proofs:
+	cd contracts/vault && cargo near build reproducible-wasm < /dev/null
+	@for c in $(MOCKS); do \
+		echo "== build $$c"; \
+		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null) || exit 1; \
+	done
+	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
+	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
+	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack python3 tools/attack.py run-all
