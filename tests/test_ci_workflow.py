@@ -27,7 +27,10 @@ REQUIRED_JOBS = {
     "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
 }
 # Patterns that make a failing command succeed. Every `||` is rejected separately, except
-# `|| status=$?`, which records the status and lets the step fail on it.
+# `|| status=$?`, which records the status and lets the step fail on it, and the two lines
+# below: the Web job runs an image that is meant to refuse an empty env, captures what it
+# printed, and the next line greps that output, so the check is the grep, not the exit code.
+CAPTURE_THEN_GREP = re.compile(r"^\s*(api|worker)=\$\(docker run --rm foundling-(api|worker):ci 2>&1 \|\| true\)$")
 ALWAYS_GREEN = (
     r";\s*(true|:)\s*$",
     r"\bexit\s+0\b",
@@ -96,7 +99,7 @@ def check(text):
         if re.search(pattern, code, re.M):
             problems.append(f"can turn a failure green: /{pattern}/")
 
-    shell_only = re.sub(r"\$\{\{.*?\}\}", "", code)
+    shell_only = "\n".join(l for l in re.sub(r"\$\{\{.*?\}\}", "", code).splitlines() if not CAPTURE_THEN_GREP.match(l))
     for match in re.finditer(r"\|\|\s*(\S*)", shell_only):
         if match.group(1) != "status=$?":
             problems.append(f"`|| {match.group(1)}` can swallow a failure; only `|| status=$?` is allowed")
@@ -232,6 +235,9 @@ class TamperingTest(unittest.TestCase):
             "|| /usr/bin/true": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || /usr/bin/true\n      - name: Test rehearsal"),
             "|| printf ok": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || printf ok\n      - name: Test rehearsal"),
             "|| { true; }": tampered(b, "run: make sandbox\n", "run: make sandbox || { true; }\n"),
+            "capture pattern on another command": tampered(b, "run: make sandbox\n", "run: |\n          out=$(make sandbox 2>&1 || true)\n"),
+            "capture pattern on another image": tampered(b, "worker=$(docker run --rm foundling-worker:ci 2>&1 || true)", "worker=$(docker run --rm other:ci 2>&1 || true)"),
+            "capture pattern with a trailing command": tampered(b, "api=$(docker run --rm foundling-api:ci 2>&1 || true)", "api=$(docker run --rm foundling-api:ci 2>&1 || true); true"),
             "reproducible build jobs deleted": without_job(without_job(b, "vault-reproducible-compare"), "vault-reproducible"),
             "reproducible hash compare deleted": without_job(b, "vault-reproducible-compare"),
             "recheck-obs deleted": without_job(b, "recheck-obs"),
