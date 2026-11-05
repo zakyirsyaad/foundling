@@ -44,7 +44,7 @@ export function deriveCycle(events: ParsedEvent[]): DerivedCycle {
   const last = events[events.length - 1];
   if (!first || !last || first.nonce === null) throw new Error("deriveCycle needs at least one event with a nonce");
   const started = events.find((e) => e.name === "cycle_started");
-  const close = events.find(closes);
+  const close = events.findLast(closes);
   return {
     nonce: first.nonce,
     startedAt: (started ?? first).blockTime,

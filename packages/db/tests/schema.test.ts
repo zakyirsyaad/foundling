@@ -1,9 +1,12 @@
 import { migrate } from "../src/migrate";
-import { asRole, resetDb, sql } from "./helpers";
+import { asRole, lockTestDb, resetDb, sql } from "./helpers";
 
 const url = process.env.DATABASE_URL!;
 
+let lock: Awaited<ReturnType<typeof lockTestDb>>;
+afterAll(() => lock.release());
 beforeAll(async () => {
+  lock = await lockTestDb(url);
   await resetDb(url);
   await migrate(url);
 });

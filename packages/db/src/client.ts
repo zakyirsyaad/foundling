@@ -7,8 +7,9 @@ import * as schema from "./schema";
 export type Db = NodePgDatabase<typeof schema> & { $client: pg.Pool };
 
 /** A pooled Drizzle client. `max` stays small: the VPS runs the API and the worker side by side. */
-export function db(url: string, max = 5): { db: Db; pool: pg.Pool } {
-  const pool = new pg.Pool({ connectionString: url, max });
+export function db(url: string, max = 5, opts: { statementTimeoutMs?: number } = {}): { db: Db; pool: pg.Pool } {
+  // A client-side statement_timeout as well as the role's: a stuck query can never hold an API request open.
+  const pool = new pg.Pool({ connectionString: url, max, ...(opts.statementTimeoutMs ? { statement_timeout: opts.statementTimeoutMs } : {}) });
   return { db: drizzle(pool, { schema }), pool };
 }
 

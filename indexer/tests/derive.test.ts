@@ -70,3 +70,8 @@ test("describeError reports the innermost cause, not the wrapped query", async (
   expect(describeError("plain")).toBe("plain");
   expect(describeError(new Error("x".repeat(5000)))).toHaveLength(2000);
 });
+
+test("the last closing event wins, as on the website (web/lib/cycles/outcome.ts)", () => {
+  const c = deriveCycle([e("cycle_started"), e("rejected", { code: "OVER_CAP" }, { block: 400 }), e("cycle_aborted", {}, { block: 500 })]);
+  expect(c).toMatchObject({ closing: "cycle_aborted", finishedAt: new Date(500_000) });
+});
