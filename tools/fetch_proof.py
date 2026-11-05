@@ -3,7 +3,11 @@
 
 Usage:
   python3 tools/fetch_proof.py --chain testnet --vault <account> --collateral-bin <binary> \
-      --out <proof.json> [--reveal-tx <hash> --reveal-signer <account>] <trigger_tx> [<trigger_tx> ...]
+      --out <proof.json> [--rpc <url> ...] [--reveal-tx <hash> --reveal-signer <account>] <trigger_tx> [<trigger_tx> ...]
+
+`--rpc`, repeatable, replaces the chain's RPC list in order; pass archival nodes for transactions
+older than regular nodes keep (about 17 to 20 hours). For a revealed vault the opening is read
+from the `revealed` and `revealed_salt` views, unless `--reveal-tx` asks for the log instead.
 
 The trigger transactions come from the keeper's history. The collateral binary is
 `foundling-verify` built with `--features fetch`. Exit code 0 means the file was written,
@@ -43,6 +47,15 @@ class SourceError(Exception):
     pass
 
 
+ACTIVE_RPCS = None
+
+
+def use_rpcs(urls):
+    """Replaces every chain's RPC list with `urls`, in order; None goes back to the defaults."""
+    global ACTIVE_RPCS
+    ACTIVE_RPCS = list(urls) if urls else None
+
+
 def read_json(url, body=None):
     headers = {"content-type": "application/json", "user-agent": "foundling-verify"}
     request = urllib.request.Request(url, data=body, headers=headers)
@@ -51,7 +64,7 @@ def read_json(url, body=None):
 
 
 def rpc(chain, method, params):
-    rpcs = CHAINS[chain]["rpcs"]
+    rpcs = ACTIVE_RPCS or CHAINS[chain]["rpcs"]
     body = json.dumps({"jsonrpc": "2.0", "id": "foundling", "method": method, "params": params}).encode()
     last = None
     for attempt in range(ATTEMPTS):
@@ -136,7 +149,10 @@ def opening_of(chain, vault, tx_hash, signer):
     if params is None:
         return None
     if not tx_hash:
-        raise SourceError("the vault is revealed, so pass --reveal-tx and --reveal-signer")
+        salt = view(chain, vault, "revealed_salt")
+        if salt is None:
+            raise SourceError(f"{vault} is revealed but its revealed_salt view is empty")
+        return {"params": params, "salt": salt}
     status = tx_status(chain, tx_hash, signer)
     salts = [data["salt"] for name, data in events_of(status, vault) if name == "revealed"]
     if len(salts) != 1:
@@ -166,7 +182,7 @@ def build(args):
     return proof
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description="Build a Foundling proof file from public sources.")
     parser.add_argument("--chain", choices=sorted(CHAINS), required=True)
     parser.add_argument("--vault", required=True)
@@ -174,8 +190,14 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--reveal-tx")
     parser.add_argument("--reveal-signer")
+    parser.add_argument("--rpc", action="append", help="RPC URL, repeatable; replaces the chain's list in order")
     parser.add_argument("trigger_tx", nargs="+")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    use_rpcs(args.rpc)
     try:
         proof = build(args)
     except (SourceError, OSError) as error:
