@@ -27,6 +27,10 @@ const EPOCH_LEN: u64 = 600;
 /// A block is 0.3 s of chain time, so this many blocks cover a second without passing it.
 const BLOCKS_PER_SECOND_NUM: u64 = 10;
 const BLOCKS_PER_SECOND_DEN: u64 = 3;
+/// The chain clock also follows the wall clock, about a second per second, so a long jump
+/// overshoots by as long as the jump took to run. On a slow runner a 220 s jump passed its target
+/// by ten seconds or more. Short jumps keep the overshoot to a block or two.
+const MAX_JUMP_BLOCKS: u64 = 60;
 
 fn testnet_timing() -> Value {
     json!({"epoch_len": EPOCH_LEN, "cooldown": COOLDOWN})
@@ -199,14 +203,15 @@ async fn head_second(env: &Foundling) -> anyhow::Result<u64> {
     Ok(env.worker.view_block().await?.timestamp() / 1_000_000_000)
 }
 
-/// Moves the chain clock to `target` seconds without passing it by more than a block.
+/// Moves the chain clock to `target` seconds, passing it by no more than a short jump's worth.
 async fn wait_until(env: &Foundling, target: u64) -> anyhow::Result<()> {
     loop {
         let now = head_second(env).await?;
         if now >= target {
             return Ok(());
         }
-        let blocks = ((target - now) * BLOCKS_PER_SECOND_NUM / BLOCKS_PER_SECOND_DEN).max(1);
+        let blocks = ((target - now) * BLOCKS_PER_SECOND_NUM / BLOCKS_PER_SECOND_DEN)
+            .clamp(1, MAX_JUMP_BLOCKS);
         env.worker.fast_forward(blocks).await?;
     }
 }
@@ -307,6 +312,8 @@ impl Run {
         let proof = json!({
             "attack": self.attack,
             "verdict": if held { "held" } else { "breached" },
+            // web/lib/proof/sample.ts reads this: "PASS" shows as Pass, anything else as Fail.
+            "result": if held { "PASS" } else { "FAIL" },
             "expected_codes": self.expected,
             "observed_codes": self.observed,
             "unexpected_codes": unexpected,
@@ -587,8 +594,8 @@ async fn drip() -> anyhow::Result<()> {
         json!({"nonce": third.nonce, "ledger_unchanged": after_third == after_second}),
     );
 
-    // Twenty seconds before the first chunk leaves the window it still counts.
-    wait_until(&env, first_at + EPOCH_LEN - 20).await?;
+    // Thirty seconds before the first chunk leaves the window it still counts.
+    wait_until(&env, first_at + EPOCH_LEN - 30).await?;
     let inside = decide(&env, template("buy_risk", CHUNK)).await?;
     let after_inside = ledger(&env).await?;
     run.step(
@@ -600,19 +607,25 @@ async fn drip() -> anyhow::Result<()> {
         json!({"nonce": inside.nonce, "before_boundary": head_second(&env).await? < first_at + EPOCH_LEN}),
     );
 
-    // The window is half open: an entry counts while `at + epoch_len > now`. Reading the view
-    // block by block shows the exact second the first chunk drops out, and that it does.
+    // The window is half open: an entry counts while `at + epoch_len > now`. Let the chain clock
+    // run across the edge on its own (it follows the wall clock, a block every ~0.12 s) and read
+    // `window_used` pinned to the head block each time, so the pair (second, used) is one block's.
     let leaves_at = first_at + EPOCH_LEN;
+    anyhow::ensure!(
+        head_second(&env).await? + 3 < leaves_at,
+        "setup failed: the chain is already at the edge of the window"
+    );
+    wait_until(&env, leaves_at - 3).await?;
     let mut samples: Vec<(u64, u128)> = Vec::new();
     loop {
         let (second, used) = window_sample(&env).await?;
-        if second > leaves_at + 1 {
+        if second > leaves_at + 2 {
             break;
         }
         if samples.last().map(|(s, _)| *s) != Some(second) {
             samples.push((second, used));
         }
-        env.worker.fast_forward(1).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
     }
     let edge_ok = samples.iter().all(|(second, used)| {
         *used
@@ -625,13 +638,13 @@ async fn drip() -> anyhow::Result<()> {
     anyhow::ensure!(
         samples.iter().any(|(s, _)| *s == leaves_at - 1)
             && samples.iter().any(|(s, _)| *s == leaves_at),
-        "the sampling skipped a second at the edge: {samples:?}"
+        "the polling skipped a second at the edge at {leaves_at}: {samples:?}"
     );
     run.step(
         "the first chunk leaves the window at exactly at + epoch_len, not before",
         edge_ok,
         None,
-        json!({"leaves_at": EPOCH_LEN, "samples_around_the_edge": samples.iter().filter(|(second, _)| second.abs_diff(leaves_at) <= 3).map(|(second, used)| (second.saturating_sub(first_at), used)).collect::<Vec<_>>()}),
+        json!({"leaves_at": EPOCH_LEN, "samples_around_the_edge": samples.iter().filter(|(second, _)| second.abs_diff(leaves_at) <= 2).map(|(second, used)| (second.saturating_sub(first_at), used)).collect::<Vec<_>>()}),
     );
 
     // Cooldown has passed since `inside`; the first chunk is gone but the second is not.

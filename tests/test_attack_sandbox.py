@@ -38,11 +38,12 @@ sys.exit(int(os.environ.get("FAKE_RC", "0")))
 """
 
 
-def proof(verdict, name="over-cap", expected=("OVER_CAP",), observed=("OVER_CAP",)):
+def proof(verdict, name="over-cap", expected=("OVER_CAP",), observed=("OVER_CAP",), result=None):
     return json.dumps(
         {
             "attack": name,
             "verdict": verdict,
+            "result": result or {"held": "PASS", "breached": "FAIL"}.get(verdict),
             "expected_codes": list(expected),
             "observed_codes": list(observed),
         }
@@ -142,6 +143,14 @@ class SandboxRunnerTest(unittest.TestCase):
     def test_a_proof_without_observed_codes_exits_2(self):
         bare = json.dumps({"attack": "over-cap", "verdict": "held", "expected_codes": ["OVER_CAP"]})
         self.assertEqual(self.run_attack(0, bare), 2)
+
+    def test_the_web_reads_result_so_it_must_say_what_the_verdict_says(self):
+        # web/lib/proof/sample.ts shows "Pass" only for result == "PASS" and "Fail" for anything else.
+        self.assertEqual(self.run_attack(0, proof("held", result="FAIL")), 2)
+        self.assertEqual(self.run_attack(101, proof("breached", result="PASS")), 2)
+        bare = json.loads(proof("held"))
+        del bare["result"]
+        self.assertEqual(self.run_attack(0, json.dumps(bare)), 2)
 
     def test_a_proof_with_codes_inside_the_expected_ones_still_passes(self):
         self.assertEqual(self.run_attack(0, proof("held", observed=())), 0)

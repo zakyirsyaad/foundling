@@ -1,8 +1,9 @@
 """Runs one sandbox attack for tools/attack.py: `cargo test` in sandbox/, then the verdict.
 
 The Rust test writes <proof dir>/<name>.json before it asserts, with `verdict` set to
-"held" or "breached". The proof dir is $FOUNDLING_PROOF_DIR, else proofs/attack/local (ignored
-by git); proofs/attack itself holds the ones committed from a run on the reproducible build.
+"held" or "breached" and `result` set to the matching "PASS" or "FAIL", which the website
+reads. The proof dir is $FOUNDLING_PROOF_DIR, else proofs/attack/local (ignored by git);
+proofs/attack itself holds the ones committed from a run on the reproducible build.
 Exit codes follow the dispatcher: 0 held, 1 breached, 2 tool error. A breach is a verdict of
 "breached", or any observed reason code outside the registry's codes for the attack. Without
 a proof the test never reached a verdict (a build error, a missing or stale wasm, a failed
@@ -73,6 +74,9 @@ def run(name, root=ROOT, cargo=("cargo",)):
         proof = json.loads(proof_path.read_text())
         verdict = proof["verdict"]
         observed = proof["observed_codes"]
+        # web/lib/proof/sample.ts shows "Pass" for result == "PASS" and "Fail" for anything else.
+        if proof["result"] != {"held": "PASS", "breached": "FAIL"}.get(verdict):
+            return fail(f"{name}: proof result {proof['result']!r} does not match verdict {verdict!r}")
         if proof["attack"] != name:
             return fail(f"{name}: proof is for {proof['attack']!r}")
         expected = registry_codes(root, name)
