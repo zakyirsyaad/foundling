@@ -10,4 +10,5 @@ esac
 opening=""
 [ -n "$FAKE_OPENING" ] && opening=',"opening":{"params":"p","salt":"s"}'
 [ "${FAKE_FETCH:-ok}" = "garbage" ] && { echo "not json" > "$out"; exit 0; }
-printf '{"chain":"testnet","vault":"v","approved_measurements":[{"mrtd":"aa"}],"cycles":[{"trigger_tx":"T"}]%s}\n' "$opening" > "$out"
+# Real collateral ends its PCK certificate chain with a NUL, which jsonb refuses; the fake keeps one.
+printf '{"chain":"testnet","vault":"v","approved_measurements":[{"mrtd":"aa"}],"cycles":[{"trigger_tx":"T","collateral":{"pck_certificate_chain":"-----END CERTIFICATE-----\\n\\u0000"}}]%s}\n' "$opening" > "$out"

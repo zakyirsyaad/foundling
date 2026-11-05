@@ -66,13 +66,17 @@ export const navPoints = pgTable(
   (t) => [primaryKey({ columns: [t.vaultId, t.nonce] })],
 );
 
-/** The proof bundle is the one thing the chain cannot give back, so it is kept raw. */
+/**
+ * The proof bundle is the one thing the chain cannot give back, so it is kept whole: `bundle` is its JSON
+ * text. Not jsonb, because Intel collateral ends its PCK certificate chain with a NUL (\u0000), which jsonb
+ * refuses.
+ */
 export const proofs = pgTable(
   "proofs",
   {
     vaultId: text("vault_id").notNull(),
     nonce: height("nonce").notNull(),
-    bundle: jsonb("bundle"),
+    bundle: text("bundle"),
     approvedMeasurements: jsonb("approved_measurements"),
     verifier: jsonb("verifier"),
     obsRecheck: jsonb("obs_recheck"),

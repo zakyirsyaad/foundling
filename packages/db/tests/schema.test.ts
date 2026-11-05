@@ -44,3 +44,14 @@ test("the writer role can write events but not change the schema", async () => {
 test("migrate can run twice", async () => {
   await expect(migrate(url)).resolves.toBeUndefined();
 });
+
+test("role passwords turn the roles into logins; without them the roles stay NOLOGIN", async () => {
+  const { applyRolePasswords } = await import("../src/migrate");
+  await applyRolePasswords(url, {});
+  const before = await sql<{ rolname: string; rolcanlogin: boolean }>(url, "select rolname, rolcanlogin from pg_roles where rolname like 'foundling_%' order by rolname");
+  expect(before.map((r) => r.rolcanlogin)).toEqual([false, false]);
+  await applyRolePasswords(url, { reader: "r-pass'quote", writer: "w-pass" });
+  const after = await sql<{ rolname: string; rolcanlogin: boolean }>(url, "select rolname, rolcanlogin from pg_roles where rolname like 'foundling_%' order by rolname");
+  expect(after).toEqual([{ rolname: "foundling_reader", rolcanlogin: true }, { rolname: "foundling_writer", rolcanlogin: true }]);
+  await sql(url, "alter role foundling_reader nologin; alter role foundling_writer nologin;");
+});

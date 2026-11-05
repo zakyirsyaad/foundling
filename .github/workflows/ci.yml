@@ -136,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test
-        run: python3 -m unittest tests.test_verify_offline tests.test_recheck_obs
+        run: python3 -m unittest tests.test_verify_offline tests.test_recheck_obs tests.test_fetch_proof
       - name: Run the tier 0a checks
         run: python3 verify.py
 

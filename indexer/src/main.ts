@@ -19,7 +19,7 @@ const deps = {
 };
 
 log("worker starting", { vaultId: config.vaultId, chain: config.chain, obsSource: config.proofs.obsSource });
-const proofDeps = { db, vaultId: config.vaultId, chain: config.chain, rpc: deps.rpc, log, ...config.proofs };
+const proofDeps = { db, vaultId: config.vaultId, chain: config.chain, rpc: deps.rpc, fastnear: deps.fastnear, log, ...config.proofs };
 // Two loops under one lock: the proof loop never waits on an index round, and only one worker runs per vault.
 const outcome = await withVaultLock(db, config.vaultId, () => Promise.race([runIndexLoop(deps), runProofLoop(proofDeps)]));
 if (outcome === "locked") {

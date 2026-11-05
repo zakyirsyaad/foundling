@@ -18,3 +18,19 @@ export async function migrate(url: string): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * Gives the roles a password and LOGIN (production, from the VPS .env). The password goes through
+ * escapeLiteral: ALTER ROLE takes no bind parameters. Roles without a password are left as they are.
+ */
+export async function applyRolePasswords(url: string, passwords: { reader?: string; writer?: string }): Promise<void> {
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    for (const [role, password] of [["foundling_reader", passwords.reader], ["foundling_writer", passwords.writer]] as const) {
+      if (password) await client.query(`alter role ${role} login password ${client.escapeLiteral(password)}`);
+    }
+  } finally {
+    await client.end();
+  }
+}

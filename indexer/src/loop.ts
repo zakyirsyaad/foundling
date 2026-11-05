@@ -141,7 +141,7 @@ export async function runIndexLoop(deps: IndexDeps, intervalMs = 30_000): Promis
     try {
       await indexOnce(deps);
     } catch (e) {
-      deps.log("index round failed", { vaultId: deps.vaultId, error: e instanceof Error ? e.message : String(e) });
+      deps.log("index round failed", { vaultId: deps.vaultId, error: describeError(e) });
     }
     await sleep(intervalMs);
   }

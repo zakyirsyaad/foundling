@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Db, cycles, events, proofs } from "@foundling/db";
 import { and, asc, eq, lte, sql } from "drizzle-orm";
+import type { Fastnear } from "../fastnear";
+import { describeError } from "../loop";
 import type { ArchivalRpc } from "../rpc";
 import { type Counts, GIVE_UP_AFTER_MS, describeRun, nextAttempt, parseSummary, replayResult, runTool } from "./run";
 
@@ -25,6 +27,8 @@ export interface ProofDeps {
   obsSource: "live" | "rehearsal";
   tools: ToolPaths;
   rpc: Pick<ArchivalRpc, "viewAt" | "tip">;
+  /** Finds the reveal transaction's signer, which fetch_proof.py needs to read its log. */
+  fastnear: Pick<Fastnear, "transactions">;
   now: () => Date;
   verifierCommit?: string;
 }
@@ -36,18 +40,22 @@ const SKIPPED: Counts = { pass: 0, skip: 1, fail: 0 };
 const RECHECK_FAILED = 1;
 const SOURCE_DOWN = 2;
 
-function readBundle(file: string): Bundle | null {
+function parseBundle(text: string): Bundle | null {
   try {
-    const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+    const value: unknown = JSON.parse(text);
     return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Bundle) : null;
   } catch {
     return null;
   }
 }
 
-async function hasReveal(deps: ProofDeps): Promise<boolean> {
-  const r = await deps.db.select({ n: sql<number>`1` }).from(events).where(and(eq(events.vaultId, deps.vaultId), eq(events.name, "revealed"))).limit(1);
-  return r.length > 0;
+interface Reveal { txHash: string; salt: string }
+
+/** The vault's own `revealed` log, as stored by the index round. */
+async function storedReveal(deps: ProofDeps): Promise<Reveal | null> {
+  const [r] = await deps.db.select({ txHash: events.txHash, data: events.data }).from(events).where(and(eq(events.vaultId, deps.vaultId), eq(events.name, "revealed"))).limit(1);
+  const salt = (r?.data as { salt?: unknown } | undefined)?.salt;
+  return r && typeof salt === "string" ? { txHash: r.txHash, salt } : null;
 }
 
 async function dueRow(deps: ProofDeps, revealed: boolean): Promise<ProofRow | undefined> {
@@ -67,18 +75,29 @@ async function triggerOf(deps: ProofDeps, nonce: bigint): Promise<string | null>
   return c?.t ?? null;
 }
 
-/** Reads the opening from plain state (views `revealed` and `revealed_salt`), long after the logs are gone. */
-async function openingFromViews(deps: ProofDeps): Promise<{ params: string; salt: string } | null> {
+/**
+ * The parameters come from the `revealed` view and the salt from the stored `revealed` log. Vaults built
+ * before the `revealed_salt` view existed (every testnet vault so far) have only the log. The verifier checks
+ * the pair against the commitment either way.
+ */
+async function openingOf(deps: ProofDeps, reveal: Reveal): Promise<{ params: string; salt: string } | null> {
   const tip = await deps.rpc.tip();
   const params = await deps.rpc.viewAt<string | null>(tip, deps.vaultId, "revealed", {});
-  const salt = await deps.rpc.viewAt<string | null>(tip, deps.vaultId, "revealed_salt", {});
-  return typeof params === "string" && typeof salt === "string" ? { params, salt } : null;
+  return typeof params === "string" ? { params, salt: reveal.salt } : null;
+}
+
+async function revealArgs(deps: ProofDeps, reveal: Reveal | null): Promise<string[]> {
+  if (!reveal) return [];
+  const [tx] = await deps.fastnear.transactions([reveal.txHash]);
+  const signer = (tx?.transaction as { signer_id?: unknown } | undefined)?.signer_id;
+  if (typeof signer !== "string") throw new Error(`FastNEAR has no signer for reveal tx ${reveal.txHash}`);
+  return ["--reveal-tx", reveal.txHash, "--reveal-signer", signer];
 }
 
 /** Works one due proof as far as it can go. False when nothing is due. */
 export async function processOne(deps: ProofDeps): Promise<boolean> {
-  const revealed = await hasReveal(deps);
-  const row = await dueRow(deps, revealed);
+  const reveal = await storedReveal(deps);
+  const row = await dueRow(deps, reveal !== null);
   if (!row) return false;
   const now = deps.now();
   const base = { firstAttemptAt: row.firstAttemptAt ?? now };
@@ -92,7 +111,7 @@ export async function processOne(deps: ProofDeps): Promise<boolean> {
 
   const dir = mkdtempSync(join(tmpdir(), "foundling-proof-"));
   try {
-    const s = await work(deps, row, revealed, trigger, dir);
+    const s = await work(deps, row, reveal, trigger, dir);
     const expired = now.getTime() - base.firstAttemptAt.getTime() >= GIVE_UP_AFTER_MS;
     if (s.problem && expired) {
       if (s.verifierState !== "done") s.verifierState = "failed_to_build";
@@ -103,7 +122,7 @@ export async function processOne(deps: ProofDeps): Promise<boolean> {
       .update(proofs)
       .set({
         ...base,
-        bundle: s.bundle, approvedMeasurements: s.bundle?.approved_measurements ?? null,
+        bundle: s.bundle ? JSON.stringify(s.bundle) : null, approvedMeasurements: s.bundle?.approved_measurements ?? null,
         verifier: s.verifier, verifierState: s.verifierState, obsRecheck: s.obsRecheck, obsState: s.obsState,
         replay: s.replay, revealedApplied: s.revealedApplied, verifierCommit: s.verifierCommit,
         attempts: retry ? row.attempts + 1 : row.attempts,
@@ -129,22 +148,23 @@ interface WorkState {
   problem: string | null;
 }
 
-async function work(deps: ProofDeps, row: ProofRow, revealed: boolean, trigger: string, dir: string): Promise<WorkState> {
+async function work(deps: ProofDeps, row: ProofRow, reveal: Reveal | null, trigger: string, dir: string): Promise<WorkState> {
   const { tools } = deps;
   const s: WorkState = {
-    bundle: row.bundle as Bundle | null, verifier: row.verifier, verifierState: row.verifierState, obsRecheck: row.obsRecheck,
+    bundle: row.bundle === null ? null : parseBundle(row.bundle), verifier: row.verifier, verifierState: row.verifierState, obsRecheck: row.obsRecheck,
     obsState: row.obsState, replay: row.replay, revealedApplied: row.revealedApplied, verifierCommit: row.verifierCommit, problem: null,
   };
   const file = join(dir, "proof.json");
 
   if (!s.bundle) {
     const rpcArgs = tools.rpcUrls.flatMap((u) => ["--rpc", u]);
-    const r = await runTool(tools.python, [tools.fetchProof, "--chain", deps.chain, "--vault", deps.vaultId, "--collateral-bin", tools.verify, "--out", file, ...rpcArgs, trigger], tools.timeoutMs);
+    const extra = [...rpcArgs, ...(await revealArgs(deps, reveal))];
+    const r = await runTool(tools.python, [tools.fetchProof, "--chain", deps.chain, "--vault", deps.vaultId, "--collateral-bin", tools.verify, "--out", file, ...extra, trigger], tools.timeoutMs);
     if (r.code !== 0 || r.timedOut) {
       s.problem = describeRun("fetch_proof.py", r, tools.timeoutMs);
       return s;
     }
-    const parsed = readBundle(file);
+    const parsed = parseBundle(readFileSync(file, "utf8"));
     if (!parsed) {
       s.problem = "fetch_proof.py wrote a bundle that is not readable JSON";
       return s;
@@ -154,10 +174,10 @@ async function work(deps: ProofDeps, row: ProofRow, revealed: boolean, trigger: 
 
   let verify = s.verifierState !== "done" && s.verifierState !== "failed_to_build";
   if (s.bundle.opening && s.revealedApplied === 0) s.revealedApplied = 1;
-  if (revealed && s.revealedApplied === 0 && s.verifierState === "done") {
-    const opening = await openingFromViews(deps);
+  if (reveal && s.revealedApplied === 0 && s.verifierState === "done") {
+    const opening = await openingOf(deps, reveal);
     if (!opening) {
-      s.problem = "revealed event stored but the revealed views are empty";
+      s.problem = "revealed event stored but the revealed view is empty";
       return s;
     }
     s.bundle = { ...s.bundle, opening };
@@ -205,7 +225,7 @@ export async function runProofLoop(deps: Omit<ProofDeps, "now"> & { log: (m: str
     try {
       worked = await processOne({ ...deps, now: () => new Date() });
     } catch (e) {
-      deps.log("proof round failed", { vaultId: deps.vaultId, error: e instanceof Error ? e.message : String(e) });
+      deps.log("proof round failed", { vaultId: deps.vaultId, error: describeError(e) });
     }
     if (!worked) await sleep(idleMs);
   }

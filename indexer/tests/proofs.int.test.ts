@@ -30,7 +30,7 @@ function rpcWithReveal(revealed: boolean) {
     ...base,
     async viewAt<T>(block: bigint, contract: string, method: string): Promise<T> {
       if (method === "revealed") return (revealed ? "{\"risk\":3}" : null) as T;
-      if (method === "revealed_salt") return (revealed ? "abc" : null) as T;
+      if (method === "revealed_salt") throw new Error("old vaults have no revealed_salt view");
       return base.viewAt<T>(block, contract, method);
     },
   };
@@ -53,16 +53,23 @@ beforeEach(async () => {
 });
 
 const calls = () => { try { return readFileSync(logFile, "utf8").trim().split("\n"); } catch { return []; } };
-type Row = { bundle: { approved_measurements: unknown; opening?: unknown } | null; approved_measurements: unknown; verifier: unknown; verifier_state: string; obs_recheck: unknown; obs_state: string; replay: string; attempts: number; next_attempt_at: Date; revealed_applied: number; verifier_commit: string | null; last_error: string | null };
-const row = async () => (await sql<Row>(url, "select * from proofs where nonce = 1"))[0]!;
+type Bundle = { approved_measurements: unknown; opening?: unknown; cycles: { collateral: { pck_certificate_chain: string } }[] };
+type Row = { bundle: Bundle | null; approved_measurements: unknown; verifier: unknown; verifier_state: string; obs_recheck: unknown; obs_state: string; replay: string; attempts: number; next_attempt_at: Date; revealed_applied: number; verifier_commit: string | null; last_error: string | null };
+/** The bundle is stored as the raw text fetch_proof wrote. */
+const row = async () => {
+  const r = (await sql<Omit<Row, "bundle"> & { bundle: string | null }>(url, "select * from proofs where nonce = 1"))[0]!;
+  return { ...r, bundle: r.bundle === null ? null : (JSON.parse(r.bundle) as Bundle) };
+};
+const fastnear = { transactions: async (hashes: string[]) => hashes.map((h) => ({ transaction: { hash: h, signer_id: "alice.testnet" }, receipts: [] })) };
 const deps = (over: Partial<Parameters<typeof processOne>[0]> = {}) => ({
-  db, vaultId: m12.vault, chain: "testnet" as const, obsSource: "live" as const, tools, rpc: rpcWithReveal(false), now: () => new Date(), verifierCommit: "abc1234", ...over,
+  db, fastnear, vaultId: m12.vault, chain: "testnet" as const, obsSource: "live" as const, tools, rpc: rpcWithReveal(false), now: () => new Date(), verifierCommit: "abc1234", ...over,
 });
 
 test("a successful run stores the bundle, both tallies and done", async () => {
   expect(await processOne(deps())).toBe(true);
   const r = await row();
   expect(r.bundle!.approved_measurements).toEqual([{ mrtd: "aa" }]);
+  expect(r.bundle!.cycles[0]!.collateral.pck_certificate_chain).toBe("-----END CERTIFICATE-----\n\u0000");
   expect(r.approved_measurements).toEqual([{ mrtd: "aa" }]);
   expect(r).toMatchObject({ verifier: { pass: 6, skip: 1, fail: 0 }, verifier_state: "done", obs_recheck: { pass: 3, skip: 0, fail: 0 }, obs_state: "done", replay: "sealed", verifier_commit: "abc1234" });
   const fetchCall = calls().find((c) => c.startsWith("fetch"))!;
@@ -160,6 +167,13 @@ test("a bundle fetched after the reveal already carries the opening", async () =
   await processOne(deps({ rpc: rpcWithReveal(true) }));
   expect(await row()).toMatchObject({ replay: "pass", revealed_applied: 1 });
   expect(calls().filter((c) => c.startsWith("verify"))).toHaveLength(1);
+});
+
+test("after a reveal, fetch_proof gets the reveal transaction and its signer", async () => {
+  await sql(url, `insert into events (vault_id, receipt_id, log_index, tx_hash, block_height, receipt_index, block_time, name, nonce, account, data)
+                  values ($1, 'RREVEAL', 0, 'TREVEAL', 999999999, 0, now(), 'revealed', null, null, '{"salt":"abc"}')`, [m12.vault]);
+  await processOne(deps({ rpc: rpcWithReveal(true) }));
+  expect(calls().find((c) => c.startsWith("fetch"))).toContain("--reveal-tx TREVEAL --reveal-signer alice.testnet");
 });
 
 test("rehearsal never calls recheck_obs and records skip", async () => {
