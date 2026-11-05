@@ -3,7 +3,7 @@
 The Rust test writes <proof dir>/<name>.json before it asserts, with `verdict` set to
 "held" or "breached" and `result` set to the matching "PASS" or "FAIL", which the website
 reads. The proof dir is $FOUNDLING_PROOF_DIR, else proofs/attack/local (ignored by git);
-proofs/attack itself holds the ones committed from a run on the reproducible build.
+proofs/attack/reproducible holds the ones committed from a run on the reproducible build.
 Exit codes follow the dispatcher: 0 held, 1 breached, 2 tool error. A breach is a verdict of
 "breached", or any observed reason code outside the registry's codes for the attack. Without
 a proof the test never reached a verdict (a build error, a missing or stale wasm, a failed

@@ -1,5 +1,5 @@
 //! Attack Lab, first five attacks (SPEC section 5, S3). Each test attacks a sandbox vault, writes
-//! `proofs/attack/<name>.json` with its verdict and the ledger before and after, and only then
+//! `<name>.json` in the proof directory with its verdict and the ledger before and after, and only then
 //! asserts, so `tools/attacks/<name>` can tell a breach (exit 1) from a tool error (exit 2).
 //! Times in a proof are seconds after the attack's first trade, so a proof is the same on every run.
 //!
@@ -286,8 +286,8 @@ impl Run {
 
     fn finish(self, env: &Foundling, before: Value, after: Value) -> anyhow::Result<()> {
         let wasm = foundling_sandbox::wasm("vault", "foundling_vault");
-        // proofs/attack holds the proofs committed from a run on the reproducible build; any other
-        // run writes to the ignored proofs/attack/local unless FOUNDLING_PROOF_DIR says otherwise.
+        // proofs/attack/reproducible holds the proofs committed from a run on the reproducible build;
+        // any other run writes to the ignored proofs/attack/local unless FOUNDLING_PROOF_DIR says so.
         let dir: PathBuf = match std::env::var_os("FOUNDLING_PROOF_DIR") {
             Some(dir) => dir.into(),
             None => [

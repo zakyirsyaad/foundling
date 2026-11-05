@@ -49,7 +49,9 @@ class AttackLabMakeTest(unittest.TestCase):
         run_all = plan.index("tools/attack.py run-all")
         self.assertLess(reproducible, run_all)
         self.assertIn("FOUNDLING_PROOF_DIR=", plan[run_all - 120 : run_all])
-        self.assertIn("proofs/attack", plan[run_all - 120 : run_all])
+        # Not proofs/attack/<name>.json: web/lib/proof/sample.ts reads those as results, and the
+        # web test of the lead expects every attack there to be "Not run yet".
+        self.assertIn("proofs/attack/reproducible", plan[run_all - 140 : run_all])
         # The mocks are built the usual way; only the vault is the audited artifact.
         loop = plan.split("; do", 1)[0]
         self.assertNotIn("vault", loop.split())

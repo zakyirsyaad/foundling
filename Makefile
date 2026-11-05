@@ -40,7 +40,7 @@ attack-lab-full: wasm
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 	@python3 tools/attack.py run-all
 
-# Regenerates the committed proofs/attack/*.json (the evidence files claims.json points at) from a
+# Regenerates the committed proofs/attack/reproducible/*.json (the evidence files claims.json points at) from a
 # run on the vault built reproducibly in the pinned image, like CI's "Vault reproducible" job. It
 # needs Docker and a committed checkout, and the audited vault is the only reproducible build: the
 # mocks are built the usual way. A plain `make attack-lab` writes to the ignored proofs/attack/local.
@@ -52,4 +52,4 @@ attack-proofs:
 	done
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
-	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack python3 tools/attack.py run-all
+	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack/reproducible python3 tools/attack.py run-all

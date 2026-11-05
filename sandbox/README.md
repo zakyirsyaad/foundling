@@ -97,11 +97,11 @@ async fn contoh() -> anyhow::Result<()> {
 
 ```
 make attack-lab-full                 # build WASM + kompilasi tes, lalu semua serangan (proof ke proofs/attack/local)
-make attack-proofs                   # vault dari build reproducible (Docker), proof ke proofs/attack untuk di-commit
+make attack-proofs                   # vault dari build reproducible (Docker), proof ke proofs/attack/reproducible untuk di-commit
 python3 tools/attack.py run drip     # satu serangan; butuh `make wasm` lebih dulu
 ```
 
-- Proof memuat langkah, kode alasan yang teramati, policy yang dipakai, hash SHA-256 `foundling_vault.wasm`, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). Run biasa menulis ke `proofs/attack/local/` (di-gitignore), karena hash WASM non-reproducible berbeda antar mesin. `proofs/attack/<nama>.json` adalah bukti yang dirujuk klaim README (SPEC 9.3) dan hanya ditulis `make attack-proofs` dari build vault reproducible; `FOUNDLING_PROOF_DIR` menggantikan lokasi keduanya. Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run dengan WASM yang sama.
+- Proof memuat langkah, kode alasan yang teramati, policy yang dipakai, hash SHA-256 `foundling_vault.wasm`, dan buku sebelum dan sesudah (`book`, `rhea_book`, saham, dompet vault). Run biasa menulis ke `proofs/attack/local/` (di-gitignore), karena hash WASM non-reproducible berbeda antar mesin. `proofs/attack/reproducible/<nama>.json` adalah bukti yang dirujuk klaim README (SPEC 9.3) dan hanya ditulis `make attack-proofs` dari build vault reproducible; `FOUNDLING_PROOF_DIR` menggantikan lokasi keduanya. Jangan taruh bukti di `proofs/attack/<nama>.json`: `attackRows()` di `web/lib/proof/sample.ts` membaca berkas itu sebagai hasil, dan tes web mengharapkan serangan yang belum dihubungkan berstatus "Not run yet". Menghubungkan situs ke folder `reproducible/` adalah keputusan lead. Waktu di proof berupa detik sejak transaksi pertama serangan, jadi isinya sama di setiap run dengan WASM yang sama.
 - Hanya kode yang tercantum di `codes` registry yang boleh masuk `observed`; langkah yang menolak dengan teks panic di luar daftar SPEC (mis. `NOT_READY`) mencatatnya di `detail`, dan `null` dari OutLayer tercatat sebagai `CycleFailed` dengan `NULL_RESULT` di `detail`.
 - Langkah `held: true/false` adalah pertahanan vault. Langkah `held: null` adalah prasyarat atau kontrol: bila salah, tes berhenti sebelum proof ditulis dan runner melapor 2, bukan 1.
 - `ledger_before` dan `ledger_after` tidak selalu sama: `drip` dan `replay` memuat trade sah di tengah. Bukti "buku tidak berubah" ada per langkah (`ledger_unchanged`, atau perbandingan dengan buku sebelum serangan itu).
