@@ -71,3 +71,23 @@ test("the 17th request running at once is 503", async () => {
   expect((await Promise.all(running)).map((r) => r.status)).toEqual(Array(16).fill(200));
   expect((await app.request("/")).status).toBe(200);
 });
+
+test("IPv6 clients share one bucket per /64, since one host can hold the whole /64", async () => {
+  const app = limitedApp([], 2);
+  const from = (ip: string) => app.request("/", {}, envFrom(ip));
+  expect((await from("2001:db8:1:2::1")).status).toBe(200);
+  expect((await from("2001:db8:1:2:ffff::9")).status).toBe(200);
+  expect((await from("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).status).toBe(429);
+  expect((await from("2001:db8:1:3::1")).status).toBe(200);
+});
+
+test.each([
+  ["2001:db8:1:2::1", "2001:db8:1:2::/64"],
+  ["2001:DB8:0001:0002:ffff:0:0:9", "2001:db8:1:2::/64"],
+  ["::1", "0:0:0:0::/64"],
+  ["::ffff:10.1.2.3", "10.1.2.3"],
+  ["10.1.2.3", "10.1.2.3"],
+])("clientKey(%s) is %s", async (ip, key) => {
+  const { clientKey } = await import("../src/limits");
+  expect(clientKey(ip)).toBe(key);
+});

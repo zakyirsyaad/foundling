@@ -1,12 +1,12 @@
 /** Rebuilds one cycle row from all of its events (WEBSITE §5). Pure: the same events always give the same row. */
+import { NOT_CYCLE_EVENTS } from "@foundling/db";
 import type { ParsedEvent } from "./parse";
 
 /** Events that end a cycle. `rejected` closes too, except for PRICE_UNAVAILABLE, which keeps the decision for a retry. */
 export const CLOSING = new Set(["executed", "swap_reverted", "hold", "cycle_failed", "cycle_aborted"]);
 const REJECTED = "rejected";
 const RETRYABLE_REJECTION = "PRICE_UNAVAILABLE";
-/** These carry a cycle nonce but belong to an account, often long after the cycle ended. */
-const NOT_CYCLE_EVENTS = new Set(["claimed"]);
+const ACCOUNT_EVENTS = new Set(NOT_CYCLE_EVENTS);
 
 export interface DerivedCycle {
   nonce: bigint;
@@ -21,7 +21,7 @@ export interface DerivedCycle {
 }
 
 export function cycleEvents(events: ParsedEvent[]): ParsedEvent[] {
-  return events.filter((e) => e.nonce !== null && !NOT_CYCLE_EVENTS.has(e.name));
+  return events.filter((e) => e.nonce !== null && !ACCOUNT_EVENTS.has(e.name));
 }
 
 function closes(e: ParsedEvent): boolean {

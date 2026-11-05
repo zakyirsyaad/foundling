@@ -1,4 +1,4 @@
-import { cycles, events, proofs } from "@foundling/db";
+import { NOT_CYCLE_EVENTS, cycles, events, proofs } from "@foundling/db";
 import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -13,8 +13,7 @@ const listQuery = z.object({
   cursor: cursorSchema(z.object({ n: digits })).optional(),
   limit: limitSchema,
 });
-/** Account events that carry a cycle nonce but are not part of the cycle (indexer/src/derive.ts). */
-const NOT_CYCLE_EVENTS = ["claimed"];
+
 
 type CycleRecord = typeof cycles.$inferSelect;
 
@@ -31,7 +30,7 @@ async function rows(deps: RouteDeps, list: CycleRecord[]) {
     deps.db
       .select({ nonce: events.nonce, name: events.name, data: events.data, txHash: events.txHash })
       .from(events)
-      .where(and(eq(events.vaultId, deps.vaultId), inArray(events.nonce, nonces), notInArray(events.name, NOT_CYCLE_EVENTS)))
+      .where(and(eq(events.vaultId, deps.vaultId), inArray(events.nonce, nonces), notInArray(events.name, [...NOT_CYCLE_EVENTS])))
       .orderBy(asc(events.blockHeight), asc(events.receiptIndex), asc(events.logIndex)),
     deps.db.select().from(proofs).where(and(eq(proofs.vaultId, deps.vaultId), inArray(proofs.nonce, nonces))),
   ]);

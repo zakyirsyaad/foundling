@@ -190,3 +190,20 @@ test("status shows when the last round succeeded, and how far the chain has move
     await admin.end();
   }
 });
+
+test("a cycle's event list leaves out account events that carry its nonce", async () => {
+  const admin = new pg.Client({ connectionString: url });
+  await admin.connect();
+  try {
+    for (const [i, name] of ["claimed", "claim_folded"].entries()) {
+      await admin.query(`insert into events (vault_id, receipt_id, log_index, tx_hash, block_height, receipt_index, block_time, name, nonce, account, data)
+                         values ($1, $2, 0, 'TACCOUNT', 999999990, 0, now(), $3, 3, 'bob.testnet', '{}')`, [M12, `RACC${i}`, name]);
+    }
+    const body = await (await get(app(), "/v1/cycles/3")).json();
+    expect(body.data.events.map((e: { name: string }) => e.name)).not.toContain("claim_folded");
+    expect(body.data.events.map((e: { name: string }) => e.name)).not.toContain("claimed");
+  } finally {
+    await admin.query("delete from events where tx_hash = 'TACCOUNT'");
+    await admin.end();
+  }
+});

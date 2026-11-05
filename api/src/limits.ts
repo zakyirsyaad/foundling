@@ -40,11 +40,34 @@ export function clientAddress(socket: string | undefined, realIp: string | undef
 type NodeEnv = { incoming?: { socket?: { remoteAddress?: string } } };
 export const socketAddress = (c: Context): string | undefined => (c.env as NodeEnv | undefined)?.incoming?.socket?.remoteAddress;
 
+/** The eight hextets of an IPv6 address, or null when it is not one. */
+function hextets(ip: string): string[] | null {
+  const halves = ip.toLowerCase().split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  const all = [...head, ...Array(Math.max(fill, 0)).fill("0"), ...tail];
+  if (all.length !== 8 || !all.every((h) => /^[0-9a-f]{1,4}$/.test(h))) return null;
+  return all.map((h) => h.replace(/^0+(?=.)/, ""));
+}
+
+/**
+ * The bucket a client counts against. An IPv6 host usually holds a whole /64, so every address in it is one
+ * client; IPv4 (and IPv4-mapped IPv6) is one address.
+ */
+export function clientKey(address: string): string {
+  const ip = unmap(address);
+  if (!ip.includes(":")) return ip;
+  const h = hextets(ip);
+  return h ? `${h.slice(0, 4).join(":")}::/64` : ip;
+}
+
 export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[] }): MiddlewareHandler {
   const windows = new Map<string, { start: number; count: number }>();
   return async (c, next) => {
     const now = Date.now();
-    const key = clientAddress(socketAddress(c), c.req.header("x-real-ip"), opts.trustProxyFrom);
+    const key = clientKey(clientAddress(socketAddress(c), c.req.header("x-real-ip"), opts.trustProxyFrom));
     if (windows.size > MAX_TRACKED) for (const [k, w] of windows) if (now - w.start >= WINDOW_MS) windows.delete(k);
     const w = windows.get(key);
     if (!w || now - w.start >= WINDOW_MS) windows.set(key, { start: now, count: 1 });

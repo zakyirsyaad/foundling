@@ -75,3 +75,8 @@ test("the last closing event wins, as on the website (web/lib/cycles/outcome.ts)
   const c = deriveCycle([e("cycle_started"), e("rejected", { code: "OVER_CAP" }, { block: 400 }), e("cycle_aborted", {}, { block: 500 })]);
   expect(c).toMatchObject({ closing: "cycle_aborted", finishedAt: new Date(500_000) });
 });
+
+test("claim_folded also carries an old cycle's nonce and is not part of that cycle", () => {
+  const evs = [e("cycle_started"), e("claim_folded", { account: "bob.testnet", amount: "5" })];
+  expect(cycleEvents(evs).map((x) => x.name)).toEqual(["cycle_started"]);
+});

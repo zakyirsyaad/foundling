@@ -5,7 +5,7 @@ import { parse } from "yaml";
 const here = join(__dirname, "..");
 const read = (f: string) => readFileSync(join(here, f), "utf8");
 
-interface Service { image?: string; build?: unknown; ports?: string[]; networks?: string[]; mem_limit?: string; cpus?: number; environment?: Record<string, string>; read_only?: boolean; user?: string }
+interface Service { init?: boolean; image?: string; build?: unknown; ports?: string[]; networks?: string[]; mem_limit?: string; cpus?: number; environment?: Record<string, string>; read_only?: boolean; user?: string }
 // Compose applies YAML merge keys (`<<: *own`); the parser must too.
 const compose = parse(read("compose.yml"), { merge: true }) as { services: Record<string, Service>; networks: Record<string, { internal?: boolean; ipam?: { config: { subnet: string }[] } }> };
 const services = Object.entries(compose.services);
@@ -94,4 +94,8 @@ test(".env.example names every variable and holds no value", () => {
 test("the build context never ships secrets or local state", () => {
   const ignore = readFileSync(join(here, "..", ".dockerignore"), "utf8").split("\n");
   for (const p of [".env", "**/.env*", "keys/", "**/*.key", "**/*.pem", "node_modules/", ".git/", ".superpowers/", "**/target/"]) expect(ignore, p).toContain(p);
+});
+
+test("the worker runs under an init process, which reaps tool processes killed on timeout", () => {
+  expect(compose.services.worker!.init).toBe(true);
 });
