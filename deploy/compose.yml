@@ -56,6 +56,8 @@ services:
       RPC_URLS: ${RPC_URLS}
       ARCHIVAL_RPC_URLS: ${ARCHIVAL_RPC_URLS}
       FASTNEAR_API_KEY: ${FASTNEAR_API_KEY}
+    # The proof tools run in their own process groups and are killed on timeout; init reaps what is left.
+    init: true
     # db has no way out; egress reaches FastNEAR, RPC and the proof sources.
     networks: [db, egress]
     mem_limit: 512m

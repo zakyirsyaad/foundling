@@ -30,7 +30,7 @@ ufw default deny incoming && ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 4
 
 Pasang Docker Engine dan plugin Compose dari repo resmi Docker, lalu masukkan `ops` ke grup `docker`. Perlu diingat, grup `docker` setara root, jadi grup ini hanya untuk lead.
 
-DNS: arahkan `api.<domain>` (record A) ke IP VPS. Caddy mengambil sertifikat TLS sendiri saat start pertama.
+DNS: arahkan `api.<domain>` (record A) ke IP VPS. Caddy mengambil sertifikat TLS sendiri saat start pertama. Jangan pasang record AAAA: proxy port Docker meneruskan klien IPv6 dengan alamat gateway, sehingga semua klien IPv6 berbagi satu jatah 60 permintaan per menit.
 
 ## 2. `.env`
 
