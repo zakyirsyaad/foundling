@@ -3,6 +3,7 @@ import { db as connect } from "@foundling/db";
 import { loadConfig } from "./config";
 import { createFastnear } from "./fastnear";
 import { type Log, runIndexLoop, withVaultLock } from "./loop";
+import { runProofLoop } from "./proofs/queue";
 import { createArchivalRpc } from "./rpc";
 
 const log: Log = (message, fields = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), message, ...fields }));
@@ -17,8 +18,10 @@ const deps = {
   log,
 };
 
-log("worker starting", { vaultId: config.vaultId, chain: config.chain });
-const outcome = await withVaultLock(db, config.vaultId, () => runIndexLoop(deps));
+log("worker starting", { vaultId: config.vaultId, chain: config.chain, obsSource: config.proofs.obsSource });
+const proofDeps = { db, vaultId: config.vaultId, chain: config.chain, rpc: deps.rpc, log, ...config.proofs };
+// Two loops under one lock: the proof loop never waits on an index round, and only one worker runs per vault.
+const outcome = await withVaultLock(db, config.vaultId, () => Promise.race([runIndexLoop(deps), runProofLoop(proofDeps)]));
 if (outcome === "locked") {
   log("another worker holds this vault; exiting", { vaultId: config.vaultId });
   process.exit(1);

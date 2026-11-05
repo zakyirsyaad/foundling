@@ -1,5 +1,12 @@
 /** Indexer settings from env (docs/plans/2026-11-05-backend.md Task 9 `.env.example`). Validated once at start. */
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import type { ToolPaths } from "./proofs/queue";
+import { TOOL_TIMEOUT_MS } from "./proofs/run";
+
+/** The repo's tools/ when run from a checkout; the image sets TOOLS_DIR. */
+const REPO_TOOLS = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "tools");
 
 const HOSTS = {
   testnet: { fastnear: "https://tx.test.fastnear.com", rpc: "https://rpc.testnet.fastnear.com", archival: "https://archival-rpc.testnet.fastnear.com" },
@@ -17,6 +24,11 @@ const envSchema = z.object({
   RPC_URLS: urlList,
   ARCHIVAL_RPC_URLS: urlList,
   FASTNEAR_API_KEY: z.string().min(1).optional(),
+  OBS_SOURCE: z.enum(["live", "rehearsal"]).default("live"),
+  VERIFIER_COMMIT: z.string().regex(/^[0-9a-f]{7,40}$/).optional(),
+  TOOLS_DIR: z.string().min(1).optional(),
+  VERIFY_BIN: z.string().min(1).default("foundling-verify"),
+  PYTHON: z.string().min(1).default("python3"),
 });
 
 export interface IndexerConfig {
@@ -27,6 +39,7 @@ export interface IndexerConfig {
   fastnearApiKey?: string;
   /** Regular nodes first, archival after: old blocks fall through to archival. */
   rpcUrls: string[];
+  proofs: { obsSource: "live" | "rehearsal"; verifierCommit?: string; tools: ToolPaths };
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): IndexerConfig {
@@ -41,5 +54,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     fastnearUrl: hosts.fastnear,
     ...(e.FASTNEAR_API_KEY ? { fastnearApiKey: e.FASTNEAR_API_KEY } : {}),
     rpcUrls: [...rpc, ...archival],
+    proofs: {
+      obsSource: e.OBS_SOURCE,
+      ...(e.VERIFIER_COMMIT ? { verifierCommit: e.VERIFIER_COMMIT } : {}),
+      tools: {
+        python: e.PYTHON,
+        fetchProof: join(e.TOOLS_DIR ?? REPO_TOOLS, "fetch_proof.py"),
+        recheckObs: join(e.TOOLS_DIR ?? REPO_TOOLS, "recheck_obs.py"),
+        verify: e.VERIFY_BIN,
+        rpcUrls: archival,
+        timeoutMs: TOOL_TIMEOUT_MS,
+      },
+    },
   };
 }

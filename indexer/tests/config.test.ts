@@ -26,3 +26,17 @@ test.each([
 ])("refuses a bad env %#", (env) => {
   expect(() => loadConfig(env)).toThrow();
 });
+
+test("proof settings: obs source, verifier commit, tools and archival RPCs for fetch_proof", () => {
+  const c = loadConfig({ ...base, OBS_SOURCE: "rehearsal", VERIFIER_COMMIT: "0123abc", ARCHIVAL_RPC_URLS: "https://arch", TOOLS_DIR: "/app/tools", VERIFY_BIN: "/usr/local/bin/foundling-verify" });
+  expect(c.proofs).toEqual({
+    obsSource: "rehearsal", verifierCommit: "0123abc",
+    tools: { python: "python3", fetchProof: "/app/tools/fetch_proof.py", recheckObs: "/app/tools/recheck_obs.py", verify: "/usr/local/bin/foundling-verify", rpcUrls: ["https://arch"], timeoutMs: 120_000 },
+  });
+});
+
+test("obs source defaults to live on mainnet and is required to be a known value", () => {
+  expect(loadConfig({ ...base, CHAIN: "mainnet" }).proofs.obsSource).toBe("live");
+  expect(() => loadConfig({ ...base, OBS_SOURCE: "maybe" })).toThrow();
+  expect(() => loadConfig({ ...base, VERIFIER_COMMIT: "not a sha" })).toThrow();
+});
