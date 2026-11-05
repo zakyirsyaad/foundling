@@ -22,6 +22,8 @@ WASM = [
     ("mock-token", "mock_token"),
 ]
 
+OLD, NEW = 1_700_000_000, 1_700_001_000
+
 # Stands in for cargo: records how it was called, then writes the proof FAKE_PROOF
 # names (if any) and exits FAKE_RC.
 FAKE_CARGO = """#!/usr/bin/env python3
@@ -36,9 +38,14 @@ sys.exit(int(os.environ.get("FAKE_RC", "0")))
 """
 
 
-def proof(verdict, name="over-cap", expected=("OVER_CAP",)):
+def proof(verdict, name="over-cap", expected=("OVER_CAP",), observed=("OVER_CAP",)):
     return json.dumps(
-        {"attack": name, "verdict": verdict, "expected_codes": list(expected), "observed": []}
+        {
+            "attack": name,
+            "verdict": verdict,
+            "expected_codes": list(expected),
+            "observed_codes": list(observed),
+        }
     )
 
 
@@ -52,15 +59,23 @@ class SandboxRunnerTest(unittest.TestCase):
         (self.root / "tools" / "attack-registry.json").write_text(
             json.dumps({"attacks": [{"name": "over-cap", "codes": ["OVER_CAP"]}]})
         )
+        self.sources = []
         for directory, file in WASM:
-            wasm = self.root / "contracts" / directory / "target" / "near" / f"{file}.wasm"
+            crate = self.root / "contracts" / directory
+            for source in (crate / "src" / "lib.rs", crate / "Cargo.toml", crate / "Cargo.lock"):
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("")
+                os.utime(source, (OLD, OLD))
+                self.sources.append(source)
+            wasm = crate / "target" / "near" / f"{file}.wasm"
             wasm.parent.mkdir(parents=True)
             wasm.write_bytes(b"\0asm")
+            os.utime(wasm, (NEW, NEW))
         self.cargo = self.root / "cargo"
         self.cargo.write_text(FAKE_CARGO)
         self.cargo.chmod(self.cargo.stat().st_mode | stat.S_IXUSR)
         self.log = self.root / "cargo.json"
-        self.proof_path = self.root / "proofs" / "attack" / "over-cap.json"
+        self.proof_path = self.root / "proofs" / "attack" / "local" / "over-cap.json"
 
     def run_attack(self, rc=0, written=None, name="over-cap"):
         env = {"FAKE_LOG": str(self.log), "FAKE_RC": str(rc),
@@ -116,6 +131,40 @@ class SandboxRunnerTest(unittest.TestCase):
         self.cargo.unlink()
         self.assertEqual(self.run_attack(0, proof("held")), 2)
 
+    def test_a_code_outside_the_expected_ones_is_a_breach_even_when_the_test_held(self):
+        # The per-step booleans decide `held`; the codes are checked on top of them.
+        stray = proof("held", observed=("OVER_CAP", "NOT_READY"))
+        self.assertEqual(self.run_attack(0, stray), 1)
+
+    def test_a_breach_is_reported_when_the_code_is_wrong_and_the_test_also_failed(self):
+        self.assertEqual(self.run_attack(101, proof("held", observed=("MALFORMED",))), 1)
+
+    def test_a_proof_without_observed_codes_exits_2(self):
+        bare = json.dumps({"attack": "over-cap", "verdict": "held", "expected_codes": ["OVER_CAP"]})
+        self.assertEqual(self.run_attack(0, bare), 2)
+
+    def test_a_proof_with_codes_inside_the_expected_ones_still_passes(self):
+        self.assertEqual(self.run_attack(0, proof("held", observed=())), 0)
+
+    def test_a_proof_dir_from_the_environment_replaces_the_local_one(self):
+        elsewhere = self.root / "committed"
+        self.proof_path = elsewhere / "over-cap.json"
+        os.environ["FOUNDLING_PROOF_DIR"] = str(elsewhere)
+        self.addCleanup(os.environ.pop, "FOUNDLING_PROOF_DIR", None)
+        self.assertEqual(self.run_attack(0, proof("held")), 0)
+
+    def test_a_wasm_older_than_its_sources_exits_2_without_calling_cargo(self):
+        for source in self.sources:
+            with self.subTest(source=source.relative_to(self.root)):
+                self.log.unlink(missing_ok=True)
+                os.utime(source, (NEW + 1, NEW + 1))
+                self.assertEqual(self.run_attack(0, proof("held")), 2)
+                self.assertFalse(self.log.exists(), "cargo must not run on a stale wasm")
+                os.utime(source, (OLD, OLD))
+
+    def test_a_wasm_newer_than_its_sources_runs(self):
+        self.assertEqual(self.run_attack(0, proof("held")), 0)
+
     def test_cargo_runs_the_exact_test_named_after_the_attack_in_sandbox(self):
         self.run_attack(0, proof("held"))
         call = json.loads(self.log.read_text())
@@ -123,7 +172,7 @@ class SandboxRunnerTest(unittest.TestCase):
             call["argv"],
             [
                 "test", "--locked", "--test", "attacks_batch1", "over_cap",
-                "--", "--exact", "--include-ignored",
+                "--", "--exact",
             ],
         )
         self.assertEqual(Path(call["cwd"]).resolve(), (self.root / "sandbox").resolve())

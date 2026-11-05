@@ -281,15 +281,35 @@ impl Run {
 
     fn finish(self, env: &Foundling, before: Value, after: Value) -> anyhow::Result<()> {
         let wasm = foundling_sandbox::wasm("vault", "foundling_vault");
-        let dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "proofs", "attack"]
+        // proofs/attack holds the proofs committed from a run on the reproducible build; any other
+        // run writes to the ignored proofs/attack/local unless FOUNDLING_PROOF_DIR says otherwise.
+        let dir: PathBuf = match std::env::var_os("FOUNDLING_PROOF_DIR") {
+            Some(dir) => dir.into(),
+            None => [
+                env!("CARGO_MANIFEST_DIR"),
+                "..",
+                "proofs",
+                "attack",
+                "local",
+            ]
             .iter()
-            .collect();
+            .collect(),
+        };
         std::fs::create_dir_all(&dir)?;
+        // A step can be right about its own condition and still have seen the wrong code, so
+        // the codes are held to the registry's list on top of the steps.
+        let unexpected: Vec<&String> = self
+            .observed
+            .iter()
+            .filter(|code| !self.expected.contains(&code.as_str()))
+            .collect();
+        let held = self.held && unexpected.is_empty();
         let proof = json!({
             "attack": self.attack,
-            "verdict": if self.held { "held" } else { "breached" },
+            "verdict": if held { "held" } else { "breached" },
             "expected_codes": self.expected,
             "observed_codes": self.observed,
+            "unexpected_codes": unexpected,
             "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
             "vault_wasm_sha256": format!("{:x}", Sha256::digest(&wasm)),
             "policy": env.config["policy"],
@@ -303,7 +323,7 @@ impl Run {
             serde_json::to_string_pretty(&proof)? + "\n",
         )?;
         assert!(
-            self.held,
+            held,
             "{} was not held: {}",
             self.attack,
             serde_json::to_string_pretty(&proof["steps"])?
@@ -425,8 +445,8 @@ async fn replay() -> anyhow::Result<()> {
     run.step(
         "execute_decision on a nonce that already ran",
         refusal(stale.as_deref(), &["NOT_READY"]).is_some() && balances(&env).await? == after_trade,
-        refusal(stale.as_deref(), &["NOT_READY"]),
-        json!({"nonce": spent.nonce}),
+        None,
+        json!({"nonce": spent.nonce, "refused_with": refusal(stale.as_deref(), &["NOT_READY"])}),
     );
 
     wait_seconds(&env, COOLDOWN + 1).await?;
@@ -436,8 +456,8 @@ async fn replay() -> anyhow::Result<()> {
         nothing.failed.as_deref() == Some("NULL_RESULT")
             && !nothing.started
             && balances(&env).await? == after_trade,
-        nothing.failed.as_deref(),
-        json!({"event": "cycle_failed"}),
+        nothing.failed.as_deref().map(|_| "CycleFailed"),
+        json!({"event": "cycle_failed", "code": nothing.failed}),
     );
 
     // A good decision that waits past `decision_ttl` (600 s) before the keeper acts on it.
@@ -457,8 +477,8 @@ async fn replay() -> anyhow::Result<()> {
         refusal(wrong.as_deref(), &["NOT_READY"]).is_some()
             && stage(&env).await?.get("DecisionReady").is_some()
             && balances(&env).await? == after_trade,
-        refusal(wrong.as_deref(), &["NOT_READY"]),
-        json!({"ready_nonce": late_nonce, "called_with": late_nonce + 1}),
+        None,
+        json!({"ready_nonce": late_nonce, "called_with": late_nonce + 1, "refused_with": refusal(wrong.as_deref(), &["NOT_READY"])}),
     );
     wait_seconds(&env, 601).await?;
     let expired = refused_text(&execute(&env, late_nonce).await?);
@@ -741,19 +761,15 @@ async fn stale_price() -> anyhow::Result<()> {
     run.finish(&env, before, ledger(&env).await?)
 }
 
-/// Decision v1 has no field for a route, a pool, an asset or a receiver, so there is nothing
-/// to put in `Rejected(ROUTE_NOT_ALLOWED)`: the vault never emits that code, and an agent
-/// that adds such fields has them ignored. What this proves is I9, that no receipt of the
-/// trade runs anywhere but the registered accounts. The code step below is the SPEC's
-/// expectation and fails for as long as the vault cannot produce it.
-// Ignored in `cargo test` so `make sandbox` stays green: the failure is a gap between the SPEC and
-// the vault, not a regression. `tools/attacks/bad-route` runs it with `--include-ignored` and
-// reports FAIL. Remove this when the vault emits the code or the SPEC drops it.
-#[ignore = "SPEC gap: the vault never emits ROUTE_NOT_ALLOWED"]
+/// Decision v1 has no field for a route, a pool, an asset or a receiver, so an agent has no way
+/// to name a way out. The vault ignores such fields and trades only through the registered
+/// pool, which is I9: no receipt of the trade runs anywhere but the registered accounts. An
+/// action the vault does not know is `CycleFailed(MALFORMED)`. SPEC 5 lists no `Rejected` code
+/// for a route, because there is none to emit.
 #[tokio::test]
 async fn bad_route() -> anyhow::Result<()> {
     let env = attack_env(testnet_timing()).await?;
-    let mut run = Run::new("bad-route", &["ROUTE_NOT_ALLOWED"]);
+    let mut run = Run::new("bad-route", &["MALFORMED"]);
     let before = settle_deposit(&env).await?;
     // The keeper signs the call, so its own account runs the receipt that converts the transaction.
     let registered: Vec<String> = [
@@ -791,9 +807,7 @@ async fn bad_route() -> anyhow::Result<()> {
     let code = smuggled.rejected.clone().or(smuggled.failed.clone());
     run.step(
         "a decision that names a receiver, a pool and a route of the attacker's choosing",
-        leaked.is_empty()
-            && attacker_holds == ["0", "0"]
-            && (smuggled.started || code.as_deref() == Some("ROUTE_NOT_ALLOWED")),
+        smuggled.started && code.is_none() && leaked.is_empty() && attacker_holds == ["0", "0"],
         code.as_deref(),
         json!({
             "nonce": nonce,
@@ -815,27 +829,17 @@ async fn bad_route() -> anyhow::Result<()> {
     .to_string();
     let unknown = cycle(&env, json!({"Raw": {"payload": transfer}})).await?;
     let code_unknown = unknown.rejected.clone().or(unknown.failed.clone());
+    // The envelope (vault, chain, nonce, commitment, hash) is the one the step above traded
+    // with, so the action is the only thing that can have made this payload malformed.
     run.step(
         "an action that is not buy or sell",
-        code_unknown.is_some()
+        code_unknown.as_deref() == Some("MALFORMED")
             && !unknown.started
             && unknown.executors.is_empty()
             && balances(&env).await? == after_trade,
         code_unknown.as_deref(),
-        json!({"nonce": nonce}),
+        json!({"nonce": nonce, "envelope_control": "same envelope as the trading step above"}),
     );
 
-    let saw = run.observed.iter().any(|code| code == "ROUTE_NOT_ALLOWED");
-    run.step(
-        "Rejected(ROUTE_NOT_ALLOWED) is emitted for an unregistered route",
-        saw,
-        None,
-        json!({"observed_codes": run.observed}),
-    );
-    run.note(
-        "ROUTE_NOT_ALLOWED",
-        "contracts/vault never emits it: Decision v1 carries no route, asset or receiver, \
-         and unknown fields are ignored. I9 held, but the SPEC's reason code cannot occur",
-    );
     run.finish(&env, before, ledger(&env).await?)
 }
