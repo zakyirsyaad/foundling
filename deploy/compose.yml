@@ -1,0 +1,109 @@
+# The VPS stack (WEBSITE §5). Run from the repo root: docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+name: foundling
+
+x-own-image: &own
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+
+services:
+  caddy:
+    image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    mem_limit: 128m
+    depends_on: [api]
+
+  api:
+    <<: *own
+    build: { context: .., dockerfile: deploy/Dockerfile.api }
+    environment:
+      DATABASE_URL_READER: ${DATABASE_URL_READER}
+      ACTIVE_VAULT_ID: ${ACTIVE_VAULT_ID}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      TRUST_PROXY_FROM: 172.30.0.0/24
+      PORT: "8080"
+    networks: [edge, db]
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    <<: *own
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+      args:
+        VERIFIER_COMMIT: ${VERIFIER_COMMIT}
+      additional_contexts:
+        verifier-src: https://github.com/zakyirsyaad/foundling.git#${VERIFIER_COMMIT}
+    environment:
+      ACTIVE_VAULT_ID: ${ACTIVE_VAULT_ID}
+      CHAIN: ${CHAIN}
+      DATABASE_URL_WRITER: ${DATABASE_URL_WRITER}
+      OBS_SOURCE: ${OBS_SOURCE}
+      RPC_URLS: ${RPC_URLS}
+      ARCHIVAL_RPC_URLS: ${ARCHIVAL_RPC_URLS}
+      FASTNEAR_API_KEY: ${FASTNEAR_API_KEY}
+    # db has no way out; egress reaches FastNEAR, RPC and the proof sources.
+    networks: [db, egress]
+    mem_limit: 512m
+    cpus: 1
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  migrate:
+    <<: *own
+    restart: "no"
+    build: { context: .., dockerfile: deploy/Dockerfile.api }
+    command: ["/app/node_modules/.bin/tsx", "packages/db/src/migrate-cli.ts"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/foundling
+      DATABASE_URL_READER: ${DATABASE_URL_READER}
+      DATABASE_URL_WRITER: ${DATABASE_URL_WRITER}
+    networks: [db]
+    mem_limit: 128m
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  postgres:
+    image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: foundling
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [db]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "foundling"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  db:
+    internal: true
+  egress: {}
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

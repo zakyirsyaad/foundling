@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793812743926,
+      "tag": "0000_smart_the_liberteens",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793853778520,
+      "tag": "0001_worthless_banshee",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793855701139,
+      "tag": "0002_superb_iron_man",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+# Nothing secret or local goes into an image. Images build from the repo root (deploy/compose.yml).
+.env
+**/.env*
+!**/.env.example
+keys/
+**/*.key
+**/*.pem
+**/*credentials*.json
+.git/
+.github/
+.superpowers/
+.remember/
+.claude/
+node_modules/
+**/node_modules/
+**/target/
+**/coverage/
+web/.next/
+web/.next-mainnet/
+web/test-results/
+web/playwright-report/
+proofs/
+sandbox/
+IDEAS*.md
+HACKATHON*.md

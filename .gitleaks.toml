@@ -1,0 +1,14 @@
+# gitleaks config for the Secrets CI job. Extends the default rules; nothing is turned off.
+[extend]
+useDefault = true
+
+# indexer/fixtures/*.json are raw public testnet transactions (indexer/scripts/record-fixture.ts).
+# Their base64 call args hold NEAR account ids under keys like "secrets_owner" and "token_id", which the
+# generic-api-key rule decodes and flags. Allowed only when both hold: the file is a fixture AND the flagged
+# value is a NEAR account id. Any other value in those files, and every other file, is still scanned.
+[[allowlists]]
+description = "NEAR account ids in recorded public testnet fixtures"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^indexer/fixtures/[a-z0-9]+\.json$''']
+regexes = ['''^([a-z0-9]+[-_])*[a-z0-9]+(\.([a-z0-9]+[-_])*[a-z0-9]+)*\.(testnet|near)$''']
