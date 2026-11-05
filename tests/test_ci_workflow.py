@@ -18,7 +18,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 RUNNER = "ubuntu-24.04"
 SOFT_JOB = "attack-lab-run"
-PROMOTION_NOTE = "# diangkat jadi wajib (hapus continue-on-error) setelah T7-T9 selesai"
+PROMOTION_NOTE = "# becomes required (remove continue-on-error) after T7-T9"
 # Jobs whose removal would silently weaken the pipeline. Deleting one needs a deliberate
 # edit of this list.
 REQUIRED_JOBS = {

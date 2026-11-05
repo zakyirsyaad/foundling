@@ -458,7 +458,7 @@ jobs:
 
   attack-lab-run:
     name: Attack Lab (run-all)
-    # diangkat jadi wajib (hapus continue-on-error) setelah T7-T9 selesai
+    # becomes required (remove continue-on-error) after T7-T9
     continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 40
