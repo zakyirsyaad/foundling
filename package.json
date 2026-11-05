@@ -5,7 +5,8 @@
     "web",
     "packages/db",
     "indexer",
-    "api"
+    "api",
+    "deploy"
   ],
   "engines": {
     "node": ">=24"

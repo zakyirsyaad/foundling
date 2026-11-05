@@ -363,11 +363,37 @@ jobs:
           npm run -w @foundling/db typecheck
           npm run -w @foundling/indexer typecheck
           npm run -w @foundling/api typecheck
+          npx -w @foundling/deploy tsc --noEmit -p .
       - name: Tests with coverage
         run: |
           npm run -w @foundling/db test
           npm run -w @foundling/indexer test:coverage
           npm run -w @foundling/api test:coverage
+          npm run -w @foundling/deploy test
+
+  backend-image:
+    name: Backend image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Proves the images build; a deployed worker image is built from the vault's own commit.
+      VERIFIER_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compose file
+        run: docker compose -f deploy/compose.yml --env-file deploy/.env.example config --quiet
+      - name: API image
+        run: docker build -f deploy/Dockerfile.api -t foundling-api:ci .
+      - name: Worker image
+        run: docker build -f deploy/Dockerfile.worker --build-arg "VERIFIER_COMMIT=$VERIFIER_COMMIT" -t foundling-worker:ci .
+      - name: Images start and refuse an empty env
+        run: |
+          api=$(docker run --rm foundling-api:ci 2>&1 || true)
+          echo "$api" | grep -q DATABASE_URL_READER
+          worker=$(docker run --rm foundling-worker:ci 2>&1 || true)
+          echo "$worker" | grep -q ACTIVE_VAULT_ID
+          docker run --rm --entrypoint python3 foundling-worker:ci /app/tools/fetch_proof.py --help > /dev/null
+          docker run --rm --entrypoint sh foundling-worker:ci -c 'test -x /usr/local/bin/foundling-verify && test "$(id -u)" != 0'
 
   dependencies:
     name: Dependencies

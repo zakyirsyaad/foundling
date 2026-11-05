@@ -1,0 +1,39 @@
+# The worker: index loop and proof queue. Built from the repo root.
+#
+# foundling-verify compiles the strategy rules, so it must come from the commit that built the indexed
+# vault's wasm_hash: compose passes `--build-context verifier-src=<repo>.git#$VERIFIER_COMMIT`. Without that
+# context (CI), the stage below falls back to the build context itself.
+FROM scratch AS verifier-src
+COPY cli /cli
+COPY strategy /strategy
+
+FROM rust:1.97.1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3 AS verifier
+ARG VERIFIER_COMMIT
+RUN test -n "$VERIFIER_COMMIT" || (echo "VERIFIER_COMMIT is required" >&2; exit 1)
+# ring and aws-lc-sys build C code.
+RUN apt-get update && apt-get install -y --no-install-recommends cmake clang pkg-config && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY --from=verifier-src /cli cli
+COPY --from=verifier-src /strategy strategy
+RUN cargo build --release --locked --features fetch --manifest-path cli/Cargo.toml
+
+FROM node:24.22.0-bookworm-slim@sha256:91acba91b842bec0bf7ea6f5e09c644c7ccad72c4996ed9616d861d1c7cd60d4
+ARG VERIFIER_COMMIT
+ENV NODE_ENV=production TOOLS_DIR=/app/tools VERIFY_BIN=/usr/local/bin/foundling-verify PYTHON=python3 VERIFIER_COMMIT=${VERIFIER_COMMIT}
+LABEL org.opencontainers.image.revision.verifier=${VERIFIER_COMMIT}
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY web/package.json web/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY indexer/package.json indexer/package.json
+COPY api/package.json api/package.json
+COPY deploy/package.json deploy/package.json
+RUN npm ci --omit=dev --ignore-scripts --workspace=@foundling/indexer --workspace=@foundling/db && npm cache clean --force
+COPY packages/db/src packages/db/src
+COPY packages/db/migrations packages/db/migrations
+COPY indexer/src indexer/src
+COPY tools/fetch_proof.py tools/recheck_obs.py tools/
+COPY --from=verifier /src/cli/target/release/foundling-verify /usr/local/bin/foundling-verify
+USER node
+CMD ["/app/node_modules/.bin/tsx", "indexer/src/main.ts"]
