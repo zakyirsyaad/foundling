@@ -397,9 +397,31 @@ jobs:
     # diangkat jadi wajib (hapus continue-on-error) setelah T7-T9 selesai
     continue-on-error: true
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/*/target
+            sandbox/target
+          key: attack-lab-${{ hashFiles('rust-toolchain.toml', 'contracts/*/Cargo.lock', 'sandbox/Cargo.lock') }}
+          restore-keys: attack-lab-
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Build the WASM the sandbox attacks deploy
+        run: make wasm
       - name: Run every core attack
         run: |
           status=0

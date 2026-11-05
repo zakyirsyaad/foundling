@@ -24,11 +24,11 @@ PROMOTION_NOTE = "# diangkat jadi wajib (hapus continue-on-error) setelah T7-T9 
 REQUIRED_JOBS = {
     "strategy", "contract", "verifier", "offline-verifier", "attack-lab", "keeper",
     "vault-wasm", "sandbox", "web", "dependencies", "secrets", SOFT_JOB, "workflow",
+    "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
 }
-# Patterns that make a failing command succeed. `|| status=$?` is fine: it records the
-# status and the step still fails on it.
+# Patterns that make a failing command succeed. Every `||` is rejected separately, except
+# `|| status=$?`, which records the status and lets the step fail on it.
 ALWAYS_GREEN = (
-    r"\|\|\s*(true|:|echo|exit\s+0)(\s|;|$)",
     r";\s*(true|:)\s*$",
     r"\bexit\s+0\b",
     r"\bset\s+\+e\b",
@@ -96,6 +96,13 @@ def check(text):
         if re.search(pattern, code, re.M):
             problems.append(f"can turn a failure green: /{pattern}/")
 
+    shell_only = re.sub(r"\$\{\{.*?\}\}", "", code)
+    for match in re.finditer(r"\|\|\s*(\S*)", shell_only):
+        if match.group(1) != "status=$?":
+            problems.append(f"`|| {match.group(1)}` can swallow a failure; only `|| status=$?` is allowed")
+    if re.search(r"(?m)^\s*(?:-\s*)?shell:", code):
+        problems.append("`shell:` can drop -e and pipefail, which GitHub's default bash keeps")
+
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
     if len(flagged) != 1:
         problems.append(f"continue-on-error must appear exactly once, found {len(flagged)}")
@@ -119,6 +126,32 @@ def check(text):
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
 
+    def contains(job, text, why):
+        if text not in jobs.get(job, ""):
+            problems.append(f"{job}: {why}")
+
+    contains("vault-reproducible-compare", "    needs: vault-reproducible\n", "must need the build jobs")
+    contains("vault-reproducible-compare", "sha256sum foundling-vault-reproducible-*/foundling_vault.wasm", "must hash every build")
+    contains("vault-reproducible-compare", "-eq 1", "must require exactly one distinct hash")
+    contains("recheck-obs", "python3 tools/recheck_obs.py tools/fixtures/m10-obs.json || status=$?", "must run the recheck")
+    contains("recheck-obs", 'test "$status" -ne 1', "must fail on a real mismatch")
+    reproducible = jobs.get("vault-reproducible", "")
+    built = reproducible.find("cargo near build reproducible-wasm")
+    audited = reproducible.find("python3 tools/wasm_imports.py contracts/vault/target/near/foundling_vault.wasm")
+    if built < 0 or audited < 0 or built > audited:
+        problems.append("vault-reproducible: must build reproducibly and then audit that file")
+
+    # The sandbox attacks deploy the WASM, so the soft job needs the same build tools as Sandbox.
+    for needle, why in (
+        ("rustup toolchain install", "needs the pinned Rust toolchain"),
+        ("cargo-near-x86_64-unknown-linux-gnu.tar.gz", "needs cargo-near"),
+        ("sha256sum --check", "must verify the cargo-near checksum"),
+    ):
+        contains(SOFT_JOB, needle, why)
+    make_wasm, run_all = soft.find("make wasm"), soft.find("python3 tools/attack.py run-all")
+    if make_wasm < 0 or run_all < 0 or make_wasm > run_all:
+        problems.append(f"{SOFT_JOB}: must run `make wasm` before run-all")
+
     wasm = jobs.get("vault-wasm", "")
     build = wasm.find("cargo near build non-reproducible-wasm")
     audit = wasm.find("python3 tools/wasm_imports.py contracts/vault/target/near/foundling_vault.wasm tools/allowlist.txt")
@@ -130,6 +163,22 @@ def check(text):
 def tampered(base, old, new):
     assert old in base, f"tampering does not apply: {old!r}"
     return base.replace(old, new, 1)
+
+
+def job_span(text, job):
+    start = text.index(f"\n  {job}:\n")
+    following = re.search(r"\n  [A-Za-z0-9_-]+:\s*\n", text[start + 1:])
+    return start, start + 1 + following.start() if following else len(text)
+
+
+def tampered_in(base, job, old, new):
+    start, end = job_span(base, job)
+    return base[:start] + tampered(base[start:end], old, new) + base[end:]
+
+
+def without_job(base, job):
+    start, end = job_span(base, job)
+    return base[:start] + base[end:]
 
 
 class RealWorkflowTest(unittest.TestCase):
@@ -178,7 +227,22 @@ class TamperingTest(unittest.TestCase):
             "pull_request narrowed": tampered(b, "  pull_request:\n", "  pull_request:\n    paths: ['docs/**']\n"),
             "push no longer on main": tampered(b, "    branches: [main]", "    branches: [nothing]"),
             "token made writable": tampered(b, "  contents: read", "  contents: write"),
-            "job header with a comment": b + "\n  evil: # sneaky\n    runs-on: macos-latest\n    steps: [{run: 'true'}]\n",
+            "step shell drops -e and pipefail": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        shell: bash {0}\n        run: cargo test --locked; echo done\n      - name: Test rehearsal"),
+            "defaults.run.shell drops -e": tampered(b, "    defaults:\n      run:\n        working-directory: strategy\n", "    defaults:\n      run:\n        shell: bash {0}\n        working-directory: strategy\n"),
+            "|| /usr/bin/true": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || /usr/bin/true\n      - name: Test rehearsal"),
+            "|| printf ok": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || printf ok\n      - name: Test rehearsal"),
+            "|| { true; }": tampered(b, "run: make sandbox\n", "run: make sandbox || { true; }\n"),
+            "reproducible build jobs deleted": without_job(without_job(b, "vault-reproducible-compare"), "vault-reproducible"),
+            "reproducible hash compare deleted": without_job(b, "vault-reproducible-compare"),
+            "recheck-obs deleted": without_job(b, "recheck-obs"),
+            "reproducible build replaced": tampered_in(b, "vault-reproducible", "cargo near build reproducible-wasm", "cargo near build non-reproducible-wasm"),
+            "hash compare no longer requires one hash": tampered_in(b, "vault-reproducible-compare", '-eq 1', '-ge 1'),
+            "hash compare no longer needs the builds": tampered_in(b, "vault-reproducible-compare", "    needs: vault-reproducible\n", ""),
+            "recheck-obs ignores a real mismatch": tampered_in(b, "recheck-obs", 'test "$status" -ne 1', "true"),
+            "soft job has no rust toolchain": tampered_in(b, SOFT_JOB, "rustup toolchain install", "true"),
+            "soft job has no cargo-near": tampered_in(b, SOFT_JOB, "cargo-near-x86_64-unknown-linux-gnu.tar.gz", "other.tar.gz"),
+            "soft job does not build the wasm": tampered_in(b, SOFT_JOB, "make wasm", "true"),
+            "job header with a comment": b +"\n  evil: # sneaky\n    runs-on: macos-latest\n    steps: [{run: 'true'}]\n",
             "flow-style job": b + "\n  evil: {runs-on: macos-latest, steps: []}\n",
         }
         for name, text in cases.items():
