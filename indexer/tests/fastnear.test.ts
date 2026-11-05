@@ -30,6 +30,16 @@ describe("FastNEAR", () => {
     expect(calls[2]!.body).toMatchObject({ desc: false, is_receiver: true, resume_token: "t1" });
   });
 
+  test("every request carries a timeout", async () => {
+    const signals: unknown[] = [];
+    const f = (async (_u: string, init: RequestInit) => {
+      signals.push(init.signal);
+      return new Response(JSON.stringify({ transactions: [] }));
+    }) as unknown as typeof fetch;
+    await createFastnear(BASE, f).transactions(["H"]);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+  });
+
   test("asks for transactions in batches of 20", async () => {
     const { f, calls } = fakeFetch((c) => ({ json: { transactions: c.body.tx_hashes.map((h: string) => ({ hash: h })) } }));
     const hashes = Array.from({ length: 45 }, (_, i) => `H${i}`);

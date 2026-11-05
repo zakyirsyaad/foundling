@@ -50,6 +50,11 @@ test.each([
   ["/v1/events?cursor=bm9wZQ"],
   ["/v1/nav?from=yesterday"],
   ["/v1/proofs/1.5"],
+  ["/v1/cycles/99999999999999999999"],
+  ["/v1/proofs/99999999999999999999"],
+  [`/v1/cycles?cursor=${Buffer.from(JSON.stringify({ n: "9".repeat(20) })).toString("base64url")}`],
+  [`/v1/events?cursor=${Buffer.from(JSON.stringify({ b: "1", r: "99999999999", l: "0" })).toString("base64url")}`],
+  [`/v1/events?cursor=${Buffer.from(JSON.stringify({ b: "9".repeat(20), r: "0", l: "0" })).toString("base64url")}`],
 ])("%s is refused with 400 and the envelope", async (path) => {
   const res = await get(app(), path);
   expect(res.status).toBe(400);
@@ -170,4 +175,18 @@ test("a proof carries its bundle, NUL and all, and no bundle before one is fetch
   expect(one.bundle.cycles[0].collateral.pck_certificate_chain).toBe("-----END CERTIFICATE-----\n\u0000");
   const two = (await (await get(app(), "/v1/proofs/2")).json()).data;
   expect(two.bundle).toBeNull();
+});
+
+test("status shows when the last round succeeded, and how far the chain has moved since", async () => {
+  const admin = new pg.Client({ connectionString: url });
+  await admin.connect();
+  try {
+    await admin.query("update sync_state set tip = scanned_tip + 40");
+    const body = await (await get(app(), "/v1/status")).json();
+    expect(body.data.tip_lag).toBe("40");
+    expect(Date.parse(body.data.indexed_at)).toBeGreaterThan(0);
+  } finally {
+    await admin.query("update sync_state set tip = scanned_tip");
+    await admin.end();
+  }
 });

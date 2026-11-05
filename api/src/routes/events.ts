@@ -2,13 +2,13 @@ import { events } from "@foundling/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { cursorSchema, digits, encodeCursor } from "../cursor";
+import { cursorSchema, digits, encodeCursor, smallDigits } from "../cursor";
 import { ok } from "../envelope";
 import { type RouteDeps, iso, limitSchema, str } from "./shared";
 
 const query = z.object({
   name: z.string().regex(/^[a-z_]{1,40}$/).optional(),
-  cursor: cursorSchema(z.object({ b: digits, r: digits, l: digits })).optional(),
+  cursor: cursorSchema(z.object({ b: digits, r: smallDigits, l: smallDigits })).optional(),
   limit: limitSchema,
 });
 

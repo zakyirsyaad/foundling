@@ -19,6 +19,7 @@ export interface IndexDeps {
 /** Postgres allows 65535 bind parameters; events have 11 columns. */
 const INSERT_BATCH = 500;
 const DECISION = "decision";
+const NOTHING_TO_PROVE = { pass: 0, skip: 1, fail: 0 };
 const MAX_ERROR_LENGTH = 2000;
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -44,6 +45,10 @@ async function readWindow(deps: IndexDeps, position: bigint): Promise<{ parsed: 
     top = maxBig(top, BigInt(t.tx_block_height));
   }
   const txs = hashes.size ? await deps.fastnear.transactions([...hashes]) : [];
+  // The position moves to the highest listed height, so a listed tx missing here would be skipped for good.
+  const got = new Set(txs.map((t) => (t as { transaction?: { hash?: unknown } }).transaction?.hash));
+  const missing = [...hashes].filter((h) => !got.has(h));
+  if (missing.length) throw new Error(`FastNEAR did not return ${missing.length} listed transaction(s): ${missing.slice(0, 3).join(", ")}`);
   return { parsed: sortEvents(txs.flatMap((t) => parseTransaction(deps.vaultId, t))), top };
 }
 
@@ -73,6 +78,8 @@ async function rederive(tx: Tx, vaultId: string, nonce: bigint): Promise<void> {
   const c: DerivedCycle = deriveCycle(evs);
   await tx.insert(cycles).values({ vaultId, ...c, amountIn: c.amountIn?.toString() ?? null, amountOut: c.amountOut?.toString() ?? null });
   if (evs.some((e) => e.name === DECISION)) await tx.insert(proofs).values({ vaultId, nonce }).onConflictDoNothing();
+  // Closed with no decision (a failed decode, an abort): nothing to prove, so the proof is final at once.
+  else if (c.closing) await tx.insert(proofs).values({ vaultId, nonce, verifier: NOTHING_TO_PROVE, verifierState: "done", obsRecheck: NOTHING_TO_PROVE, obsState: "done", replay: "skip", lastError: "the cycle closed without a decision" }).onConflictDoNothing();
 }
 
 /** Rebuilds every cycle row of the vault from its stored events (docs/RUNBOOK.md). Returns how many cycles exist. */
@@ -85,8 +92,12 @@ export async function rederiveAll(db: Db, vaultId: string): Promise<number> {
   return n;
 }
 
-/** Closed cycles without a nav point get one, read at the cycle's last block. A failed read is retried next round. */
-async function recordNav(deps: IndexDeps): Promise<void> {
+/**
+ * Closed cycles without a nav point get one, read at the cycle's last block. Each cycle is tried on its own,
+ * so one block that no node can serve does not hold back the rest; failures are retried next round.
+ */
+async function recordNav(deps: IndexDeps): Promise<string[]> {
+  const failures: string[] = [];
   const due = await deps.db
     .select({ nonce: cycles.nonce, lastBlock: cycles.lastBlock, finishedAt: cycles.finishedAt })
     .from(cycles)
@@ -94,7 +105,17 @@ async function recordNav(deps: IndexDeps): Promise<void> {
     .where(and(eq(cycles.vaultId, deps.vaultId), isNotNull(cycles.closing), isNull(navPoints.nonce)))
     .orderBy(asc(cycles.nonce));
   for (const c of due) {
-    const nav = await readNav(deps.rpc, deps.vaultId, c.lastBlock);
+    try {
+      await writeNav(deps, c);
+    } catch (e) {
+      failures.push(`nav for cycle ${c.nonce}: ${describeError(e)}`);
+    }
+  }
+  return failures;
+}
+
+async function writeNav(deps: IndexDeps, c: { nonce: bigint; lastBlock: bigint; finishedAt: Date | null }): Promise<void> {
+  const nav = await readNav(deps.rpc, deps.vaultId, c.lastBlock);
     await deps.db
       .insert(navPoints)
       .values({
@@ -103,7 +124,6 @@ async function recordNav(deps: IndexDeps): Promise<void> {
         oracleNear: nav.oracleNear?.toString() ?? null, oracleUsdc: nav.oracleUsdc?.toString() ?? null,
       })
       .onConflictDoNothing();
-  }
 }
 
 /** The innermost cause names the real failure; a wrapped query error otherwise carries every bound parameter. */
@@ -133,8 +153,9 @@ export async function indexOnce(deps: IndexDeps): Promise<{ stored: number; posi
       for (const nonce of touched) await rederive(tx, vaultId, nonce);
       return inserted.length;
     });
-    await recordNav(deps);
-    await db.update(syncState).set({ lastError: null }).where(eq(syncState.vaultId, vaultId));
+    const navFailures = await recordNav(deps);
+    for (const f of navFailures) deps.log("nav read failed", { vaultId, error: f });
+    await db.update(syncState).set({ lastError: navFailures[0]?.slice(0, MAX_ERROR_LENGTH) ?? null, indexedAt: new Date(), scannedTip: tip }).where(eq(syncState.vaultId, vaultId));
     if (stored) deps.log("indexed", { vaultId, stored, position: top.toString() });
     return { stored, position: top };
   } catch (e) {

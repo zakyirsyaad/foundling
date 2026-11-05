@@ -42,11 +42,22 @@ def heartbeat_problem(api, now):
     stamp = (envelope.get("data") or {}).get("heartbeat_at")
     if not envelope.get("success") or not isinstance(stamp, str):
         return f"API {api}/v1/status has no heartbeat: {envelope.get('error')}"
-    at = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    age = now - at
+    limit = int(MAX_HEARTBEAT_AGE.total_seconds() // 60)
+    age = now - parse_time(stamp)
     if age > MAX_HEARTBEAT_AGE:
-        return f"worker heartbeat is {int(age.total_seconds() // 60)} minutes old (limit {int(MAX_HEARTBEAT_AGE.total_seconds() // 60)})"
+        return f"worker heartbeat is {int(age.total_seconds() // 60)} minutes old (limit {limit})"
+    # The heartbeat is written at the start of every round, even one that then fails.
+    indexed = envelope["data"].get("indexed_at")
+    if not isinstance(indexed, str):
+        return "the worker has never finished an index round"
+    since = now - parse_time(indexed)
+    if since > MAX_HEARTBEAT_AGE:
+        return f"last successful index round was {int(since.total_seconds() // 60)} minutes ago (limit {limit})"
     return None
+
+
+def parse_time(stamp):
+    return datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
 def keeper_problem(rpc, keeper, min_near):

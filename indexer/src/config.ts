@@ -25,7 +25,8 @@ const envSchema = z.object({
   ARCHIVAL_RPC_URLS: urlList,
   FASTNEAR_API_KEY: z.string().min(1).optional(),
   OBS_SOURCE: z.enum(["live", "rehearsal"]).default("live"),
-  VERIFIER_COMMIT: z.string().regex(/^[0-9a-f]{7,40}$/).optional(),
+  // A full sha: the worker image fetches cli/ from a BuildKit git context, which needs all 40 characters.
+  VERIFIER_COMMIT: z.string().regex(/^[0-9a-f]{40}$/).optional(),
   TOOLS_DIR: z.string().min(1).optional(),
   VERIFY_BIN: z.string().min(1).default("foundling-verify"),
   PYTHON: z.string().min(1).default("python3"),
@@ -43,7 +44,8 @@ export interface IndexerConfig {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): IndexerConfig {
-  const e = envSchema.parse(env);
+  // Compose passes an unset optional value as "", which must read as unset (and let defaults apply).
+  const e = envSchema.parse(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== "")));
   const hosts = HOSTS[e.CHAIN];
   const rpc = e.RPC_URLS.length ? e.RPC_URLS : [hosts.rpc];
   const archival = e.ARCHIVAL_RPC_URLS.length ? e.ARCHIVAL_RPC_URLS : [hosts.archival];

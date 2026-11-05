@@ -188,3 +188,46 @@ test("a cycle without a trigger transaction is final at once", async () => {
   expect(await row()).toMatchObject({ verifier_state: "failed_to_build", obs_state: "done", last_error: expect.stringMatching(/no trigger/) });
   expect(calls()).toEqual([]);
 });
+
+async function addReveal() {
+  await sql(url, `insert into events (vault_id, receipt_id, log_index, tx_hash, block_height, receipt_index, block_time, name, nonce, account, data)
+                  values ($1, 'RREVEAL', 0, 'TREVEAL', 999999999, 0, now(), 'revealed', null, null, '{"salt":"abc"}')`, [m12.vault]);
+}
+
+test("a verifier that fails after the reveal is retried with backoff, then gives the replay up as skip", async () => {
+  let now = new Date("2026-11-10T00:00:00Z");
+  await processOne(deps({ now: () => now }));
+  await addReveal();
+  now = new Date("2026-11-12T00:00:00Z");
+  process.env.FAKE_VERIFY = "nosummary";
+  await processOne(deps({ rpc: rpcWithReveal(true), now: () => now }));
+  let r = await row();
+  expect(r).toMatchObject({ revealed_applied: 0, replay: "sealed", attempts: 1 });
+  expect(r.next_attempt_at.getTime() - now.getTime()).toBe(5 * 60_000);
+  now = new Date(now.getTime() + GIVE_UP_AFTER_MS);
+  await processOne(deps({ rpc: rpcWithReveal(true), now: () => now }));
+  r = await row();
+  expect(r).toMatchObject({ revealed_applied: 1, replay: "skip", verifier: { pass: 6, skip: 1, fail: 0 } });
+  expect(await processOne(deps({ rpc: rpcWithReveal(true), now: () => now }))).toBe(false);
+});
+
+test("an empty revealed view backs off instead of spinning", async () => {
+  let now = new Date("2026-11-10T00:00:00Z");
+  await processOne(deps({ now: () => now }));
+  await addReveal();
+  now = new Date("2026-11-12T00:00:00Z");
+  await processOne(deps({ rpc: rpcWithReveal(false), now: () => now }));
+  const r = await row();
+  expect(r.next_attempt_at.getTime()).toBeGreaterThan(now.getTime());
+  expect(await processOne(deps({ rpc: rpcWithReveal(false), now: () => now }))).toBe(false);
+});
+
+test("a thrown error is a problem with backoff, not a stuck head of the queue", async () => {
+  await addReveal();
+  const down = { transactions: async () => { throw new Error("fastnear down"); } };
+  const now = new Date("2026-11-10T00:00:00Z");
+  await expect(processOne(deps({ fastnear: down, rpc: rpcWithReveal(true), now: () => now }))).resolves.toBe(true);
+  const r = await row();
+  expect(r).toMatchObject({ attempts: 1, last_error: expect.stringMatching(/fastnear down/) });
+  expect(r.next_attempt_at.getTime() - now.getTime()).toBe(5 * 60_000);
+});

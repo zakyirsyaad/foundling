@@ -43,7 +43,8 @@ test("/v1/cycles/:nonce, /v1/nav, /v1/status and /v1/proofs/:nonce match their s
   expect(nav.map((n) => n.nonce)).toEqual([1n, 2n, 3n, 4n, 5n, 6n, 7n]);
   expect(nav[0]!.oracle).toEqual({ near: 300000000n, usdc: 100000000n });
   const status = statusSchema.parse((await body("/v1/status")).data);
-  expect(status.tipLag).toBe(300_000_000n - status.position);
+  // The last successful round scanned to the tip it read, so nothing is behind.
+  expect(status.tipLag).toBe(0n);
   expect(proofSchema.parse((await body("/v1/proofs/1")).data)).toEqual({ verifier: { pass: 9, skip: 2, fail: 0, state: "done" }, obsRecheck: { pass: 0, skip: 0, fail: 0, state: "queued" }, replay: "pass" });
 });
 

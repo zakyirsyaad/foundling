@@ -21,4 +21,9 @@ export function cursorSchema<T extends z.ZodType>(shape: T) {
     .pipe(shape);
 }
 
-export const digits = z.string().regex(/^\d{1,20}$/);
+const MAX_BIGINT = 2n ** 63n - 1n;
+const MAX_INT = 2 ** 31 - 1;
+/** A Postgres bigint (nonce, block height): anything larger is a 400, not a failed query. */
+export const digits = z.string().regex(/^\d{1,19}$/).refine((s) => /^\d+$/.test(s) && BigInt(s) <= MAX_BIGINT, "out of range");
+/** A Postgres integer (receipt index, log index). */
+export const smallDigits = z.string().regex(/^\d{1,10}$/).refine((s) => /^\d+$/.test(s) && Number(s) <= MAX_INT, "out of range");

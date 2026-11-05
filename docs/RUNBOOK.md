@@ -49,7 +49,7 @@ Isi setiap baris. Password dibuat acak, misalnya dengan `openssl rand -hex 24`, 
 - `ACTIVE_VAULT_ID`, `CHAIN`, `OBS_SOURCE` (`live` untuk mainnet, `rehearsal` untuk vault testnet dengan harga tiruan).
 - `ARCHIVAL_RPC_URLS`: setidaknya satu node arsip, misalnya `https://archival-rpc.mainnet.fastnear.com`. Node ini juga diteruskan ke `fetch_proof.py` sebagai `--rpc`, karena node biasa hanya menyimpan sekitar 17–20 jam.
 - `WEB_ORIGIN`: origin website persis, misalnya `https://foundling.xyz`, tanpa garis miring di akhir.
-- `VERIFIER_COMMIT`: commit yang membangun `wasm_hash` vault aktif. Commit ini harus sudah ada di GitHub, karena image worker mengambil `cli/` dan `strategy/` dari sana.
+- `VERIFIER_COMMIT`: commit yang membangun `wasm_hash` vault aktif, ditulis sebagai SHA penuh 40 karakter, karena git context BuildKit tidak menerima SHA pendek. Commit ini harus sudah ada di GitHub, karena image worker mengambil `cli/` dan `strategy/` dari sana.
 
 ## 3. Menyalakan stack, migrasi, dan role
 
@@ -76,14 +76,17 @@ Untuk mengganti password, ubah URL di `.env`, lalu jalankan `docker compose ... 
 ## 4. Membaca `sync_state`: heartbeat dan galat terakhir
 
 ```sql
-select vault_id, position, tip, tip - position as lag_blocks,
-       date_trunc('second', now() - heartbeat_at) as heartbeat_age, last_error
+select vault_id, position, tip, tip - scanned_tip as lag_blocks,
+       date_trunc('second', now() - heartbeat_at) as heartbeat_age,
+       date_trunc('second', now() - indexed_at) as last_success_age, last_error
 from sync_state;
 ```
 
-- `heartbeat_age` di bawah 1 menit berarti worker hidup, karena putaran indeks berjalan tiap 30 detik.
-- `last_error` kosong berarti putaran terakhir berhasil. Bila terisi, isinya alasan aslinya. Galat pada satu putaran tidak memajukan `position`, dan putaran berikutnya mencoba lagi.
-- `lag_blocks` bisa besar saat vault sedang sepi. `position` adalah tinggi transaksi vault terakhir yang terbaca, bukan tip chain.
+- `heartbeat_age` di bawah 1 menit berarti proses worker hidup, karena putaran indeks berjalan tiap 30 detik. Heartbeat ditulis di awal setiap putaran, termasuk putaran yang kemudian gagal.
+- `last_success_age` di bawah 1 menit berarti putaran terakhir selesai. Bila heartbeat segar tapi umur ini terus naik, setiap putaran gagal, dan alasannya ada di `last_error`.
+- `last_error` kosong berarti putaran terakhir berhasil. Galat pada satu putaran tidak memajukan `position`, dan putaran berikutnya mencoba lagi. Pesan `nav for cycle N` berarti titik NAV satu siklus belum terbaca; siklus lain tetap jalan, dan pembacaannya dicoba lagi setiap putaran.
+- `lag_blocks` adalah jarak tip chain sekarang dari tip yang dipindai putaran sukses terakhir. Angkanya tetap kecil walau vault sedang sepi.
+- Transaksi vault yang bentuknya tidak dikenali parser menghentikan putaran sampai parser diperbaiki. Ini disengaja (gagal tertutup), supaya event tidak terlewat diam-diam.
 
 Antrean bukti:
 
@@ -93,12 +96,17 @@ select nonce, attempts, next_attempt_at, left(last_error, 80) as last_error
 from proofs where last_error is not null order by nonce;
 ```
 
-Status akhir verifier adalah `done` atau `failed_to_build`, dan obs selesai bila `done`. Sumber yang tidak terbaca dicoba lagi setelah 5, 15, 60, 180, lalu 360 menit. Setelah 24 jam, bukti dicatat `failed_to_build` dan obs dicatat `skip`. Untuk mencoba lagi sekarang:
+Status akhir verifier adalah `done` atau `failed_to_build`, dan obs selesai bila `done`. Sumber yang tidak terbaca dicoba lagi setelah 5, 15, 60, 180, lalu 360 menit. Setelah 24 jam, bukti dicatat `failed_to_build` dan obs dicatat `skip`. Siklus yang tertutup tanpa `decision` langsung mendapat status akhir `skip`, karena tidak ada yang bisa dibuktikan.
+
+Untuk mencoba lagi sekarang, termasuk bukti yang sudah menyerah, mulai antrean siklus itu dari awal:
 
 ```sql
-update proofs set next_attempt_at = now(), attempts = 0, first_attempt_at = null, last_error = null
-where verifier_state <> 'done' or obs_state <> 'done';
+update proofs set verifier_state = 'queued', obs_state = 'queued', obs_recheck = null,
+       next_attempt_at = now(), attempts = 0, first_attempt_at = null, last_error = null
+where nonce = 3;  -- atau: where verifier_state = 'failed_to_build'
 ```
+
+Bundel yang sudah tersimpan tidak diambil ulang, jadi hanya verifier dan recheck obs yang dijalankan lagi.
 
 Lewat API publik: `curl -s https://api.<domain>/v1/status`.
 
@@ -138,10 +146,11 @@ Partner tidak memegang kunci vault, keeper, atau governor, dan tidak membutuhkan
 **Alert.** Workflow `Heartbeat` jalan tiap 15 menit dan mengirim email GitHub bila gagal. Baris `FAIL` di log job menjelaskan sebabnya:
 
 - `worker heartbeat is N minutes old`: worker berhenti atau macet.
+- `last successful index round was N minutes ago`: worker hidup, tapi setiap putaran gagal. Alasannya ada di `last_error` (§4).
 - `API ... answered HTTP 503` atau `could not be read`: API atau VPS mati.
 - `keeper ... holds X NEAR, below Y`: saldo keeper menipis, jadi siklus berikutnya bisa gagal membayar gas.
 
-Workflow ini baru jalan setelah lead mengisi variabel repo `API_ORIGIN` dan `KEEPER_ACCOUNT`, dan bila perlu `KEEPER_MIN_NEAR` (bawaan 2) dan `RPC_URL`.
+Workflow ini baru jalan setelah lead mengisi variabel repo `API_ORIGIN` dan `KEEPER_ACCOUNT`, dan bila perlu `KEEPER_MIN_NEAR` (bawaan 2) dan `RPC_URL`. `RPC_URL` bawaannya node mainnet, jadi selama vault masih di testnet isi `https://rpc.testnet.fastnear.com`; kalau tidak, cek keeper akan selalu gagal.
 
 **Me-restart worker.** Lead memberi partner user SSH sendiri tanpa grup `docker`, dengan satu aturan sudo. **[VPS]** Di `/etc/sudoers.d/foundling-partner`, dibuat dengan `visudo -f`:
 

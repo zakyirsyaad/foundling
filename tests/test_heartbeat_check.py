@@ -20,6 +20,7 @@ YOCTO = 10**24
 
 class Fake:
     heartbeat_age_minutes = 1
+    indexed_age_minutes = 1
     keeper_yocto = 5 * YOCTO
     api_up = True
 
@@ -39,9 +40,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/v1/status" or not Fake.api_up:
             return self.reply(503, {"success": False, "data": None, "error": "busy", "meta": None})
-        at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=Fake.heartbeat_age_minutes)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        stamp = lambda minutes: (now - datetime.timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z")
         self.reply(200, {"success": True, "error": None, "meta": None,
-                         "data": {"position": "10", "heartbeat_at": at.isoformat().replace("+00:00", "Z"), "tip_lag": "0"}})
+                         "data": {"position": "10", "heartbeat_at": stamp(Fake.heartbeat_age_minutes), "tip_lag": "0",
+                                  "indexed_at": stamp(Fake.indexed_age_minutes)}})
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
@@ -61,7 +64,7 @@ class HeartbeatCheck(unittest.TestCase):
         cls.server.shutdown()
 
     def setUp(self):
-        Fake.heartbeat_age_minutes, Fake.keeper_yocto, Fake.api_up = 1, 5 * YOCTO, True
+        Fake.heartbeat_age_minutes, Fake.indexed_age_minutes, Fake.keeper_yocto, Fake.api_up = 1, 1, 5 * YOCTO, True
 
     def run_check(self, *extra):
         out = io.StringIO()
@@ -79,6 +82,12 @@ class HeartbeatCheck(unittest.TestCase):
         code, out = self.run_check()
         self.assertEqual(code, 1)
         self.assertIn("heartbeat", out)
+
+    def test_rounds_that_keep_failing_are_1_even_with_a_fresh_heartbeat(self):
+        Fake.indexed_age_minutes = 25
+        code, out = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("last successful index round", out)
 
     def test_a_keeper_below_the_minimum_is_1(self):
         Fake.keeper_yocto = 15 * YOCTO // 10

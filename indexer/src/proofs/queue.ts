@@ -110,22 +110,30 @@ export async function processOne(deps: ProofDeps): Promise<boolean> {
   }
 
   const dir = mkdtempSync(join(tmpdir(), "foundling-proof-"));
+  const s = initialState(row);
   try {
-    const s = await work(deps, row, reveal, trigger, dir);
+    try {
+      await work(deps, s, reveal, trigger, dir);
+    } catch (e) {
+      // FastNEAR, RPC or the disk failing is a problem like a tool failing: backoff, then a final state.
+      s.problem = describeError(e);
+    }
     const expired = now.getTime() - base.firstAttemptAt.getTime() >= GIVE_UP_AFTER_MS;
     if (s.problem && expired) {
       if (s.verifierState !== "done") s.verifierState = "failed_to_build";
       if (s.obsState !== "done") Object.assign(s, { obsState: "done", obsRecheck: SKIPPED });
+      if (s.revealPhase) Object.assign(s, { revealedApplied: 1, replay: "skip" });
     }
     const retry = s.problem !== null && !expired;
     await deps.db
       .update(proofs)
       .set({
-        ...base,
+        // Each phase (fetch and verify, then the re-verify after a reveal) gets its own 24 hours.
+        firstAttemptAt: s.problem ? base.firstAttemptAt : null,
         bundle: s.bundle ? JSON.stringify(s.bundle) : null, approvedMeasurements: s.bundle?.approved_measurements ?? null,
         verifier: s.verifier, verifierState: s.verifierState, obsRecheck: s.obsRecheck, obsState: s.obsState,
         replay: s.replay, revealedApplied: s.revealedApplied, verifierCommit: s.verifierCommit,
-        attempts: retry ? row.attempts + 1 : row.attempts,
+        attempts: retry ? row.attempts + 1 : 0,
         nextAttemptAt: retry ? nextAttempt(now, row.attempts) : now,
         lastError: s.problem,
       })
@@ -144,16 +152,22 @@ interface WorkState {
   obsState: string;
   replay: string;
   revealedApplied: number;
+  /** True while re-verifying a finished proof after the reveal. */
+  revealPhase: boolean;
   verifierCommit: string | null;
   problem: string | null;
 }
 
-async function work(deps: ProofDeps, row: ProofRow, reveal: Reveal | null, trigger: string, dir: string): Promise<WorkState> {
-  const { tools } = deps;
-  const s: WorkState = {
+function initialState(row: ProofRow): WorkState {
+  return {
     bundle: row.bundle === null ? null : parseBundle(row.bundle), verifier: row.verifier, verifierState: row.verifierState, obsRecheck: row.obsRecheck,
-    obsState: row.obsState, replay: row.replay, revealedApplied: row.revealedApplied, verifierCommit: row.verifierCommit, problem: null,
+    obsState: row.obsState, replay: row.replay, revealedApplied: row.revealedApplied, revealPhase: false, verifierCommit: row.verifierCommit, problem: null,
   };
+}
+
+/** Moves `s` (owned by processOne for this one row) as far as the tools allow. */
+async function work(deps: ProofDeps, s: WorkState, reveal: Reveal | null, trigger: string, dir: string): Promise<void> {
+  const { tools } = deps;
   const file = join(dir, "proof.json");
 
   if (!s.bundle) {
@@ -162,26 +176,25 @@ async function work(deps: ProofDeps, row: ProofRow, reveal: Reveal | null, trigg
     const r = await runTool(tools.python, [tools.fetchProof, "--chain", deps.chain, "--vault", deps.vaultId, "--collateral-bin", tools.verify, "--out", file, ...extra, trigger], tools.timeoutMs);
     if (r.code !== 0 || r.timedOut) {
       s.problem = describeRun("fetch_proof.py", r, tools.timeoutMs);
-      return s;
+      return;
     }
     const parsed = parseBundle(readFileSync(file, "utf8"));
     if (!parsed) {
       s.problem = "fetch_proof.py wrote a bundle that is not readable JSON";
-      return s;
+      return;
     }
     s.bundle = parsed;
   }
 
   let verify = s.verifierState !== "done" && s.verifierState !== "failed_to_build";
-  if (s.bundle.opening && s.revealedApplied === 0) s.revealedApplied = 1;
   if (reveal && s.revealedApplied === 0 && s.verifierState === "done") {
+    s.revealPhase = true;
     const opening = await openingOf(deps, reveal);
     if (!opening) {
       s.problem = "revealed event stored but the revealed view is empty";
-      return s;
+      return;
     }
     s.bundle = { ...s.bundle, opening };
-    s.revealedApplied = 1;
     verify = true;
   }
 
@@ -192,13 +205,14 @@ async function work(deps: ProofDeps, row: ProofRow, reveal: Reveal | null, trigg
     if (summary) {
       Object.assign(s, { verifier: summary, verifierState: "done", verifierCommit: deps.verifierCommit ?? null });
       s.replay = s.bundle.opening ? (replayResult(r.stdout) ?? "skip") : "sealed";
+      // Applied only once a verifier run with the opening has a SUMMARY; a failed run is retried.
+      if (s.bundle.opening) s.revealedApplied = 1;
     } else {
       s.problem = describeRun("foundling-verify", r, tools.timeoutMs);
     }
   }
 
   if (s.obsState !== "done") await recheck(deps, s, file);
-  return s;
 }
 
 async function recheck(deps: ProofDeps, s: WorkState, file: string): Promise<void> {

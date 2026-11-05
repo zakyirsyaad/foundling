@@ -96,6 +96,23 @@ class ArchiveProofs(unittest.TestCase):
         self.assertFalse((self.out.parent / "escape.json").exists())
         self.assertFalse(any(self.out.rglob("*escape*")))
 
+    def test_a_stored_bundle_is_never_replaced_by_none(self):
+        self.run_archive()
+        Fake.proofs = {**Fake.proofs, "1": {**Fake.proofs["1"], "bundle": None}}
+        try:
+            self.assertEqual(self.run_archive(), 0)
+            saved = json.loads((self.out / VAULT / "1.json").read_text())
+            self.assertEqual(saved["proof"]["bundle"], {"pck": "x\u0000"})
+        finally:
+            Fake.proofs = {**Fake.proofs, "1": {**Fake.proofs["1"], "bundle": {"pck": "x\u0000"}}}
+
+    def test_a_bundle_for_another_vault_is_refused(self):
+        Fake.proofs = {**Fake.proofs, "3": {**Fake.proofs["3"], "bundle": {"vault": "other.testnet"}}}
+        try:
+            self.assertEqual(self.run_archive(), 1)
+        finally:
+            Fake.proofs = {**Fake.proofs, "3": {**Fake.proofs["3"], "bundle": None}}
+
     def test_a_bad_vault_id_is_refused(self):
         with self.assertRaises(SystemExit):
             self.run_archive("../evil")

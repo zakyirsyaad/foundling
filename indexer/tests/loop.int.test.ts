@@ -124,3 +124,54 @@ test("rederiveAll rebuilds every cycle and queued proof from the events alone", 
   expect(await sql(url, "select * from cycles order by nonce")).toEqual(before);
   expect(await count("proofs")).toBe(7);
 });
+
+test("a cycle that closes without a decision gets a final skip proof at once", async () => {
+  const t = synthTx("TABORT", 1000, [ev("cycle_started", `{"nonce":4}`), ev("cycle_aborted", `{"nonce":4}`)]);
+  await indexOnce({ db, fastnear: fakeFastnear([{ transaction_hash: "TABORT", tx_block_height: 1000 }], [t]), rpc: fakeRpc(), vaultId: VAULT, log });
+  const p = (await sql<{ verifier: unknown; verifier_state: string; obs_recheck: unknown; obs_state: string; replay: string }>(url, "select * from proofs where nonce = 4"))[0];
+  expect(p).toMatchObject({ verifier: { pass: 0, skip: 1, fail: 0 }, verifier_state: "done", obs_recheck: { pass: 0, skip: 1, fail: 0 }, obs_state: "done", replay: "skip" });
+});
+
+test("an open cycle without a decision has no proof row yet", async () => {
+  const t = synthTx("TOPEN", 1000, [ev("cycle_started", `{"nonce":5}`)]);
+  await indexOnce({ db, fastnear: fakeFastnear([{ transaction_hash: "TOPEN", tx_block_height: 1000 }], [t]), rpc: fakeRpc(), vaultId: VAULT, log });
+  expect(await count("proofs")).toBe(0);
+});
+
+test("a nav read that keeps failing for one cycle does not hold back the others", async () => {
+  const m12 = fixture("m12");
+  const base = fakeRpc();
+  const closed = await (async () => {
+    await indexOnce({ db, fastnear: m12.fastnear, rpc: { ...base, viewAt: async () => { throw new Error("archival down"); } }, vaultId: m12.vault, log }).catch(() => {});
+    return sql<{ nonce: string; last_block: string }>(url, "select nonce, last_block from cycles where closing is not null order by nonce");
+  })();
+  const bad = BigInt(closed[0]!.last_block);
+  const rpc = { ...base, async viewAt<T>(block: bigint, c: string, m: string): Promise<T> { if (block === bad) throw new Error("block gone everywhere"); return base.viewAt<T>(block, c, m); } };
+  await indexOnce({ db, fastnear: m12.fastnear, rpc, vaultId: m12.vault, log });
+  expect(await count("nav_points")).toBe(closed.length - 1);
+  const state = (await sql<{ last_error: string; indexed_at: Date | null }>(url, "select last_error, indexed_at from sync_state"))[0]!;
+  expect(state.last_error).toMatch(new RegExp(`nav for cycle ${closed[0]!.nonce}.*block gone everywhere`));
+  expect(state.indexed_at).toBeInstanceOf(Date);
+});
+
+test("a transaction FastNEAR does not return fails the round instead of being skipped", async () => {
+  const start = synthTx("TSTART", 1000, [ev("cycle_started", `{"nonce":1}`)]);
+  const listed = [{ transaction_hash: "TSTART", tx_block_height: 1000 }, { transaction_hash: "TMISSING", tx_block_height: 1500 }];
+  const fastnear = { ...fakeFastnear(listed, [start]), async transactions(hashes: string[]) { return hashes.filter((h) => h === "TSTART").map(() => start); } };
+  await expect(indexOnce({ db, fastnear, rpc: fakeRpc(), vaultId: VAULT, log })).rejects.toThrow(/TMISSING/);
+  expect((await sql<{ position: string }>(url, "select position from sync_state"))[0]!.position).toBe("0");
+});
+
+test("a successful round records indexed_at and the tip it scanned to; a failed round does not", async () => {
+  const m12 = fixture("m12");
+  await indexOnce({ db, fastnear: m12.fastnear, rpc: fakeRpc("ok", 300_000_000n), vaultId: m12.vault, log });
+  const ok = (await sql<{ indexed_at: Date; scanned_tip: string }>(url, "select indexed_at, scanned_tip from sync_state"))[0]!;
+  expect(ok.scanned_tip).toBe("300000000");
+  const broken = { ...m12.fastnear, async *accountTxs() { throw new Error("fastnear down"); } };
+  await expect(indexOnce({ db, fastnear: broken, rpc: fakeRpc("ok", 300_000_500n), vaultId: m12.vault, log })).rejects.toThrow();
+  const after = (await sql<{ indexed_at: Date; scanned_tip: string; tip: string; heartbeat_at: Date }>(url, "select * from sync_state"))[0]!;
+  expect(after.indexed_at).toEqual(ok.indexed_at);
+  expect(after.scanned_tip).toBe("300000000");
+  expect(after.tip).toBe("300000500");
+  expect(after.heartbeat_at.getTime()).toBeGreaterThan(ok.indexed_at.getTime());
+});

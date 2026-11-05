@@ -9,6 +9,9 @@ export const syncState = pgTable("sync_state", {
   position: height("position").notNull(),
   tip: height("tip"),
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+  /** The end of the last round that succeeded, and the chain tip it read: the heartbeat alone moves even when rounds fail. */
+  indexedAt: timestamp("indexed_at", { withTimezone: true }),
+  scannedTip: height("scanned_tip"),
   lastError: text("last_error"),
 });
 

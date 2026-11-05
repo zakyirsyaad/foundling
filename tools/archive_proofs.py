@@ -60,6 +60,12 @@ def nonces(api):
 
 
 def write_if_changed(path, record):
+    # A bundle is the one record the chain cannot give back: an API that lost it (a rebuilt database)
+    # must not erase the archived copy.
+    if record["proof"].get("bundle") is None and path.exists():
+        kept = json.loads(path.read_text()).get("proof", {}).get("bundle")
+        if kept is not None:
+            record = {**record, "proof": {**record["proof"], "bundle": kept}}
     text = json.dumps(record, indent=1, sort_keys=True) + "\n"
     if path.exists() and path.read_text() == text:
         return False
@@ -93,6 +99,9 @@ def main(argv=None):
                 continue
             if not proof.get("success"):
                 raise ApiError(f"proof {nonce}: {proof.get('error')}")
+            bundle = (proof.get("data") or {}).get("bundle")
+            if isinstance(bundle, dict) and bundle.get("vault") not in (None, args.vault):
+                raise ApiError(f"proof {nonce} holds a bundle for {bundle.get('vault')!r}, not {args.vault}")
             written += write_if_changed(folder / f"{nonce}.json", {"vault": args.vault, "nonce": nonce, "proof": proof["data"]})
     except ApiError as error:
         print(f"FAIL {error}")

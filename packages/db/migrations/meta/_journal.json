@@ -15,6 +15,13 @@
       "when": 1793853778520,
       "tag": "0001_worthless_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793855701139,
+      "tag": "0002_superb_iron_man",
+      "breakpoints": true
     }
   ]
 }
