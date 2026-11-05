@@ -8,10 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@foundling/db": "*",
+    "drizzle-orm": "0.45.4",
     "pg": "8.23.1",
     "tsx": "4.23.15",
-    "zod": "4.6.7",
-    "@foundling/db": "*"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

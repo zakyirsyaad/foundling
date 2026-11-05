@@ -2,34 +2,51 @@
 export const ONE_HOUR_BLOCKS = 6000n;
 
 const TIMEOUT_MS = 8000;
+/** A busy node (HTTP 429) is waited out on the same URL before the next one is tried. */
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
+const TOO_MANY_REQUESTS = 429;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Provider-side failures: another node may still answer (same set as web/lib/chain/rpc.ts). */
 const PROVIDER_ERRORS = new Set(["INTERNAL_ERROR", "TIMEOUT_ERROR", "UNKNOWN_BLOCK", "NO_SYNCED_BLOCKS", "NOT_SYNCED_YET", "GARBAGE_COLLECTED_BLOCK"]);
 
 class EndpointFailed extends Error {}
+/** The node answered and the contract (or the request) was refused: other nodes would say the same. */
+export class ContractError extends Error {
+  override name = "ContractError";
+}
 type Envelope = { result?: Record<string, unknown>; error?: { cause?: { name?: string }; message?: string; data?: unknown } };
 
 export function createArchivalRpc(urls: string[], f: typeof fetch = fetch) {
   if (urls.length === 0) throw new Error("no RPC URLs configured");
 
-  async function callOne(url: string, method: string, params: object): Promise<Record<string, unknown>> {
-    let res: Response;
-    try {
-      res = await f(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: "foundling-indexer", method, params }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-    } catch (e) {
-      throw new EndpointFailed(String(e));
+  async function send(url: string, method: string, params: object): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      let res: Response;
+      try {
+        res = await f(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "foundling-indexer", method, params }),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch (e) {
+        throw new EndpointFailed(String(e));
+      }
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (res.status !== TOO_MANY_REQUESTS || delay === undefined) return res;
+      await sleep(delay);
     }
+  }
+
+  async function callOne(url: string, method: string, params: object): Promise<Record<string, unknown>> {
+    const res = await send(url, method, params);
     if (!res.ok) throw new EndpointFailed(`HTTP ${res.status}`);
     const body = (await res.json()) as Envelope;
     if (body.error) {
       const name = body.error.cause?.name ?? "";
       const message = `${name} ${body.error.message ?? ""} ${JSON.stringify(body.error.data ?? "")}`.trim();
       if (PROVIDER_ERRORS.has(name)) throw new EndpointFailed(message);
-      throw new Error(`RPC ${method}: ${message}`);
+      throw new ContractError(`RPC ${method}: ${message}`);
     }
     if (!body.result) throw new EndpointFailed("empty RPC answer");
     return body.result;

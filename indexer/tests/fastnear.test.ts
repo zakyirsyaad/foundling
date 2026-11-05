@@ -146,6 +146,44 @@ describe("archival RPC", () => {
     expect(calls[0]!.body).toMatchObject({ method: "block", params: { finality: "final" } });
   });
 
+  test("waits out HTTP 429 on the same URL before moving on", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const urls: string[] = [];
+      const f = (async (url: string) => {
+        urls.push(url);
+        n++;
+        return n <= 2 ? new Response("{}", { status: 429 }) : new Response(JSON.stringify({ result: { result: bytes(3) } }));
+      }) as unknown as typeof fetch;
+      const p = createArchivalRpc(["https://archival", "https://other"], f).viewAt(1n, VAULT, "m", {});
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(urls).toEqual(["https://archival", "https://archival"]);
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(p).resolves.toBe(3);
+      expect(urls).toEqual(["https://archival", "https://archival", "https://archival"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a URL that keeps answering 429 is given up after 1, 2 and 4 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const urls: string[] = [];
+      const f = (async (url: string) => {
+        urls.push(url);
+        return url === "https://busy" ? new Response("{}", { status: 429 }) : new Response(JSON.stringify({ result: { result: bytes(9) } }));
+      }) as unknown as typeof fetch;
+      const p = createArchivalRpc(["https://busy", "https://calm"], f).viewAt(1n, VAULT, "m", {});
+      await vi.advanceTimersByTimeAsync(7000);
+      await expect(p).resolves.toBe(9);
+      expect(urls).toEqual(["https://busy", "https://busy", "https://busy", "https://busy", "https://calm"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("one hour is 6000 blocks", () => {
     expect(ONE_HOUR_BLOCKS).toBe(6000n);
   });

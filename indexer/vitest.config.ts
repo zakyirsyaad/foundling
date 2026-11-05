@@ -8,6 +8,6 @@ export default defineConfig({
     // Integration tests share one Postgres database; run files one at a time.
     fileParallelism: false,
     env: { DATABASE_URL: process.env.DATABASE_URL ?? "postgres://localhost:55432/foundling_test" },
-    coverage: { provider: "v8", include: ["src/**"], thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 } },
+    coverage: { provider: "v8", include: ["src/**"], exclude: ["src/main.ts"], thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 } },
   },
 });

@@ -3,7 +3,8 @@ import pg from "pg";
 
 import * as schema from "./schema";
 
-export type Db = NodePgDatabase<typeof schema>;
+/** The pool stays reachable as `$client`, for session-level work such as advisory locks. */
+export type Db = NodePgDatabase<typeof schema> & { $client: pg.Pool };
 
 /** A pooled Drizzle client. `max` stays small: the VPS runs the API and the worker side by side. */
 export function db(url: string, max = 5): { db: Db; pool: pg.Pool } {

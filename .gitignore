@@ -30,6 +30,11 @@ spikes/
 web/test-results/
 web/playwright-report/
 web/coverage/
+
+# Backend
+indexer/coverage/
+api/coverage/
+packages/db/coverage/
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
