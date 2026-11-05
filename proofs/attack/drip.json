@@ -1,0 +1,159 @@
+{
+  "attack": "drip",
+  "expected_codes": [
+    "OVER_EPOCH_CAP"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "15500000",
+      "wnear": "999999999999999999999999"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "15500000",
+    "wallet_wnear": "999999999999999999999999",
+    "window_usdc": "3000000",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "OVER_EPOCH_CAP"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "steps": [
+    {
+      "detail": {
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "first chunk is accepted"
+    },
+    {
+      "detail": {
+        "nonce": 3,
+        "window": 3000000
+      },
+      "held": null,
+      "observed": null,
+      "step": "second chunk, half an epoch later, is accepted"
+    },
+    {
+      "detail": {
+        "ledger_unchanged": true,
+        "nonce": 4
+      },
+      "held": true,
+      "observed": "OVER_EPOCH_CAP",
+      "step": "third chunk crosses the epoch cap"
+    },
+    {
+      "detail": {
+        "before_boundary": true,
+        "nonce": 5
+      },
+      "held": true,
+      "observed": "OVER_EPOCH_CAP",
+      "step": "just inside the boundary the first chunk still counts"
+    },
+    {
+      "detail": {
+        "leaves_at": 600,
+        "samples_around_the_edge": [
+          [
+            597,
+            3000000
+          ],
+          [
+            598,
+            3000000
+          ],
+          [
+            599,
+            3000000
+          ],
+          [
+            600,
+            1500000
+          ],
+          [
+            601,
+            1500000
+          ]
+        ]
+      },
+      "held": true,
+      "observed": null,
+      "step": "the first chunk leaves the window at exactly at + epoch_len, not before"
+    },
+    {
+      "detail": {
+        "nonce": 6,
+        "window": 3000000
+      },
+      "held": null,
+      "observed": null,
+      "step": "after the boundary one chunk fits again"
+    },
+    {
+      "detail": {
+        "after_boundary": true,
+        "nonce": 7
+      },
+      "held": true,
+      "observed": "OVER_EPOCH_CAP",
+      "step": "a full epoch after the first chunk the cap still holds: no fixed boundary resets it"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "1cdeec06f0c572ad0d426f68ff4b185fa1140fb2ccaf4940f964f184c125ef52",
+  "verdict": "held"
+}
