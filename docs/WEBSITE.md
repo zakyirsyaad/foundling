@@ -407,25 +407,29 @@ Satu alert dari luar VPS memantau heartbeat worker dan saldo keeper, karena 16 s
 
 ## 10. Urutan kerja
 
-| # | Selesai bila |
-| --- | --- |
-| W1 | `/proof` statis tampil dari `proofs/` dan RPC, tanpa Postgres. Workspace dan CI hijau |
-| W2 | Baris §11 yang bertanda W2 selesai. Schema siap. Vault uji hidup: build `rehearsal`, `mock-ref` terbaru, allowlist akun wallet lead dan partner, skrip keeper sementara |
-| W3 | Parser cocok dengan jumlah event m5, m10, m12. Worker hidup di vault uji dan restart tanpa dobel. API melayani riwayat |
-| W4 | shadcn/ui dengan tema `neutral`, Inter, dan Geist Mono yang di-host sendiri terpasang, dan `claims.json` ada. Semua halaman baca-saja tampil dari data testnet, dan `/app` tetap jalan saat API mati |
-| W5 | Lead dan partner menyelesaikan deposit, batal, `redeem`, klaim, dan `advance` lewat website |
-| W6 | Antrean bukti berjalan: bundel disimpan, `pass`, `skip`, `fail` tampil, dan verifikasi ulang setelah `reveal` lulus uji |
-| W7 | Deposit dari chain lain lulus di E2E dengan respons asli dari SP4 untuk setiap chain asal, dan tes kontrak API lulus terhadap kuotasi `dry: true` sungguhan |
-| W8 | Tampilan final, responsif, aksesibel, semua state ada, dan review keamanan selesai |
-| W9 | Website publik membaca vault final di mainnet, alert dan runbook siap |
+| # | Selesai bila | Target |
+| --- | --- | --- |
+| W1 | `/proof` statis tampil dari `proofs/` dan RPC, tanpa Postgres. Workspace dan CI hijau | Selesai (#36) |
+| W2 | Baris §11 yang bertanda W2 selesai. Schema siap. Vault uji hidup: build `rehearsal`, `mock-ref` terbaru, allowlist akun wallet lead dan partner, skrip keeper sementara | 7 Nov |
+| W3 | Parser cocok dengan jumlah event m5, m10, m12. Worker hidup di vault uji dan restart tanpa dobel. API melayani riwayat | 7 Nov |
+| W4 | shadcn/ui dengan tema `neutral`, Inter, dan Geist Mono yang di-host sendiri terpasang, dan `claims.json` ada. Semua halaman baca-saja tampil dari data testnet, dan `/app` tetap jalan saat API mati | 8 Nov |
+| W5 | Lead dan partner menyelesaikan deposit, batal, `redeem`, klaim, dan `advance` lewat website | 8 Nov |
+| W6 | Antrean bukti berjalan: bundel disimpan, `pass`, `skip`, `fail` tampil, dan verifikasi ulang setelah `reveal` lulus uji | 9 Nov |
+| W7 | Deposit dari chain lain lulus di E2E dengan respons asli dari SP4 untuk setiap chain asal, dan tes kontrak API lulus terhadap kuotasi `dry: true` sungguhan | 10 Nov |
+| W8 | Tampilan final, responsif, aksesibel, semua state ada, dan review keamanan selesai | 12 Nov |
+| W9 | Website publik membaca vault final di mainnet, alert dan runbook siap | VPS 11 Nov, website 12 Nov |
 
 **SP4.** SP4 tidak butuh vault atau website, jadi dijalankan sebagai skrip terpisah segera setelah testnet selesai, sebelum vault final, atas persetujuan lead. Isinya deposit USDC Base ke akun NEAR dan satu kurang bayar di bawah `minAmountIn` yang dikembalikan, sekitar US$5 ditambah gas. Responsnya disimpan sebagai fixture W7. W7 bisa dibangun lebih dulu dengan respons tiruan, tapi baru selesai setelah fixture SP4 ada. Arbitrum dan Ethereum masing-masing butuh satu deposit kecil sekitar 1 sampai 2 USDC ditambah gas, dan gas Ethereum bisa beberapa dolar. Keduanya juga atas persetujuan lead, per chain. Chain yang belum lulus tidak tampil.
 
 Pekerjaan chain di PLAN didahulukan bila bentrok, dan target kontrak beku tidak bergeser.
 
+Target ditarik mundur dari tanggal di PLAN: kontrak beku 9 Nov, vault final 11 Nov, `reveal` 12 Nov, kirim 13 Nov. W2 dan W3 lebih dulu karena W5 dan W6 butuh vault uji yang hidup. W7 jatuh di antara kontrak beku dan vault final, sesuai SP4 di atas. Worker sudah hidup di VPS sebelum siklus pertama vault final (§5), jadi bagian VPS di W9 jatuh pada hari vault final lahir. Target ini adalah tenggat per milestone, bukan jadwal harian.
+
 **Lantai aman.** `/proof` statis dari W1 adalah pengganti halaman bukti yang pindah dari partner, jadi proyek tidak pernah sampai submit tanpa halaman bukti.
 
 **Hero.** Baris verifier di bawah video hero memakai `verify.py --live` (Tier 1 SPEC), yang dipegang partner bersama `verify.py`. Sampai mode itu ada, baris itu memakai data testnet m12 berlabel. Videonya dibuat lead.
+
+**Vault uji dan m12** (keputusan lead 2026-11-05). Worker dan API testnet mengindeks vault uji dari W2, bukan m12. Saat worker dijalankan dengan alat sungguhan atas m12, siklus 1 lulus penuh (14 PASS), tapi siklus 2–7 gagal di cek `replay`: aturan tidak memberi aksi, sedangkan vault mengeksekusi swap. Pengambilan bundel langsung tanpa worker memberi hasil yang sama, jadi ini sifat data m12. Vault uji dibangun dari kode sekarang, jadi punya view `revealed_salt`, dan agennya mengikuti aturan. Hanya di vault itu verifikasi ulang setelah `reveal` (W6) bisa diuji dengan benar. Snapshot m12 tetap dipakai untuk baris jumlah access key, karena isinya benar dan berlabel. Bila vault uji belum siap saat dibutuhkan, yang tampil hanya siklus 1 m12. Siklus 2–7 tidak disembunyikan diam-diam: bila tampil, tampil apa adanya dengan label FAIL `replay`.
 
 **Gerbang.** Bila worker belum hidup saat vault final lahir, website rilis tanpa riwayat, memakai halaman yang hanya butuh RPC.
 

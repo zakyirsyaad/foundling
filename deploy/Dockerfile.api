@@ -1,0 +1,18 @@
+# The read-only API (also the image of the one-shot `migrate` service). Built from the repo root.
+FROM node:24.22.0-bookworm-slim@sha256:91acba91b842bec0bf7ea6f5e09c644c7ccad72c4996ed9616d861d1c7cd60d4
+ENV NODE_ENV=production
+WORKDIR /app
+# npm ci with workspaces needs every workspace manifest, even the ones it does not install.
+COPY package.json package-lock.json ./
+COPY web/package.json web/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY indexer/package.json indexer/package.json
+COPY api/package.json api/package.json
+COPY deploy/package.json deploy/package.json
+RUN npm ci --omit=dev --ignore-scripts --workspace=@foundling/api --workspace=@foundling/db && npm cache clean --force
+COPY packages/db/src packages/db/src
+COPY packages/db/migrations packages/db/migrations
+COPY api/src api/src
+USER node
+EXPOSE 8080
+CMD ["/app/node_modules/.bin/tsx", "api/src/main.ts"]

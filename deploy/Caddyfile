@@ -1,0 +1,16 @@
+# TLS and the public edge for api.<domain>. The API sees the client address only through X-Real-IP,
+# and trusts it only from this network (TRUST_PROXY_FROM in compose.yml).
+api.{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	request_body {
+		max_size 1KB
+	}
+	reverse_proxy api:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+}
