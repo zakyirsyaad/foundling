@@ -164,3 +164,10 @@ test("an unexpected failure is 500 with the envelope and no detail", async () =>
   expect(body).toEqual({ success: false, data: null, error: "internal error", meta: null });
   expect(logged).toEqual(["api error"]);
 });
+
+test("a proof carries its bundle, NUL and all, and no bundle before one is fetched", async () => {
+  const one = (await (await get(app(), "/v1/proofs/1")).json()).data;
+  expect(one.bundle.cycles[0].collateral.pck_certificate_chain).toBe("-----END CERTIFICATE-----\n\u0000");
+  const two = (await (await get(app(), "/v1/proofs/2")).json()).data;
+  expect(two.bundle).toBeNull();
+});

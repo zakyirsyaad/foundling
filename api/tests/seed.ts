@@ -19,7 +19,8 @@ export async function seedM12(): Promise<void> {
   } finally {
     await pool.end();
   }
-  await sql(url, `update proofs set verifier = '{"pass":9,"skip":2,"fail":0}', verifier_state = 'done', replay = 'pass' where nonce = 1`);
+  await sql(url, `update proofs set verifier = '{"pass":9,"skip":2,"fail":0}', verifier_state = 'done', replay = 'pass',
+                  bundle = $1 where nonce = 1`, [JSON.stringify({ chain: "testnet", cycles: [{ collateral: { pck_certificate_chain: "-----END CERTIFICATE-----\n\u0000" } }] })]);
 }
 
 export { lockTestDb, sql };
