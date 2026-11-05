@@ -67,7 +67,9 @@ export function runTool(cmd: string, args: string[], timeoutMs: number): Promise
       finish(null);
     }, timeoutMs);
     child.on("error", () => finish(null));
-    child.on("exit", (code) => setImmediate(() => finish(code)));
+    // 'close' comes after stdout and stderr have drained; 'exit' can come first, and the SUMMARY or the
+    // stderr tail would be lost (seen on Linux CI). A timeout has already finished above.
+    child.on("close", (code) => finish(code));
   });
 }
 
