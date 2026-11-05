@@ -1,6 +1,6 @@
 /** One index round and the loop around it (WEBSITE §5 "Worker: putaran indeks"). */
 import { type Db, cycles, events, navPoints, proofs, syncState } from "@foundling/db";
-import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { type DerivedCycle, cycleEvents, deriveCycle } from "./derive";
 import type { Fastnear } from "./fastnear";
 import { readNav } from "./nav";
@@ -73,6 +73,16 @@ async function rederive(tx: Tx, vaultId: string, nonce: bigint): Promise<void> {
   const c: DerivedCycle = deriveCycle(evs);
   await tx.insert(cycles).values({ vaultId, ...c, amountIn: c.amountIn?.toString() ?? null, amountOut: c.amountOut?.toString() ?? null });
   if (evs.some((e) => e.name === DECISION)) await tx.insert(proofs).values({ vaultId, nonce }).onConflictDoNothing();
+}
+
+/** Rebuilds every cycle row of the vault from its stored events (docs/RUNBOOK.md). Returns how many cycles exist. */
+export async function rederiveAll(db: Db, vaultId: string): Promise<number> {
+  const rows = await db.selectDistinct({ nonce: events.nonce }).from(events).where(and(eq(events.vaultId, vaultId), isNotNull(events.nonce)));
+  await db.transaction(async (tx) => {
+    for (const { nonce } of rows) await rederive(tx, vaultId, nonce!);
+  });
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(cycles).where(eq(cycles.vaultId, vaultId)) as [{ n: number }];
+  return n;
 }
 
 /** Closed cycles without a nav point get one, read at the cycle's last block. A failed read is retried next round. */

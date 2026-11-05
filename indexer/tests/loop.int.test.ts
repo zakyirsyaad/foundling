@@ -1,6 +1,6 @@
 import { db as connect, migrate } from "@foundling/db";
 import { lockTestDb, resetDb, sql } from "../../packages/db/tests/helpers";
-import { indexOnce, withVaultLock } from "../src/loop";
+import { indexOnce, rederiveAll, withVaultLock } from "../src/loop";
 import type { FastnearTx } from "../src/parse";
 import { fakeFastnear, fakeRpc, fixture, log } from "./support";
 
@@ -113,4 +113,14 @@ test("missing oracle prices are stored as null", async () => {
   const nav = await sql<{ oracle_near: string | null; oracle_usdc: string | null }>(url, "select oracle_near, oracle_usdc from nav_points");
   expect(nav.length).toBeGreaterThan(0);
   expect(nav.every((n) => n.oracle_near === null && n.oracle_usdc === null)).toBe(true);
+});
+
+test("rederiveAll rebuilds every cycle and queued proof from the events alone", async () => {
+  const m12 = fixture("m12");
+  await indexOnce({ db, fastnear: m12.fastnear, rpc: fakeRpc(), vaultId: m12.vault, log });
+  const before = await sql(url, "select * from cycles order by nonce");
+  await sql(url, "delete from cycles; delete from proofs;");
+  await expect(rederiveAll(db, m12.vault)).resolves.toBe(7);
+  expect(await sql(url, "select * from cycles order by nonce")).toEqual(before);
+  expect(await count("proofs")).toBe(7);
 });
