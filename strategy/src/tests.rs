@@ -12,7 +12,7 @@ const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
-/// A full-cap sell with every field at its longest is 736 bytes; the vault's hard limit is 1024.
+/// A full-cap sell with every field at its longest is 742 bytes; the vault's hard limit is 1024.
 const DECISION_TARGET_BYTES: usize = 768;
 const PROMPT: &str = "Classify the headlines.";
 const TIME_OF_OBS: u64 = 12;
@@ -627,6 +627,7 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
         ai_ref: AiRef {
             chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
             resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+            m: Some(1),
         },
     };
 
@@ -668,6 +669,7 @@ fn the_largest_decision_stays_under_the_target_size() {
         ai_ref: AiRef {
             chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
             resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+            m: Some(1),
         },
     };
 
@@ -778,6 +780,7 @@ fn the_reference_of_a_reading_reaches_the_decision() {
         ai_ref: AiRef {
             chat_id: "chat".into(),
             resp_sig_hash: "abc".into(),
+            m: Some(0),
         },
     };
     let expected = inputs_digest(INPUT, &reading.obs, "abc");

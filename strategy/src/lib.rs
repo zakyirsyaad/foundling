@@ -202,6 +202,10 @@ pub struct Verdict {
 pub struct AiRef {
     pub chat_id: String,
     pub resp_sig_hash: String,
+    /// Index into `advisor::MODELS` of the model that answered, which NEAR AI's signature
+    /// names and its signature endpoint asks for. Absent while the advisor is silent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

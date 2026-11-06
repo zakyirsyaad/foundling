@@ -1,7 +1,9 @@
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use super::advisor::{observe, read_advice, read_titles, MAX_TITLES, MAX_TITLE_CHARS, MODELS};
+use super::advisor::{
+    observe, read_advice, read_titles, Advice, MAX_TITLES, MAX_TITLE_CHARS, MODELS,
+};
 use super::sources::Call;
 use super::*;
 
@@ -18,7 +20,11 @@ const NONCE: u64 = 7;
 const SALT_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
 fn reply_with(id: &str, content: &str, finish_reason: &str) -> Vec<u8> {
-    json!({"id": id, "model": MODELS[0], "choices": [{"index": 0, "finish_reason": finish_reason,
+    reply_from(MODELS[0], id, content, finish_reason)
+}
+
+fn reply_from(model: &str, id: &str, content: &str, finish_reason: &str) -> Vec<u8> {
+    json!({"id": id, "model": model, "choices": [{"index": 0, "finish_reason": finish_reason,
         "message": {"role": "assistant", "content": content}}]})
     .to_string()
     .into_bytes()
@@ -28,8 +34,13 @@ fn chat_reply(content: &str) -> Vec<u8> {
     reply_with(CHAT_ID, content, "stop")
 }
 
+/// What the first model's reply reads as.
+fn advice_of(reply: &[u8]) -> Option<Advice> {
+    read_advice(reply, 0)
+}
+
 fn answer_of(content: &str) -> Option<(u8, u8)> {
-    read_advice(&chat_reply(content)).map(|advice| (advice.ai_flag, advice.ai_conf))
+    advice_of(&chat_reply(content)).map(|advice| (advice.ai_flag, advice.ai_conf))
 }
 
 fn secret(ai_key: Option<&str>) -> Secret {
@@ -84,7 +95,15 @@ fn world(broken: &'static [&'static str]) -> impl FnMut(&Call) -> Option<Vec<u8>
                 if names("chat") || broken.iter().any(|model| body.contains(model)) {
                     return None;
                 }
-                Some(chat_reply(r#"{"risk_flag":true,"confidence":80}"#))
+                // The API names the model that answered, as the real one does.
+                let asked: serde_json::Value = serde_json::from_str(body).ok()?;
+                let model = asked["model"].as_str()?;
+                Some(reply_from(
+                    model,
+                    CHAT_ID,
+                    r#"{"risk_flag":true,"confidence":80}"#,
+                    "stop",
+                ))
             }
             _ => market_reply(call),
         }
@@ -252,14 +271,14 @@ fn a_flag_that_is_not_a_boolean_is_not_an_answer() {
 fn a_cut_off_answer_is_not_an_answer() {
     let reply = reply_with(CHAT_ID, r#"{"risk_flag":false,"confidence":90}"#, "length");
 
-    assert!(read_advice(&reply).is_none());
+    assert!(advice_of(&reply).is_none());
 }
 
 #[test]
 fn a_reply_without_a_choice_is_not_an_answer() {
     let reply = json!({"id": CHAT_ID, "choices": []}).to_string();
 
-    assert!(read_advice(reply.as_bytes()).is_none());
+    assert!(advice_of(reply.as_bytes()).is_none());
 }
 
 #[test]
@@ -267,12 +286,12 @@ fn a_reply_with_two_choices_is_not_an_answer() {
     let choice = json!({"finish_reason": "stop", "message": {"content": r#"{"risk_flag":false,"confidence":90}"#}});
     let reply = json!({"id": CHAT_ID, "choices": [choice, choice]}).to_string();
 
-    assert!(read_advice(reply.as_bytes()).is_none());
+    assert!(advice_of(reply.as_bytes()).is_none());
 }
 
 #[test]
 fn an_api_error_is_not_an_answer() {
-    assert!(read_advice(br#"{"error":{"message":"out of credit"}}"#).is_none());
+    assert!(advice_of(br#"{"error":{"message":"out of credit"}}"#).is_none());
 }
 
 #[test]
@@ -283,21 +302,21 @@ fn a_chat_id_that_could_swell_the_decision_is_refused() {
         "stop",
     );
 
-    assert!(read_advice(&reply).is_none());
+    assert!(advice_of(&reply).is_none());
 }
 
 #[test]
 fn a_chat_id_with_odd_characters_is_refused() {
     let reply = reply_with("chat\"id", r#"{"risk_flag":false,"confidence":90}"#, "stop");
 
-    assert!(read_advice(&reply).is_none());
+    assert!(advice_of(&reply).is_none());
 }
 
 #[test]
 fn an_empty_chat_id_is_refused() {
     let reply = reply_with("", r#"{"risk_flag":false,"confidence":90}"#, "stop");
 
-    assert!(read_advice(&reply).is_none());
+    assert!(advice_of(&reply).is_none());
 }
 
 #[test]
@@ -308,7 +327,7 @@ fn the_reference_points_at_the_signed_reply() {
         .map(|byte| format!("{byte:02x}"))
         .collect();
 
-    let advice = read_advice(&reply).unwrap();
+    let advice = advice_of(&reply).unwrap();
 
     assert_eq!(advice.ai_ref.chat_id, CHAT_ID);
     assert_eq!(advice.ai_ref.resp_sig_hash, expected);
@@ -566,7 +585,7 @@ fn a_reply_whose_reasoning_ran_out_is_not_an_answer() {
         "message": {"content": null, "reasoning_content": "Let me think"}}]})
     .to_string();
 
-    assert!(read_advice(reply.as_bytes()).is_none());
+    assert!(advice_of(reply.as_bytes()).is_none());
 }
 
 #[test]
@@ -608,4 +627,73 @@ fn a_flag_from_the_advisor_blocks_a_buy_at_the_end() {
     flagged.ai_flag = AI_FLAGGED;
 
     assert_eq!(decide(&params, &input, &flagged).action, Action::None);
+}
+
+#[test]
+fn a_reply_from_another_model_is_not_an_answer() {
+    let reply = reply_from(
+        MODELS[1],
+        CHAT_ID,
+        r#"{"risk_flag":false,"confidence":90}"#,
+        "stop",
+    );
+
+    assert!(read_advice(&reply, 0).is_none());
+}
+
+#[test]
+fn a_reply_that_names_no_model_is_not_an_answer() {
+    let reply = json!({"id": CHAT_ID, "choices": [{"index": 0, "finish_reason": "stop",
+        "message": {"role": "assistant", "content": r#"{"risk_flag":false,"confidence":90}"#}}]})
+    .to_string()
+    .into_bytes();
+
+    assert!(advice_of(&reply).is_none());
+}
+
+#[test]
+fn the_reference_names_the_model_that_answered() {
+    let reply = reply_from(
+        MODELS[1],
+        CHAT_ID,
+        r#"{"risk_flag":false,"confidence":90}"#,
+        "stop",
+    );
+
+    assert_eq!(read_advice(&reply, 1).unwrap().ai_ref.m, Some(1));
+}
+
+#[test]
+fn the_reading_names_the_second_model_when_it_answers() {
+    static FIRST: [&str; 1] = [MODELS[0]];
+
+    let reading = observe(&secret(Some(KEY)), NONCE, world(&FIRST)).unwrap();
+
+    assert_eq!(reading.ai_ref.m, Some(1));
+}
+
+#[test]
+fn a_silent_advisor_names_no_model() {
+    let reading = observe(&secret(None), NONCE, world(&[])).unwrap();
+
+    assert_eq!(reading.ai_ref.m, None);
+    let json = serde_json::to_string(&reading.ai_ref).unwrap();
+    assert_eq!(json, r#"{"chat_id":"","resp_sig_hash":""}"#);
+}
+
+/// The reply GLM-5.3 Flash gave on 2026-11-06 to a run of this WASM with a real key. NEAR
+/// AI's `provider_tee` signature for it names this model and this `resp_sig_hash`.
+const LIVE_REPLY: &str = r#"{"id":"96c4d660c8c24433aafa9eac77b20286","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"risk_flag\": true, \"confidence\": 70}"},"finish_reason":"stop","logprobs":null,"matched_stop":154827}],"model":"z-ai/glm-5.3-flash","created":1793981881,"usage":{"prompt_tokens":496,"total_tokens":510,"completion_tokens":14,"prompt_tokens_details":null,"reasoning_tokens":1,"completion_tokens_details":{"reasoning_tokens":1}}}"#;
+
+#[test]
+fn the_reply_seen_live_reads_as_an_answer() {
+    let advice = advice_of(LIVE_REPLY.as_bytes()).unwrap();
+
+    assert_eq!((advice.ai_flag, advice.ai_conf), (AI_FLAGGED, 70));
+    assert_eq!(advice.ai_ref.chat_id, "96c4d660c8c24433aafa9eac77b20286");
+    assert_eq!(
+        advice.ai_ref.resp_sig_hash,
+        "865729cb2e02965750d82714848f2498a44062623b3f957d1cdaaf239127b030"
+    );
+    assert_eq!(advice.ai_ref.m, Some(0));
 }

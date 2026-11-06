@@ -57,6 +57,7 @@ impl From<Obs> for Observed {
 #[derive(Deserialize)]
 struct Chat {
     id: String,
+    model: String,
     choices: Vec<Choice>,
 }
 
@@ -126,15 +127,16 @@ fn ask(
         read_titles(&feed)
     })?;
     let headlines = format!("{}\n\nref:{tag}", titles.join("\n"));
-    let reply = MODELS.iter().find_map(|model| {
-        send(&Call {
+    let (asked, reply) = MODELS.iter().enumerate().find_map(|(index, model)| {
+        let reply = send(&Call {
             host: CHAT_HOST,
             path: CHAT_PATH,
             body: Some(chat_body(model, prompt, &headlines)),
             headers: chat_headers(key),
-        })
+        })?;
+        Some((index, reply))
     })?;
-    read_advice(&reply)
+    read_advice(&reply, asked)
 }
 
 /// `x-no-aliasing` keeps the gateway from answering with another model, whose TEE would not
@@ -203,14 +205,19 @@ fn title_of(item: &str) -> Option<String> {
     (!title.trim().is_empty()).then_some(title)
 }
 
-/// Anything but the exact answer counts as no answer. `resp_sig_hash` is the hash of these
-/// reply bytes, the same `response_hash` that the TEE's signature covers.
-pub fn read_advice(reply: &[u8]) -> Option<Advice> {
+/// Anything but the exact answer from the model asked, `MODELS[asked]`, counts as no
+/// answer: `x-no-aliasing` should already keep another model out, and a reply that still
+/// names one would carry a signature for a model the vault never chose. `resp_sig_hash` is
+/// the hash of these reply bytes, the same `response_hash` that the TEE's signature covers.
+pub fn read_advice(reply: &[u8], asked: usize) -> Option<Advice> {
     let chat: Chat = serde_json::from_slice(reply).ok()?;
     let [choice] = chat.choices.as_slice() else {
         return None;
     };
-    if choice.finish_reason != FINISHED || !is_chat_id(&chat.id) {
+    if choice.finish_reason != FINISHED
+        || !is_chat_id(&chat.id)
+        || MODELS.get(asked) != Some(&chat.model.as_str())
+    {
         return None;
     }
     let answer: Answer = serde_json::from_str(choice.message.content.trim()).ok()?;
@@ -227,6 +234,7 @@ pub fn read_advice(reply: &[u8]) -> Option<Advice> {
         ai_ref: AiRef {
             chat_id: chat.id,
             resp_sig_hash: to_hex(&Sha256::digest(reply)),
+            m: u8::try_from(asked).ok(),
         },
     })
 }
