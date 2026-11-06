@@ -167,15 +167,47 @@
   },
   {
     "id": "near-ai-advisor",
-    "claim": "NEAR AI as an advisor that can only lower exposure.",
+    "claim": "A NEAR AI model in a TEE reads the latest crypto headlines and can only hold back a buy. Its signed answer is checked offline.",
     "tracks": [
-      "privacy"
+      "privacy",
+      "agents"
     ],
-    "code_refs": [],
-    "test_refs": [],
-    "evidence": [],
-    "checks": [],
-    "status": "skip",
+    "code_refs": [
+      "strategy/src/advisor.rs",
+      "tools/fetch_proof.py",
+      "cli/src/ai_signature.rs"
+    ],
+    "test_refs": [
+      "strategy/src/advisor_tests.rs",
+      "tests/test_fetch_proof.py",
+      "cli/tests/ai_signature.rs"
+    ],
+    "evidence": [
+      "cli/fixtures/testnet-advisor-proof.json"
+    ],
+    "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 300,
+        "expect": "SUMMARY pass=21 skip=0 fail=0"
+      },
+      {
+        "tier": "0b",
+        "cmd": "cargo test --manifest-path strategy/Cargo.toml advisor",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 120,
+        "expect": "test result: ok"
+      }
+    ],
+    "status": "pass",
     "downgrade": "A NEAR AI advisor is planned and not yet checked."
   }
 ]
