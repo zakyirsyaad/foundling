@@ -892,7 +892,13 @@ fn newlines_and_tabs_are_allowed_in_a_prompt() {
 fn a_prompt_outside_printable_ascii_is_refused() {
     // Python's json.dumps escapes these where serde_json does not, so a sealing script
     // and the WASM would commit to different bytes.
-    for prompt in ["Don\u{2019}t buy", "caf\u{e9}", "a\u{7f}b", "a\u{1}b", "a\rb"] {
+    for prompt in [
+        "Don\u{2019}t buy",
+        "caf\u{e9}",
+        "a\u{7f}b",
+        "a\u{1}b",
+        "a\rb",
+    ] {
         refuses_param("prompt", prompt);
     }
 }

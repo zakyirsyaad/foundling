@@ -437,7 +437,10 @@ fn the_request_can_be_signed_and_stays_deterministic() {
 }
 
 /// The chat bodies a run sends, with the first model answering `first` when given.
-fn chat_bodies(first: Option<&'static str>, broken: &'static [&'static str]) -> (Option<Observed>, Vec<serde_json::Value>) {
+fn chat_bodies(
+    first: Option<&'static str>,
+    broken: &'static [&'static str],
+) -> (Option<Observed>, Vec<serde_json::Value>) {
     let mut bodies = Vec::new();
     let mut inner = world(broken);
     let reading = observe(&secret(Some(KEY)), |call: &Call| {
