@@ -37,6 +37,7 @@ attack-lab:
 # limit and report ERROR for what is only a cold cache.
 attack-lab-full: wasm
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
+	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 	@python3 tools/attack.py run-all
 
@@ -51,5 +52,6 @@ attack-proofs:
 		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null) || exit 1; \
 	done
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
+	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack/reproducible python3 tools/attack.py run-all

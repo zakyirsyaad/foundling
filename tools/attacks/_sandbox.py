@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TEST_BINARY = "attacks_batch1"
+BATCH2 = ("kill-agent", "governor-loosen", "double-redeem", "forged-caller", "freeze-race")
+BATCH2_TEST_BINARY = "attacks_batch2"
 WASM = [
     ("vault", "foundling_vault"),
     ("mock-oracle", "mock_oracle"),
@@ -24,6 +26,10 @@ WASM = [
     ("mock-outlayer", "mock_outlayer"),
     ("mock-token", "mock_token"),
 ]
+
+
+def test_binary(name):
+    return BATCH2_TEST_BINARY if name in BATCH2 else TEST_BINARY
 
 
 def proof_dir(root):
@@ -63,7 +69,9 @@ def run(name, root=ROOT, cargo=("cargo",)):
 
     proof_path = proof_dir(root) / f"{name}.json"
     proof_path.unlink(missing_ok=True)
-    command = [*cargo, "test", "--locked", "--test", TEST_BINARY, name.replace("-", "_"), "--", "--exact"]
+    command = [
+        *cargo, "test", "--locked", "--test", test_binary(name), name.replace("-", "_"), "--", "--exact",
+    ]
     try:
         # cargo's output goes to stderr so stdout stays the dispatcher's status lines.
         code = subprocess.run(command, cwd=root / "sandbox", stdout=sys.stderr).returncode
