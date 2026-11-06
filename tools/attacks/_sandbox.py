@@ -26,6 +26,16 @@ WASM = [
 ]
 
 
+def registry_entry(root, name):
+    attacks = json.loads((Path(root) / "tools" / "attack-registry.json").read_text())["attacks"]
+    return next(a for a in attacks if a["name"] == name)
+
+
+def test_binary(name, root=ROOT):
+    """The cargo test binary that holds the attack, from the registry; batch 1 has no field."""
+    return registry_entry(root, name).get("test_binary", TEST_BINARY)
+
+
 def proof_dir(root):
     return Path(os.environ.get("FOUNDLING_PROOF_DIR") or Path(root) / "proofs" / "attack" / "local")
 
@@ -42,8 +52,7 @@ def fail(message):
 
 
 def registry_codes(root, name):
-    attacks = json.loads((root / "tools" / "attack-registry.json").read_text())["attacks"]
-    return next(a["codes"] for a in attacks if a["name"] == name)
+    return registry_entry(root, name)["codes"]
 
 
 def run(name, root=ROOT, cargo=("cargo",)):
@@ -61,9 +70,13 @@ def run(name, root=ROOT, cargo=("cargo",)):
     if stale:
         return fail(f"{name}: wasm older than its sources ({', '.join(stale)}); run `make wasm`")
 
+    try:
+        binary = test_binary(name, root)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as err:
+        return fail(f"{name}: cannot read its test binary from the registry: {err!r}")
     proof_path = proof_dir(root) / f"{name}.json"
     proof_path.unlink(missing_ok=True)
-    command = [*cargo, "test", "--locked", "--test", TEST_BINARY, name.replace("-", "_"), "--", "--exact"]
+    command = [*cargo, "test", "--locked", "--test", binary, name.replace("-", "_"), "--", "--exact"]
     try:
         # cargo's output goes to stderr so stdout stays the dispatcher's status lines.
         code = subprocess.run(command, cwd=root / "sandbox", stdout=sys.stderr).returncode
