@@ -46,7 +46,7 @@
     },
     {
       "name": "kill-agent",
-      "expected": "Tidak ada siklus baru; `redeem` in-kind tetap berhasil",
+      "expected": "Tidak ada siklus baru dari akun selain id keeper; `redeem` in-kind tetap berhasil",
       "codes": [
         "NOT_KEEPER"
       ],
@@ -55,7 +55,11 @@
     {
       "name": "governor-loosen",
       "expected": "Method tidak ada atau ditolak; rotasi keeper hanya terjadwal dan bisa dibatalkan guardian",
-      "codes": [],
+      "codes": [
+        "POLICY_NOT_TIGHTER",
+        "POLICY_BELOW_FLOOR",
+        "TIMELOCK"
+      ],
       "test_binary": "attacks_batch2"
     },
     {

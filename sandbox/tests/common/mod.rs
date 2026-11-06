@@ -440,9 +440,34 @@ const SPEC_PANIC_CODES: &[&str] = &[
     "BAD_SALT",
     "BAD_REVEAL",
     "ALREADY_REVEALED",
+    "POLICY_NOT_TIGHTER",
+    "POLICY_BELOW_FLOOR",
+    "TIMELOCK",
+    "OPS_BUDGET",
+    "NOT_READY",
+    "EXPIRED",
+    "NOT_EXPIRED",
+    "NOT_AWAITING",
+    "NOT_STALE",
+    "NEAR_RESERVE",
+    "PARAMS_TOO_LONG",
     "FROZEN",
     "HALTED",
 ];
+
+/// Whole codes in a message: runs of capital letters and underscores, so `NOT_EXPIRED` is never
+/// read as `EXPIRED` and `POLICY_NOT_TIGHTER` is never read as `NOT_TIGHTER`.
+fn codes_in(message: &str) -> Vec<&'static str> {
+    let tokens: Vec<&str> = message
+        .split(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+        .filter(|token| !token.is_empty())
+        .collect();
+    SPEC_PANIC_CODES
+        .iter()
+        .copied()
+        .filter(|code| tokens.contains(code))
+        .collect()
+}
 
 /// The message of a panic, or the kind of the error when it is not a panic.
 fn refusal_message(text: &str) -> String {
@@ -485,11 +510,7 @@ impl Run {
     pub fn refused(&self, result: &ExecutionFinalResult) -> Option<String> {
         let text = refused_text(result)?;
         let message = refusal_message(&text);
-        let codes: Vec<&str> = SPEC_PANIC_CODES
-            .iter()
-            .copied()
-            .filter(|code| message.contains(code))
-            .collect();
+        let codes = codes_in(&message);
         for code in &codes {
             self.record(code);
         }
