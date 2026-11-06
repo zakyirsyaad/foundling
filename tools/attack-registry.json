@@ -110,7 +110,10 @@
     {
       "name": "setup-spam",
       "expected": "Paling banyak satu per target; NEAR vault tidak turun di bawah `near_reserve`",
-      "codes": []
+      "codes": [
+        "NEAR_RESERVE"
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "advance-race",

@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use foundling_sandbox::{event_data, failures, Foundling, Setup, NEAR_FEED, NEAR_PRICE};
+use foundling_sandbox::{event_data, events, failures, Foundling, Setup, NEAR_FEED, NEAR_PRICE};
 use near_workspaces::types::NearToken;
 use serde_json::{json, Value};
 
@@ -460,4 +460,187 @@ async fn never_flat() -> anyhow::Result<()> {
         "ledger_after differs from ledger_before by the sells and the mint; each step asserts what it claims",
     );
     run.finish(&env, before, ledger(&env).await?)
+}
+
+const TARGETS: [&str; 4] = ["Usdc", "Wnear", "Rhea", "RheaTokens"];
+/// What `setup_storage` pays per target (setup.rs): the two token registrations, the Ref storage
+/// deposit, and one yoctoNEAR for `register_tokens`.
+const TOKEN_STORAGE: u128 = 1_250_000_000_000_000_000_000;
+const REF_STORAGE: u128 = 10_000_000_000_000_000_000_000;
+/// The protocol's price of a stored byte.
+const BYTE_COST: u128 = 10_000_000_000_000_000_000;
+const NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+
+type Calls = Vec<(&'static str, near_workspaces::result::ExecutionFinalResult)>;
+
+async fn spam_accounts(
+    env: &Foundling,
+    count: usize,
+) -> anyhow::Result<Vec<near_workspaces::Account>> {
+    let root = env.worker.root_account()?;
+    let mut accounts = Vec::new();
+    for index in 0..count {
+        accounts.push(
+            root.create_subaccount(&format!("spam{index}"))
+                .initial_balance(NearToken::from_near(2))
+                .transact()
+                .await?
+                .into_result()?,
+        );
+    }
+    Ok(accounts)
+}
+
+/// Every account calls `setup_storage` `per_account` times, all accounts at once. Each account
+/// signs its own calls one after the other, so the vault sees as many in flight as there are accounts.
+async fn barrage(
+    env: &Foundling,
+    accounts: &[near_workspaces::Account],
+    per_account: usize,
+    targets: &[&'static str],
+) -> anyhow::Result<Calls> {
+    let mut set = tokio::task::JoinSet::new();
+    for (index, account) in accounts.iter().enumerate() {
+        let account = account.clone();
+        let vault = env.vault_id.clone();
+        let picks: Vec<&'static str> = (0..per_account)
+            .map(|call| targets[(index + call) % targets.len()])
+            .collect();
+        set.spawn(async move {
+            let mut done: Calls = Vec::new();
+            for target in picks {
+                let result = account
+                    .call(&vault, "setup_storage")
+                    .args_json(json!({ "target": target }))
+                    .max_gas()
+                    .transact()
+                    .await?;
+                done.push((target, result));
+            }
+            anyhow::Ok(done)
+        });
+    }
+    let mut calls = Vec::new();
+    while let Some(joined) = set.join_next().await {
+        calls.extend(joined??);
+    }
+    Ok(calls)
+}
+
+/// How many registrations of `target` actually completed: `on_setup` logs `setup_step` with
+/// `failed` false once the registration call came back.
+fn completed(calls: &Calls, target: &str) -> usize {
+    calls
+        .iter()
+        .filter(|(called, _)| *called == target)
+        .flat_map(|(_, result)| events(result))
+        .filter(|event| event["event"] == "setup_step" && event["data"][0]["failed"] == false)
+        .count()
+}
+
+async fn vault_near(env: &Foundling) -> anyhow::Result<(u128, u128)> {
+    let details = env.worker.view_account(&env.vault_id).await?;
+    Ok((
+        details.balance.as_yoctonear(),
+        details.storage_usage as u128,
+    ))
+}
+
+/// `setup_storage` is open to everyone and pays from the vault's own NEAR, so a crowd could try to
+/// register the same target over and over (Ref's storage surplus cannot be withdrawn again) or run
+/// the vault's NEAR down until a state write, `redeem` included, fails (I11). The flag goes in before
+/// the promise: one call per target gets through, and the NEAR floor (`stake + near_reserve`) holds.
+/// First with plenty of NEAR, where every target is registered exactly once; then with a reserve
+/// that leaves room for the two token registrations only, where Ref's 0.01 NEAR must be refused.
+#[tokio::test]
+async fn setup_spam() -> anyhow::Result<()> {
+    let mut run = Run::new("setup-spam", &["NEAR_RESERVE"]);
+
+    // A. Plenty of NEAR: 100 calls from 25 accounts, then ten more for RheaTokens, which waits for Ref.
+    let env = Foundling::start().await?;
+    let (near_before, _) = vault_near(&env).await?;
+    let accounts = spam_accounts(&env, 25).await?;
+    let mut calls = barrage(&env, &accounts, 4, &TARGETS).await?;
+    anyhow::ensure!(
+        calls.len() == 100,
+        "setup failed: the barrage should be 100 calls"
+    );
+    if completed(&calls, "Rhea") == 1 && completed(&calls, "RheaTokens") == 0 {
+        calls.extend(barrage(&env, &accounts[..10], 1, &["RheaTokens"]).await?);
+    }
+    let mut refused = 0;
+    for (_, result) in &calls {
+        if run.refused(result).is_some() {
+            refused += 1;
+        }
+    }
+    let per_target: Vec<usize> = TARGETS
+        .iter()
+        .map(|target| completed(&calls, target))
+        .collect();
+    let (near_after, _) = vault_near(&env).await?;
+    let fixed = 2 * TOKEN_STORAGE + REF_STORAGE + 1;
+    run.step(
+        "100 simultaneous setup_storage calls: each target is registered exactly once",
+        per_target == [1, 1, 1, 1]
+            && env.view_vault::<bool>("is_setup_done", json!({})).await?
+            && refused == calls.len() - 4,
+        None,
+        json!({"calls": calls.len(), "completed_per_target": per_target, "refused": refused,
+               "targets": TARGETS}),
+    );
+    run.step(
+        "the NEAR the vault paid is the four registrations and not more",
+        delta(near_before, near_after) <= 0 && (near_before - near_after) <= fixed + NEAR / 100,
+        None,
+        json!({"paid": (near_before.saturating_sub(near_after)).to_string(), "registrations": fixed.to_string(),
+               "margin": (NEAR / 100).to_string()}),
+    );
+
+    // B. A reserve that leaves room for the two token registrations (0.0025 NEAR) and not for Ref (0.01).
+    // The first vault, as deployed, tells what a second one will hold: its NEAR before anything was
+    // spent, and the bytes it stores (setup does not change the size of its state).
+    let (_, usage) = vault_near(&env).await?;
+    let room = 5 * NEAR / 1000;
+    let reserve = near_before - usage * BYTE_COST - room;
+    let tight = Foundling::start_with(Setup {
+        policy: json!({ "near_reserve": reserve.to_string() }),
+        ..Default::default()
+    })
+    .await?;
+    let (tight_before, _) = vault_near(&tight).await?;
+    let accounts = spam_accounts(&tight, 25).await?;
+    let calls = barrage(&tight, &accounts, 4, &TARGETS).await?;
+    let mut ref_refusals = 0;
+    for (target, result) in &calls {
+        if let Some(text) = run.refused(result) {
+            if *target == "Rhea" && text.contains("NEAR_RESERVE") {
+                ref_refusals += 1;
+            }
+        }
+    }
+    let per_target: Vec<usize> = TARGETS
+        .iter()
+        .map(|target| completed(&calls, target))
+        .collect();
+    let (tight_after, tight_usage) = vault_near(&tight).await?;
+    let floor = tight_usage * BYTE_COST + reserve;
+    run.step(
+        "with room for two token registrations only, Ref's storage deposit is refused with NEAR_RESERVE every time",
+        per_target == [1, 1, 0, 0] && ref_refusals > 0 && !tight.view_vault::<bool>("is_setup_done", json!({})).await?,
+        Some("NEAR_RESERVE"),
+        json!({"completed_per_target": per_target, "rhea_refused_near_reserve": ref_refusals}),
+    );
+    run.step(
+        "the vault's NEAR never fell under stake + near_reserve",
+        tight_after >= floor && delta(tight_before, tight_after) < 0,
+        None,
+        json!({"balance_before": tight_before.to_string(), "balance_after": tight_after.to_string(),
+               "floor": floor.to_string(), "near_reserve": reserve.to_string(), "stake": (tight_usage * BYTE_COST).to_string()}),
+    );
+    run.finish(
+        &env,
+        json!({"vault_near": near_before.to_string()}),
+        json!({"vault_near": near_after.to_string()}),
+    )
 }
