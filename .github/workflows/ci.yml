@@ -31,6 +31,9 @@ jobs:
         working-directory: strategy
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # This job has its own `defaults: run`, so this shows the workflow's `shell: bash` still applies.
+      - name: The default shell has pipefail
+        run: '[[ -o pipefail ]]'
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -437,10 +440,15 @@ jobs:
           for crate in contracts/vault contracts/mock-ref contracts/mock-oracle \
             contracts/mock-outlayer contracts/mock-token; do
             for package in crypto-bigint zstd zstd-safe; do
-              # grep -c reads all of cargo tree's output. `grep -q` would stop at the first match,
-              # and under pipefail cargo tree's SIGPIPE would then make the `if` false.
-              if [ "$(cargo tree --locked --manifest-path "$crate/Cargo.toml" \
-                --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -c "$package")" -ne 0 ]; then
+              # An absent package makes cargo tree print nothing and exit 0. Any failure (an ambiguous
+              # spec, a stale lockfile) fails the check instead of reading as "absent". No pipe, so no
+              # SIGPIPE under pipefail.
+              if ! tree="$(cargo tree --locked --manifest-path "$crate/Cargo.toml" \
+                --target wasm32-unknown-unknown -e normal -i "$package")"; then
+                echo "::error::cargo tree failed for $package in $crate, so the check cannot say it is absent"
+                exit 1
+              fi
+              if grep -q "$package" <<< "$tree"; then
                 echo "::error::$package reached the WASM of $crate"
                 exit 1
               fi

@@ -40,7 +40,10 @@ CAPTURE_THEN_GREP = re.compile(r"^\s*(api|worker)=\$\(docker run --rm foundling-
 ALWAYS_GREEN = (
     r";\s*(true|:)\s*$",
     r"\bexit\s+0\b",
-    r"\bset\s+\+e\b",
+    # `set +e`, and any flag group that clears e (`set +eo pipefail`, `set +xe`).
+    r"\bset\s+\+[A-Za-z]*e",
+    # The long forms, which also undo the workflow default's pipefail.
+    r"\+o\s+(errexit|pipefail)\b",
     r"--exit-zero",
 )
 
@@ -133,7 +136,8 @@ def check(text):
             problems.append(f"{job}: expected a step `run: {pattern}`")
 
     runs("attack-lab", r"python3 -m unittest tests\.test_attack_lab")
-    scaffold_modules = set(re.findall(r"\btests\.(test_attack_\w+)", jobs.get("attack-lab", "")))
+    scaffold = "\n".join(l for l in jobs.get("attack-lab", "").splitlines() if not l.lstrip().startswith("#"))
+    scaffold_modules = set(re.findall(r"\btests\.(test_attack_\w+)", scaffold))
     for module in ATTACK_TESTS:
         if module not in scaffold_modules:
             problems.append(f"attack-lab: tests.{module} is never run")
@@ -236,6 +240,12 @@ class TamperingTest(unittest.TestCase):
             "workflow default shell removed": tampered(b, DEFAULT_SHELL, ""),
             "workflow default shell drops pipefail": tampered(b, DEFAULT_SHELL, "defaults:\n  run:\n    shell: bash -e {0}\n"),
             "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
+            "batch 3 tests only in a comment": tampered_in(
+                b, "attack-lab", " tests.test_attack_batch3\n", "\n        # run: python3 -m unittest tests.test_attack_batch3\n"
+            ),
+            "set +o pipefail": tampered(b, "run: make sandbox\n", "run: set +o pipefail; make sandbox\n"),
+            "set +eo pipefail": tampered(b, "run: make sandbox\n", "run: set +eo pipefail; make sandbox\n"),
+            "set +o errexit": tampered(b, "run: make sandbox\n", "run: set +o errexit; make sandbox\n"),
             "soft job swallows the status": tampered(b, 'exit "$status"', "true"),
             "action pinned to a tag": tampered(b, sha, "actions/checkout@v4"),
             "no timeout": tampered(b, workflow + "    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n", workflow + "    runs-on: ubuntu-24.04\n"),
