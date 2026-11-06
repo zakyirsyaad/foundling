@@ -26,6 +26,12 @@ REQUIRED_JOBS = {
     "vault-wasm", "sandbox", "web", "dependencies", "secrets", SOFT_JOB, "workflow",
     "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
 }
+# GitHub runs a step with no shell as `bash -e {0}`, which has no pipefail, so `cmd | tee`
+# reports tee's status. A workflow default of `shell: bash` runs `bash -eo pipefail {0}`.
+DEFAULT_SHELL = "defaults:\n  run:\n    shell: bash\n"
+# Every Attack Lab unittest module must run in the scaffold job, so a new batch cannot be
+# added without its binding tests reaching CI.
+ATTACK_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_attack_*.py"))
 # Patterns that make a failing command succeed. Every `||` is rejected separately, except
 # `|| status=$?`, which records the status and lets the step fail on it, and the two lines
 # below: the Web job runs an image that is meant to refuse an empty env, captures what it
@@ -34,7 +40,10 @@ CAPTURE_THEN_GREP = re.compile(r"^\s*(api|worker)=\$\(docker run --rm foundling-
 ALWAYS_GREEN = (
     r";\s*(true|:)\s*$",
     r"\bexit\s+0\b",
-    r"\bset\s+\+e\b",
+    # `set +e`, and any flag group that clears e (`set +eo pipefail`, `set +xe`).
+    r"\bset\s+\+[A-Za-z]*e",
+    # The long forms, which also undo the workflow default's pipefail.
+    r"\+o\s+(errexit|pipefail)\b",
     r"--exit-zero",
 )
 
@@ -87,6 +96,12 @@ def check(text):
             problems.append(f"{name}: no timeout-minutes")
         if re.search(r"(?m)^    permissions:", body):
             problems.append(f"{name}: job-level permissions are not allowed")
+        # A job's own `defaults: run` replaces the workflow's whole block (seen in CI: Strategy ran
+        # `bash -e {0}`), so it has to repeat `shell: bash` to keep pipefail.
+        if re.search(r"(?m)^    defaults:", body) and not re.search(
+            r"(?m)^    defaults:\n      run:\n(?:        .*\n)*?        shell: bash\n", body
+        ):
+            problems.append(f"{name}: its own `defaults: run` replaces the workflow's, so it must set `shell: bash` too")
 
     for ref in re.findall(r"(?m)^\s*-?\s*uses: (\S+)", code):
         if not re.search(r"@[0-9a-f]{40}$", ref):
@@ -103,8 +118,11 @@ def check(text):
     for match in re.finditer(r"\|\|\s*(\S*)", shell_only):
         if match.group(1) != "status=$?":
             problems.append(f"`|| {match.group(1)}` can swallow a failure; only `|| status=$?` is allowed")
-    if re.search(r"(?m)^\s*(?:-\s*)?shell:", code):
-        problems.append("`shell:` can drop -e and pipefail, which GitHub's default bash keeps")
+    if not re.search(rf"(?m)^{re.escape(DEFAULT_SHELL)}", head + "\n"):
+        problems.append("the workflow must set `defaults: run: shell: bash`, which adds pipefail to GitHub's `bash -e`")
+    for value in re.findall(r"(?m)^\s*(?:-\s*)?shell:(.*)$", code):
+        if value.strip() != "bash":
+            problems.append(f"`shell:{value}` can drop -e or pipefail; only `shell: bash` is allowed")
 
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
     if len(flagged) != 1:
@@ -115,8 +133,8 @@ def check(text):
         problems.append(f"{SOFT_JOB} must carry `    continue-on-error: true`")
     elif lines[lines.index("    continue-on-error: true") - 1].strip() != PROMOTION_NOTE:
         problems.append("the promotion note must sit directly above continue-on-error")
-    if not re.search(r"python3 tools/attack\.py run-all\b", soft):
-        problems.append(f"{SOFT_JOB} must run `python3 tools/attack.py run-all`")
+    if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", soft):
+        problems.append(f"{SOFT_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
     if 'exit "$status"' not in soft:
         problems.append(f'{SOFT_JOB} must end with exit "$status" so a failure stays visible')
 
@@ -125,6 +143,11 @@ def check(text):
             problems.append(f"{job}: expected a step `run: {pattern}`")
 
     runs("attack-lab", r"python3 -m unittest tests\.test_attack_lab")
+    scaffold = "\n".join(l for l in jobs.get("attack-lab", "").splitlines() if not l.lstrip().startswith("#"))
+    scaffold_modules = set(re.findall(r"\btests\.(test_attack_\w+)", scaffold))
+    for module in ATTACK_TESTS:
+        if module not in scaffold_modules:
+            problems.append(f"attack-lab: tests.{module} is never run")
     runs("offline-verifier", r"python3 verify\.py")
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
@@ -220,6 +243,18 @@ class TamperingTest(unittest.TestCase):
             "attack-lab command replaced": tampered(b, "run: python3 -m unittest tests.test_attack_lab\n", "run: 'true'\n"),
             "workflow command only echoed": tampered(b, "run: python3 -m unittest tests.test_ci_workflow\n", "run: echo python3 -m unittest tests.test_ci_workflow\n"),
             "run-all replaced": tampered(b, "python3 tools/attack.py run-all", "echo skip"),
+            "run-all without --strict": tampered(b, "run-all --strict", "run-all"),
+            "workflow default shell removed": tampered(b, DEFAULT_SHELL, ""),
+            "workflow default shell drops pipefail": tampered(b, DEFAULT_SHELL, "defaults:\n  run:\n    shell: bash -e {0}\n"),
+            "job defaults without shell": tampered_in(b, "strategy", "        shell: bash\n", ""),
+            "step shell: sh": tampered(b, "run: make sandbox\n", "shell: sh\n        run: make sandbox\n"),
+            "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
+            "batch 3 tests only in a comment": tampered_in(
+                b, "attack-lab", " tests.test_attack_batch3\n", "\n        # run: python3 -m unittest tests.test_attack_batch3\n"
+            ),
+            "set +o pipefail": tampered(b, "run: make sandbox\n", "run: set +o pipefail; make sandbox\n"),
+            "set +eo pipefail": tampered(b, "run: make sandbox\n", "run: set +eo pipefail; make sandbox\n"),
+            "set +o errexit": tampered(b, "run: make sandbox\n", "run: set +o errexit; make sandbox\n"),
             "soft job swallows the status": tampered(b, 'exit "$status"', "true"),
             "action pinned to a tag": tampered(b, sha, "actions/checkout@v4"),
             "no timeout": tampered(b, workflow + "    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n", workflow + "    runs-on: ubuntu-24.04\n"),
@@ -231,7 +266,7 @@ class TamperingTest(unittest.TestCase):
             "push no longer on main": tampered(b, "    branches: [main]", "    branches: [nothing]"),
             "token made writable": tampered(b, "  contents: read", "  contents: write"),
             "step shell drops -e and pipefail": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        shell: bash {0}\n        run: cargo test --locked; echo done\n      - name: Test rehearsal"),
-            "defaults.run.shell drops -e": tampered(b, "    defaults:\n      run:\n        working-directory: strategy\n", "    defaults:\n      run:\n        shell: bash {0}\n        working-directory: strategy\n"),
+            "defaults.run.shell drops -e": tampered(b, "    defaults:\n      run:\n        shell: bash\n        working-directory: strategy\n", "    defaults:\n      run:\n        shell: bash {0}\n        working-directory: strategy\n"),
             "|| /usr/bin/true": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || /usr/bin/true\n      - name: Test rehearsal"),
             "|| printf ok": tampered(b, "        run: cargo test --locked\n      - name: Test rehearsal", "        run: cargo test --locked || printf ok\n      - name: Test rehearsal"),
             "|| { true; }": tampered(b, "run: make sandbox\n", "run: make sandbox || { true; }\n"),
