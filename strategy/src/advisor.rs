@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::sources::{observe_market, Call};
 use crate::{to_hex, AiRef, Obs, Secret, AI_CLEAR, AI_FLAGGED};
 
-/// Security news first, then a general feed if that one is down.
+/// General crypto news: The Block first, Cointelegraph if that feed is down.
 const FEEDS: [(&str, &str); 2] = [
     ("www.theblock.co", "/rss.xml"),
     ("cointelegraph.com", "/rss"),
@@ -17,9 +17,13 @@ const FEEDS: [(&str, &str); 2] = [
 const CHAT_HOST: &str = "cloud-api.near.ai";
 const CHAT_PATH: &str = "/v1/chat/completions";
 /// Both run inside NEAR's own TEE tier. The list of models changes, and a sealed vault
-/// cannot, so one can disappear without silencing the advisor.
+/// cannot, so the second is asked only when the first cannot be reached. A first model that
+/// answers badly leaves the advisor silent: asking again would let a second opinion undo a
+/// raised flag.
 pub const MODELS: [&str; 2] = ["z-ai/glm-5.3-flash", "Qwen/Qwen3.8-27B"];
-const MAX_OUTPUT_TOKENS: u32 = 64;
+/// Both models reason by default and the reasoning counts against this, so it leaves room
+/// for the few tokens they still spend before the answer.
+const MAX_OUTPUT_TOKENS: u32 = 256;
 pub const MAX_TITLES: usize = 20;
 pub const MAX_TITLE_CHARS: usize = 160;
 const MAX_CONFIDENCE: u8 = 100;
@@ -101,26 +105,34 @@ fn ask(prompt: &str, key: &str, send: &mut impl FnMut(&Call) -> Option<Vec<u8>>)
             host,
             path,
             body: None,
-            bearer: None,
+            headers: Vec::new(),
         })?;
         read_titles(&feed)
     })?;
     let headlines = titles.join("\n");
-    MODELS.iter().find_map(|model| {
-        let body = chat_body(model, prompt, &headlines);
-        let reply = send(&Call {
+    let reply = MODELS.iter().find_map(|model| {
+        send(&Call {
             host: CHAT_HOST,
             path: CHAT_PATH,
-            body: Some(body),
-            bearer: Some(key),
-        })?;
-        read_advice(&reply)
-    })
+            body: Some(chat_body(model, prompt, &headlines)),
+            headers: chat_headers(key),
+        })
+    })?;
+    read_advice(&reply)
+}
+
+/// `x-no-aliasing` keeps the gateway from answering with another model, whose TEE would not
+/// have signed the reply.
+fn chat_headers(key: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("authorization", format!("Bearer {key}")),
+        ("x-no-aliasing", "true".to_string()),
+    ]
 }
 
 /// Non-streaming, so the reply bytes are what the model's TEE signs.
 fn chat_body(model: &str, prompt: &str, headlines: &str) -> String {
-    json!({
+    let mut body = json!({
         "model": model,
         "messages": [
             { "role": "system", "content": prompt },
@@ -129,8 +141,20 @@ fn chat_body(model: &str, prompt: &str, headlines: &str) -> String {
         "temperature": 0,
         "max_tokens": MAX_OUTPUT_TOKENS,
         "stream": false,
-    })
-    .to_string()
+    });
+    keep_reasoning_short(model, &mut body);
+    body.to_string()
+}
+
+/// GLM-5.3 Flash keeps its reasoning to about 20 tokens at `reasoning_effort` "low";
+/// switching its thinking off only moves the reasoning into `content`. Qwen turns thinking
+/// off through its chat template. (docs.near.ai/cloud/reasoning-models)
+fn keep_reasoning_short(model: &str, body: &mut serde_json::Value) {
+    if model == MODELS[0] {
+        body["reasoning_effort"] = json!("low");
+    } else {
+        body["chat_template_kwargs"] = json!({ "enable_thinking": false });
+    }
 }
 
 /// The headlines of a feed. Only the items count: the channel's own title is no news.
@@ -148,16 +172,19 @@ pub fn read_titles(feed: &[u8]) -> Option<Vec<String>> {
 fn title_of(item: &str) -> Option<String> {
     let (_, rest) = item.split_once("<title>")?;
     let (raw, _) = rest.split_once("</title>")?;
+    let raw = raw.trim();
     let text = raw
         .strip_prefix("<![CDATA[")
         .and_then(|inner| inner.strip_suffix("]]>"))
-        .unwrap_or(raw);
+        .unwrap_or(raw)
+        .trim();
     let title: String = text
         .chars()
         .filter(|character| !character.is_control())
         .take(MAX_TITLE_CHARS)
         .collect();
-    (!title.is_empty()).then_some(title)
+    // A blank title is no headline, and a feed of them should make way for the backup.
+    (!title.trim().is_empty()).then_some(title)
 }
 
 /// Anything but the exact answer counts as no answer. `resp_sig_hash` is the hash of these

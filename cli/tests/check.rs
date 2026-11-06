@@ -1,23 +1,25 @@
 //! A real testnet cycle, then the same cycle with one thing wrong each time. The fixture comes
 //! from `tools/fetch_proof.py` on a burner vault, and every value in it is public on chain.
 //!
-//! Its binary predates `prompt` in `Params`, so this commit cannot open it. The attestation
-//! half runs on the real cycle with the parameters withheld. The commitment and the replay run
-//! on the same numbers sealed again under today's rule, which no quote covers. A run of a
-//! binary with `prompt` replaces this split with one fixture that passes everything.
+//! Its binary predates `prompt` in `Params`, so this commit cannot open it. The real cycle
+//! runs with the parameters withheld. The opening runs on the same numbers sealed again under
+//! today's rule, through the whole `check`: no quote covers those decision bytes, so every
+//! such report also fails "output hash", and only that. A run of a binary with `prompt`
+//! replaces this split with one fixture that passes everything.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use foundling_strategy::{commitment, Params};
 use foundling_verify::check;
 use foundling_verify::hex::decode;
 use foundling_verify::proof::Proof;
-use foundling_verify::replay;
 use foundling_verify::report::Report;
 
 const FIXTURE: &str = include_str!("../fixtures/testnet-proof.json");
 const QUOTE_REPORT_DATA_OFFSET: usize = 48 + 520;
 const TEN_YEARS_SECONDS: u64 = 10 * 365 * 24 * 60 * 60;
 const PROMPT: &str = "Classify the headlines.";
+/// What `check` says about decision bytes no quote covers.
+const UNCOVERED: &str = "output hash";
 
 fn fixture() -> Proof {
     serde_json::from_str(FIXTURE).unwrap()
@@ -32,7 +34,7 @@ fn proof() -> Proof {
 }
 
 /// The fixture's numbers with a prompt, sealed under today's rule. Its decision bytes differ
-/// from the attested ones, so only the replay half is meaningful here.
+/// from the attested ones, so `check` also fails "output hash" on it.
 fn opened() -> Proof {
     let mut proof = fixture();
     let opening = proof.opening.as_mut().unwrap();
@@ -47,15 +49,6 @@ fn opened() -> Proof {
     }
     proof.commitment = sealed;
     proof
-}
-
-fn replayed(proof: &Proof) -> Report {
-    let mut report = Report::default();
-    let params = replay::open_params(proof, &mut report);
-    for cycle in &proof.cycles {
-        replay::check_cycle(proof, cycle, params.as_ref(), &mut report);
-    }
-    report
 }
 
 fn replaced(text: &str, old: &str, new: &str) -> String {
@@ -76,8 +69,11 @@ fn assert_fails(proof: &Proof, expected: &[&str]) {
     assert_report_fails(&check(proof), expected);
 }
 
-fn assert_replay_fails(proof: &Proof, expected: &[&str]) {
-    assert_report_fails(&replayed(proof), expected);
+/// For a proof built on `opened`: the expected failures plus the uncovered output bytes.
+fn assert_opened_fails(proof: &Proof, expected: &[&str]) {
+    let mut all = vec![UNCOVERED];
+    all.extend_from_slice(expected);
+    assert_fails(proof, &all);
 }
 
 fn assert_report_fails(report: &Report, expected: &[&str]) {
@@ -102,14 +98,15 @@ fn before_reveal_a_real_cycle_passes_and_the_replay_is_skipped() {
 
 #[test]
 fn an_opening_sealed_under_this_rule_reproduces_the_decision() {
-    let report = replayed(&opened());
-    assert_eq!(failed(&report), Vec::<&str>::new());
+    let report = check(&opened());
+    assert_report_fails(&report, &[UNCOVERED]);
     assert_eq!(report.skipped, 0);
     assert!(report
         .lines
         .iter()
         .any(|line| line == "PASS nonce 1 replay"));
-    assert_eq!(report.summary(), "SUMMARY pass=4 skip=0 fail=0");
+    assert!(report.lines.iter().any(|line| line == "1/1 reproduced"));
+    assert_eq!(report.summary(), "SUMMARY pass=13 skip=0 fail=1");
 }
 
 #[test]
@@ -130,9 +127,8 @@ fn a_proof_without_cycles_fails() {
 fn another_salt_fails_the_commitment() {
     let mut proof = opened();
     proof.opening.as_mut().unwrap().salt = "11".repeat(32);
-    let report = replayed(&proof);
-    assert_eq!(failed(&report).len(), 1);
-    assert!(failed(&report)[0].contains("another commitment"));
+    let report = check(&proof);
+    assert_report_fails(&report, &[UNCOVERED, "another commitment"]);
     assert_eq!(report.skipped, 1);
 }
 
@@ -140,7 +136,7 @@ fn another_salt_fails_the_commitment() {
 fn a_short_salt_fails_the_commitment() {
     let mut proof = opened();
     proof.opening.as_mut().unwrap().salt = "11".to_string();
-    assert_replay_fails(&proof, &["32 bytes"]);
+    assert_opened_fails(&proof, &["32 bytes"]);
 }
 
 #[test]
@@ -148,14 +144,14 @@ fn parameters_that_are_not_canonical_fail() {
     let mut proof = opened();
     let opening = proof.opening.as_mut().unwrap();
     opening.params = format!(" {}", opening.params);
-    assert_replay_fails(&proof, &["not canonical"]);
+    assert_opened_fails(&proof, &["not canonical"]);
 }
 
 #[test]
 fn another_commitment_on_chain_fails_the_binding_too() {
     let mut proof = opened();
     proof.commitment = "00".repeat(32);
-    assert_replay_fails(&proof, &["another commitment", "binding"]);
+    assert_opened_fails(&proof, &["another commitment", "binding"]);
 }
 
 #[test]
@@ -172,7 +168,7 @@ fn a_changed_amount_is_caught_by_the_replay_and_the_quote() {
     change(&mut attested);
     change(&mut sealed);
     assert_fails(&attested, &["output hash"]);
-    assert_replay_fails(&sealed, &["replay"]);
+    assert_opened_fails(&sealed, &["replay"]);
 }
 
 #[test]
@@ -199,7 +195,7 @@ fn a_changed_price_is_caught_by_the_digest_and_the_quote() {
 fn a_proof_for_another_vault_fails_the_binding() {
     let mut proof = opened();
     proof.vault = "other.testnet".to_string();
-    assert_replay_fails(&proof, &["another commitment", "binding"]);
+    assert_opened_fails(&proof, &["another commitment", "binding"]);
 }
 
 #[test]

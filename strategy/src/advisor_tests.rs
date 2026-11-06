@@ -99,13 +99,13 @@ fn hosts_called(ai_key: Option<&str>, broken: &'static [&'static str]) -> Vec<&'
     hosts
 }
 
-fn chat_call_of(ai_key: &str) -> (Option<String>, serde_json::Value) {
+fn chat_call_of(ai_key: &str) -> (Vec<(&'static str, String)>, serde_json::Value) {
     let mut seen = None;
     let mut inner = world(&[]);
     observe(&secret(Some(ai_key)), |call: &Call| {
         if call.host == CHAT_HOST {
             seen = Some((
-                call.bearer.map(str::to_string),
+                call.headers.clone(),
                 serde_json::from_str(call.body.as_deref().unwrap()).unwrap(),
             ));
         }
@@ -383,7 +383,7 @@ fn the_key_goes_only_to_the_chat_host() {
     let mut carried = Vec::new();
     let mut inner = world(&[]);
     observe(&secret(Some(KEY)), |call: &Call| {
-        if call.bearer.is_some() {
+        if !call.headers.is_empty() {
             carried.push(call.host);
         }
         inner(call)
@@ -394,10 +394,18 @@ fn the_key_goes_only_to_the_chat_host() {
 
 #[test]
 fn the_key_stays_out_of_the_request_body() {
-    let (bearer, body) = chat_call_of(KEY);
+    let (headers, body) = chat_call_of(KEY);
 
-    assert_eq!(bearer.as_deref(), Some(KEY));
+    assert!(headers.contains(&("authorization", format!("Bearer {KEY}"))));
     assert!(!body.to_string().contains(KEY));
+}
+
+#[test]
+fn the_chat_call_asks_for_the_model_it_names() {
+    // Without it the gateway may answer from another model, whose TEE did not sign.
+    let (headers, _) = chat_call_of(KEY);
+
+    assert!(headers.contains(&("x-no-aliasing", "true".to_string())));
 }
 
 #[test]
@@ -426,6 +434,88 @@ fn the_request_can_be_signed_and_stays_deterministic() {
     assert_eq!(body["model"], MODELS[0]);
     assert_eq!(body["stream"], false);
     assert_eq!(body["temperature"], 0);
+}
+
+/// The chat bodies a run sends, with the first model answering `first` when given.
+fn chat_bodies(first: Option<&'static str>, broken: &'static [&'static str]) -> (Option<Observed>, Vec<serde_json::Value>) {
+    let mut bodies = Vec::new();
+    let mut inner = world(broken);
+    let reading = observe(&secret(Some(KEY)), |call: &Call| {
+        if call.host != CHAT_HOST {
+            return inner(call);
+        }
+        let body: serde_json::Value = serde_json::from_str(call.body.as_deref().unwrap()).unwrap();
+        let asked_first = body["model"] == MODELS[0];
+        bodies.push(body);
+        match first {
+            Some(content) if asked_first => Some(chat_reply(content)),
+            _ => inner(call),
+        }
+    });
+    (reading, bodies)
+}
+
+#[test]
+fn a_bad_answer_from_the_first_model_is_not_asked_again() {
+    let fenced = "```json\n{\"risk_flag\":true,\"confidence\":95}\n```";
+
+    let (reading, bodies) = chat_bodies(Some(fenced), &[]);
+
+    assert_eq!(reading.unwrap().obs.ai_flag, AI_SILENT);
+    assert_eq!(bodies.len(), 1);
+}
+
+#[test]
+fn the_first_model_reasons_only_briefly() {
+    let (_, bodies) = chat_bodies(None, &[]);
+
+    assert_eq!(bodies[0]["model"], MODELS[0]);
+    assert_eq!(bodies[0]["reasoning_effort"], "low");
+    assert!(bodies[0].get("chat_template_kwargs").is_none());
+}
+
+#[test]
+fn the_second_model_does_not_reason() {
+    let (_, bodies) = chat_bodies(None, &[MODELS[0]]);
+
+    assert_eq!(bodies[1]["model"], MODELS[1]);
+    assert_eq!(bodies[1]["chat_template_kwargs"]["enable_thinking"], false);
+    assert!(bodies[1].get("reasoning_effort").is_none());
+}
+
+#[test]
+fn the_answer_has_room_after_brief_reasoning() {
+    let (_, bodies) = chat_bodies(None, &[]);
+
+    assert!(bodies[0]["max_tokens"].as_u64().unwrap() >= 256);
+}
+
+#[test]
+fn a_reply_whose_reasoning_ran_out_is_not_an_answer() {
+    let reply = json!({"id": CHAT_ID, "choices": [{"finish_reason": "length",
+        "message": {"content": null, "reasoning_content": "Let me think"}}]})
+    .to_string();
+
+    assert!(read_advice(reply.as_bytes()).is_none());
+}
+
+#[test]
+fn a_blank_title_is_skipped() {
+    let feed = "<item><title>   </title></item><item><title> Kept </title></item>";
+
+    assert_eq!(read_titles(feed.as_bytes()).unwrap(), ["Kept"]);
+}
+
+#[test]
+fn a_feed_of_blank_titles_is_no_feed() {
+    assert_eq!(read_titles(b"<item><title> </title></item>"), None);
+}
+
+#[test]
+fn cdata_with_space_around_it_is_unwrapped() {
+    let feed = "<item><title>\n  <![CDATA[Bridge drained]]>\n</title></item>";
+
+    assert_eq!(read_titles(feed.as_bytes()).unwrap(), ["Bridge drained"]);
 }
 
 #[test]

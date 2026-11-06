@@ -27,11 +27,22 @@ const PRICE_ONE: u128 = 100_000_000;
 const WNEAR_UNITS_PER_USDC_UNIT: u128 = 1_000_000_000_000_000_000;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
-pub struct Call<'a> {
+/// Each call of a run waits at most this long, so a stalled source leaves time for the
+/// fallback after it instead of taking the whole run.
+pub const CALL_BUDGET_NANOS: u64 = 12_000_000_000;
+
+pub struct Call {
     pub host: &'static str,
     pub path: &'static str,
     pub body: Option<String>,
-    pub bearer: Option<&'a str>,
+    /// Sent as given. Only the advisor's chat call carries any, so the key and NEAR AI's
+    /// own header stay out of every other request.
+    pub headers: Vec<(&'static str, String)>,
+}
+
+/// When one call has to give up: its own slice, never past the run's deadline.
+pub fn call_deadline(now: u64, run_deadline: u64) -> u64 {
+    run_deadline.min(now.saturating_add(CALL_BUDGET_NANOS))
 }
 
 #[derive(Deserialize)]
@@ -84,22 +95,22 @@ pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<
     })
 }
 
-fn rpc_call(method: &str, params: Value) -> Call<'static> {
+fn rpc_call(method: &str, params: Value) -> Call {
     let body = json!({ "jsonrpc": "2.0", "id": "foundling", "method": method, "params": params });
     Call {
         host: RPC_HOST,
         path: RPC_PATH,
         body: Some(body.to_string()),
-        bearer: None,
+        headers: Vec::new(),
     }
 }
 
-fn block_call() -> Call<'static> {
+fn block_call() -> Call {
     rpc_call("block", json!({ "finality": "final" }))
 }
 
 /// Pinned to a height, and `pool_spot` checks the reply, so `ta` is the time of this price.
-fn pool_call(height: u64) -> Call<'static> {
+fn pool_call(height: u64) -> Call {
     rpc_call(
         "query",
         json!({
@@ -112,12 +123,12 @@ fn pool_call(height: u64) -> Call<'static> {
     )
 }
 
-fn trades_call() -> Call<'static> {
+fn trades_call() -> Call {
     Call {
         host: TRADE_HOST,
         path: TRADE_PATH,
         body: None,
-        bearer: None,
+        headers: Vec::new(),
     }
 }
 

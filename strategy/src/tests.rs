@@ -12,7 +12,8 @@ const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
-const DECISION_TARGET_BYTES: usize = 720;
+/// A full-cap sell with every field at its longest is 736 bytes; the vault's hard limit is 1024.
+const DECISION_TARGET_BYTES: usize = 768;
 const PROMPT: &str = "Classify the headlines.";
 const TIME_OF_OBS: u64 = 12;
 const MAX_ACCOUNT_BYTES: usize = 64;
@@ -638,6 +639,47 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
 }
 
 #[test]
+fn the_largest_decision_stays_under_the_target_size() {
+    // A full-cap sell with every variable field at its longest: a 64-byte vault, hash and
+    // chat id, ten-digit prices and a six-digit nonce.
+    let price: u128 = 9_700_000_000;
+    let cap = "4000000000000000000000000";
+    let input_data = INPUT
+        .replace(
+            r#""vault":"vault.owner.near""#,
+            &format!(r#""vault":"{}""#, "v".repeat(MAX_ACCOUNT_BYTES)),
+        )
+        .replace(r#""nonce":1"#, r#""nonce":123456"#)
+        .replace(r#""wnear_book":"0""#, &format!(r#""wnear_book":"{cap}""#));
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["wasm_hash"] = json!("b".repeat(HASH_HEX_BYTES));
+    secret["params"]["risk_on_above"] = json!("9900000000");
+    secret["params"]["risk_off_below"] = json!("9800000000");
+    secret["params"]["sell_wnear"] = json!(cap);
+    let reading = Observed {
+        obs: Obs {
+            pa: price,
+            pb: price,
+            ta: FIXTURE_NOW,
+            tb: FIXTURE_NOW,
+            ai_flag: AI_CLEAR,
+            ai_conf: 100,
+        },
+        ai_ref: AiRef {
+            chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
+            resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+        },
+    };
+
+    let decision = respond(&input_data, Some(&secret.to_string()), |_, _| Some(reading)).unwrap();
+
+    assert_eq!(decision.action, Action::SellRisk);
+    assert_eq!(decision.amount_in.to_string().len(), cap.len());
+    let size = serde_json::to_string(&decision).unwrap().len();
+    assert!(size <= DECISION_TARGET_BYTES, "{size}");
+}
+
+#[test]
 fn the_commitment_matches_an_independent_implementation() {
     let value = commitment("testnet", VAULT, "bb", &params(), &salt());
 
@@ -758,6 +800,26 @@ fn the_key_stays_out_of_the_decision() {
         .contains("the-key"));
 }
 
+fn secret_with_key(key: &str) -> String {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["ai_key"] = json!(key);
+    secret.to_string()
+}
+
+fn answers_with_secret(secret: &str) -> bool {
+    let decision = respond(INPUT, Some(secret), observed(431_000_000)).unwrap();
+    decision.commitment == KNOWN_COMMITMENT
+}
+
+/// A prompt whose published params come to exactly `size` bytes.
+fn prompt_for_params_of(size: usize) -> String {
+    let empty = Params {
+        prompt: String::new(),
+        ..params()
+    };
+    "p".repeat(size - empty.canonical().len())
+}
+
 #[test]
 fn a_secret_without_a_key_still_answers() {
     let decision = respond(INPUT, Some(&secret_json()), observed(431_000_000)).unwrap();
@@ -766,22 +828,73 @@ fn a_secret_without_a_key_still_answers() {
 }
 
 #[test]
+fn a_well_formed_key_is_accepted() {
+    assert!(answers_with_secret(&secret_with_key("sk-Abc_123.xyz")));
+}
+
+#[test]
+fn a_key_that_cannot_be_sent_is_refused() {
+    for key in ["", "sk-abc\n", "sk-abc\r\n", "sk abc", "sk-ä"] {
+        assert!(!answers_with_secret(&secret_with_key(key)), "{key:?}");
+    }
+}
+
+#[test]
+fn a_key_too_long_for_a_header_is_refused() {
+    assert!(!answers_with_secret(&secret_with_key(
+        &"k".repeat(MAX_KEY_BYTES + 1)
+    )));
+}
+
+#[test]
 fn a_prompt_is_required() {
     refuses_param("prompt", "");
 }
 
 #[test]
-fn a_prompt_too_long_for_reveal_is_refused() {
-    refuses_param("prompt", &"p".repeat(MAX_PROMPT_BYTES + 1));
+fn the_reveal_limit_is_the_vaults() {
+    let vault = include_str!("../../contracts/vault/src/reveal.rs");
+
+    assert!(vault.contains("pub const MAX_PARAMS_BYTES: usize = 8 * 1024;"));
+    assert_eq!(MAX_PARAMS_BYTES, 8 * 1024);
 }
 
 #[test]
-fn the_longest_prompt_passes() {
-    let secret = secret_with_param("prompt", &"p".repeat(MAX_PROMPT_BYTES));
+fn params_that_fill_the_reveal_limit_pass() {
+    let secret = secret_with_param("prompt", &prompt_for_params_of(MAX_PARAMS_BYTES));
 
     let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
 
     assert_ne!(decision.commitment, "");
+}
+
+#[test]
+fn params_past_the_reveal_limit_are_refused() {
+    refuses_param("prompt", &prompt_for_params_of(MAX_PARAMS_BYTES + 1));
+}
+
+#[test]
+fn the_reveal_limit_counts_escaped_bytes() {
+    // Each newline is published as two bytes.
+    refuses_param("prompt", &"\n".repeat(MAX_PARAMS_BYTES / 2));
+}
+
+#[test]
+fn newlines_and_tabs_are_allowed_in_a_prompt() {
+    let secret = secret_with_param("prompt", "Line one.\n\tLine two.");
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_ne!(decision.commitment, "");
+}
+
+#[test]
+fn a_prompt_outside_printable_ascii_is_refused() {
+    // Python's json.dumps escapes these where serde_json does not, so a sealing script
+    // and the WASM would commit to different bytes.
+    for prompt in ["Don\u{2019}t buy", "caf\u{e9}", "a\u{7f}b", "a\u{1}b", "a\rb"] {
+        refuses_param("prompt", prompt);
+    }
 }
 
 #[test]

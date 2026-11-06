@@ -2,7 +2,7 @@
 //! process, so every crate left out is one that cannot read it, and a ready-made client has
 //! neither the deadline nor the size cap below.
 
-use foundling_strategy::sources::Call;
+use foundling_strategy::sources::{call_deadline, Call};
 use foundling_strategy::{advisor, Input, Observed, Secret};
 use wasip2::clocks::monotonic_clock;
 use wasip2::http::outgoing_handler;
@@ -14,22 +14,19 @@ use wasip2::io::streams::StreamError;
 
 const STATUS_OK: u16 = 200;
 const JSON_HEADER: (&str, &[u8]) = ("content-type", b"application/json");
-/// Without this the gateway may swap the model, and the reply would not be signed by it.
-const NO_ALIASING_HEADER: (&str, &[u8]) = ("x-no-aliasing", b"true");
-const AUTHORIZATION: &str = "authorization";
-/// The most `blocking_write_and_flush` takes in one call.
-const WRITE_CHUNK_BYTES: usize = 4096;
 /// A block reply is about 20 KB and grows with the shard count.
 const MAX_REPLY_BYTES: usize = 256 * 1024;
 const READ_CHUNK_BYTES: u64 = 16 * 1024;
 /// Every read of a run together, on the WASM's own clock: a host timeout starts over at each
 /// stage, so a slow drip could outlast it. Running out ends in a hold, well before the
-/// vault's execution limit would turn the run into a `null`.
+/// vault's execution limit (45 seconds in SPEC) would turn the run into a `null`.
 const RUN_BUDGET_NANOS: u64 = 30_000_000_000;
 
 pub fn observe(secret: &Secret, _input: &Input) -> Option<Observed> {
-    let deadline = monotonic_clock::now() + RUN_BUDGET_NANOS;
-    advisor::observe(secret, |call| send(call, deadline))
+    let run_deadline = monotonic_clock::now() + RUN_BUDGET_NANOS;
+    advisor::observe(secret, |call| {
+        send(call, call_deadline(monotonic_clock::now(), run_deadline))
+    })
 }
 
 fn send(call: &Call, deadline: u64) -> Option<Vec<u8>> {
@@ -46,12 +43,8 @@ fn request(call: &Call, deadline: u64) -> Option<IncomingResponse> {
         let (name, value) = JSON_HEADER;
         headers.append(name, value).ok()?;
     }
-    if let Some(key) = call.bearer {
-        let (name, value) = NO_ALIASING_HEADER;
-        headers.append(name, value).ok()?;
-        headers
-            .append(AUTHORIZATION, format!("Bearer {key}").as_bytes())
-            .ok()?;
+    for (name, value) in &call.headers {
+        headers.append(name, value.as_bytes()).ok()?;
     }
     let outgoing = OutgoingRequest::new(headers);
     let method = match call.body {
@@ -62,19 +55,33 @@ fn request(call: &Call, deadline: u64) -> Option<IncomingResponse> {
     outgoing.set_scheme(Some(&Scheme::Https)).ok()?;
     outgoing.set_authority(Some(call.host)).ok()?;
     outgoing.set_path_with_query(Some(call.path)).ok()?;
-    write_body(&outgoing, call.body.as_deref())?;
+    let body = outgoing.body().ok()?;
     let pending = outgoing_handler::handle(outgoing, None).ok()?;
+    write_body(body, call.body.as_deref(), deadline)?;
     wait_for(&pending.subscribe(), deadline)?;
     pending.get()?.ok()?.ok()
 }
 
-fn write_body(outgoing: &OutgoingRequest, body: Option<&str>) -> Option<()> {
-    let writer = outgoing.body().ok()?;
+/// After `handle`, so the host drains the body as it is written: a host that buffers one
+/// write before the request starts (wasmtime's default) blocks a second one for good, and
+/// no deadline reaches inside a blocking call. Each write waits for room on the run's clock.
+fn write_body(writer: OutgoingBody, body: Option<&str>, deadline: u64) -> Option<()> {
     if let Some(body) = body {
         let stream = writer.write().ok()?;
-        for chunk in body.as_bytes().chunks(WRITE_CHUNK_BYTES) {
-            stream.blocking_write_and_flush(chunk).ok()?;
+        let ready = stream.subscribe();
+        let mut rest = body.as_bytes();
+        while !rest.is_empty() {
+            wait_for(&ready, deadline)?;
+            let room = usize::try_from(stream.check_write().ok()?).ok()?;
+            let (now, later) = rest.split_at(room.min(rest.len()));
+            stream.write(now).ok()?;
+            rest = later;
         }
+        stream.flush().ok()?;
+        wait_for(&ready, deadline)?;
+        stream.check_write().ok()?;
+        drop(ready);
+        drop(stream);
     }
     OutgoingBody::finish(writer, None).ok()
 }

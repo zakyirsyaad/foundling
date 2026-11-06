@@ -67,6 +67,13 @@ class VerifyOffline(unittest.TestCase):
         result = verify.check_commitment(json.loads(RUST_VECTOR.read_text(encoding="utf-8")))
         self.assertEqual(result.status, "PASS")
 
+    def test_the_bundle_vector_is_the_rust_vector(self):
+        # Two copies of one vector drift apart silently, as they did when `prompt` was added.
+        bundle = load("commitment.json")
+        rust = json.loads(RUST_VECTOR.read_text(encoding="utf-8"))
+        for field in ("chain", "vault", "wasm_hash", "params", "salt", "commitment"):
+            self.assertEqual(bundle[field], rust[field], field)
+
     def test_verify_commitment_check_fail_on_tampered_fixture(self):
         tampered = copy.deepcopy(load("commitment.json"))
         tampered["params"] = tampered["params"].replace("1000", "9999")

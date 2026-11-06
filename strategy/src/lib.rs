@@ -10,8 +10,11 @@ const DECISION_VERSION: u32 = 1;
 const INPUT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 32;
 const BPS: u128 = 10_000;
-/// `reveal` publishes the prompt, so its size is part of what that call has to carry.
-const MAX_PROMPT_BYTES: usize = 2_000;
+/// The vault's `reveal` refuses canonical params longer than this
+/// (`contracts/vault/src/reveal.rs`), so params past it could never be opened.
+const MAX_PARAMS_BYTES: usize = 8 * 1024;
+/// Far above any NEAR AI key, and well inside what a header can carry.
+const MAX_KEY_BYTES: usize = 256;
 /// Older than this, a source counts as dead. A quiet market can go two minutes without a trade.
 const MAX_SOURCE_AGE_SECONDS: u64 = 300;
 #[cfg(feature = "rehearsal")]
@@ -63,7 +66,9 @@ pub struct Params {
 
 // Canonical forms are fixed text, not serde output: any crate in a build can switch on
 // `serde_json/preserve_order`, near-sdk does, and that changes key order. The vault's
-// `reveal` has to produce these same bytes.
+// `reveal` has to produce these same bytes. The one string, the prompt, is a JSON string
+// escaped the serde_json way; `is_sound` keeps it to printable ASCII, newline and tab,
+// where that escaping is byte for byte Python's `json.dumps`.
 impl Params {
     pub fn canonical(&self) -> String {
         format!(
@@ -85,8 +90,19 @@ impl Params {
             && self.sell_wnear > 0
             && (1..=BPS).contains(&self.source_dev_bps)
             && !self.prompt.is_empty()
-            && self.prompt.len() <= MAX_PROMPT_BYTES
+            && self.prompt.bytes().all(is_prompt_byte)
+            && self.canonical().len() <= MAX_PARAMS_BYTES
     }
+}
+
+fn is_prompt_byte(byte: u8) -> bool {
+    byte == b'\n' || byte == b'\t' || (b' '..=b'~').contains(&byte)
+}
+
+/// A key goes into an `authorization` header as is, so one that cannot be sent there would
+/// leave the advisor silent for the life of the vault without anything to show for it.
+fn is_sendable_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= MAX_KEY_BYTES && key.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -329,7 +345,7 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
 
 fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
     let secret: Secret = serde_json::from_str(raw).ok()?;
-    if !secret.params.is_sound() {
+    if !secret.params.is_sound() || !secret.ai_key.as_deref().is_none_or(is_sendable_key) {
         return None;
     }
     let salt = from_hex(&secret.salt).filter(|salt| salt.len() == SALT_BYTES)?;

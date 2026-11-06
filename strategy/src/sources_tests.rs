@@ -1,6 +1,9 @@
 use serde_json::json;
 
-use super::sources::{observe_market, parse_decimal, pool_spot, read_block, read_trades, Call};
+use super::sources::{
+    call_deadline, observe_market, parse_decimal, pool_spot, read_block, read_trades, Call,
+    CALL_BUDGET_NANOS,
+};
 use super::AI_SILENT;
 
 // Raw replies, read on 2026-11-01. The trades were asked with `count=3` to stay short.
@@ -296,4 +299,26 @@ fn any_source_that_fails_ends_the_reading() {
     for name in ["trade", "block", "pool"] {
         assert_eq!(observe_market(network(Some(name))), None, "{name}");
     }
+}
+
+#[test]
+fn a_call_gets_its_own_slice_of_the_run() {
+    let run_deadline = 30_000_000_000;
+
+    assert_eq!(call_deadline(0, run_deadline), CALL_BUDGET_NANOS);
+}
+
+#[test]
+fn a_call_never_outlives_the_run() {
+    let run_deadline = 30_000_000_000;
+
+    assert_eq!(call_deadline(run_deadline - 1, run_deadline), run_deadline);
+}
+
+#[test]
+fn a_stalled_first_call_leaves_time_for_the_next() {
+    let run_deadline = 30_000_000_000;
+    let after_first = call_deadline(0, run_deadline);
+
+    assert!(call_deadline(after_first, run_deadline) > after_first);
 }
