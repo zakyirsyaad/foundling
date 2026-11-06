@@ -162,7 +162,7 @@ jobs:
       - name: Test
         run: python3 -m unittest tests.test_attack_lab
       - name: Test the sandbox attack runner and the make targets
-        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make
+        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make tests.test_attack_batch2
 
   keeper:
     name: Keeper bot
@@ -488,6 +488,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
       - name: Build the WASM the sandbox attacks deploy
         run: make wasm
+      - name: Compile the sandbox attack tests and fetch neard
+        run: make attack-warm
       - name: Run every core attack
         run: |
           status=0
