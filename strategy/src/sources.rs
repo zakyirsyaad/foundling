@@ -27,10 +27,22 @@ const PRICE_ONE: u128 = 100_000_000;
 const WNEAR_UNITS_PER_USDC_UNIT: u128 = 1_000_000_000_000_000_000;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
+/// Each call of a run waits at most this long, so a stalled source leaves time for the
+/// fallback after it instead of taking the whole run.
+pub const CALL_BUDGET_NANOS: u64 = 12_000_000_000;
+
 pub struct Call {
     pub host: &'static str,
     pub path: &'static str,
     pub body: Option<String>,
+    /// Sent as given. Only the advisor's chat call carries any, so the key and NEAR AI's
+    /// own header stay out of every other request.
+    pub headers: Vec<(&'static str, String)>,
+}
+
+/// When one call has to give up: its own slice, never past the run's deadline.
+pub fn call_deadline(now: u64, run_deadline: u64) -> u64 {
+    run_deadline.min(now.saturating_add(CALL_BUDGET_NANOS))
 }
 
 #[derive(Deserialize)]
@@ -67,8 +79,8 @@ struct Pool {
     amounts: Vec<String>,
 }
 
-/// A source that fails ends the reading, and the strategy holds. The advisor is not wired
-/// in yet, so this reading can record prices but cannot trade.
+/// A source that fails ends the reading, and the strategy holds. The advisor stays silent
+/// here; `advisor::observe` fills it in.
 pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<Obs> {
     let (height, ta) = read_block(&send(&block_call())?)?;
     let pa = pool_spot(&send(&pool_call(height))?, height)?;
@@ -89,6 +101,7 @@ fn rpc_call(method: &str, params: Value) -> Call {
         host: RPC_HOST,
         path: RPC_PATH,
         body: Some(body.to_string()),
+        headers: Vec::new(),
     }
 }
 
@@ -115,6 +128,7 @@ fn trades_call() -> Call {
         host: TRADE_HOST,
         path: TRADE_PATH,
         body: None,
+        headers: Vec::new(),
     }
 }
 

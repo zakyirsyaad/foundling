@@ -1,6 +1,7 @@
 #!/bin/sh
 # Stand-in for foundling-verify. FAKE_VERIFY: ok (default) | nosummary | hang.
 echo "verify $*" >> "${FAKE_LOG:-/dev/null}"
+[ -n "$FAKE_ENV_LOG" ] && echo "verify key=${NEARAI_ARCHIVE_KEY:-none}" >> "$FAKE_ENV_LOG"
 case "${FAKE_VERIFY:-ok}" in
   nosummary) echo "thread main panicked"; exit 0 ;;
   hang) sleep 30; exit 0 ;;

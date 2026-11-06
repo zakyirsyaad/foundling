@@ -50,6 +50,7 @@ Isi setiap baris. Password dibuat acak, misalnya dengan `openssl rand -hex 24`, 
 - `ARCHIVAL_RPC_URLS`: setidaknya satu node arsip, misalnya `https://archival-rpc.mainnet.fastnear.com`. Node ini juga diteruskan ke `fetch_proof.py` sebagai `--rpc`, karena node biasa hanya menyimpan sekitar 17–20 jam.
 - `WEB_ORIGIN`: origin website persis, misalnya `https://foundling.xyz`, tanpa garis miring di akhir.
 - `VERIFIER_COMMIT`: commit yang membangun `wasm_hash` vault aktif, ditulis sebagai SHA penuh 40 karakter, karena git context BuildKit tidak menerima SHA pendek. Commit ini harus sudah ada di GitHub, karena image worker mengambil `cli/` dan `strategy/` dari sana.
+- `NEARAI_ARCHIVE_KEY` (opsional): API key **kedua** dari akun NEAR AI yang kuncinya disegel di vault, bukan kunci itu sendiri. Dengan kunci ini worker mengarsipkan tanda tangan NEAR AI dan laporan attestation tiap siklus di bundle bukti (`cycles[].ai_signature`), sehingga siapa pun bisa memeriksanya tanpa kunci. Hanya `fetch_proof.py` yang menerimanya. Isi hanya bila `VERIFIER_COMMIT` sudah membaca `ai_signature`; verifier yang lebih tua menolak bundle itu.
 
 ## 3. Menyalakan stack, migrasi, dan role
 

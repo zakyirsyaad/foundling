@@ -10,6 +10,11 @@ const DECISION_VERSION: u32 = 1;
 const INPUT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 32;
 const BPS: u128 = 10_000;
+/// The vault's `reveal` refuses canonical params longer than this
+/// (`contracts/vault/src/reveal.rs`), so params past it could never be opened.
+const MAX_PARAMS_BYTES: usize = 8 * 1024;
+/// Far above any NEAR AI key, and well inside what a header can carry.
+const MAX_KEY_BYTES: usize = 256;
 /// Older than this, a source counts as dead. A quiet market can go two minutes without a trade.
 const MAX_SOURCE_AGE_SECONDS: u64 = 300;
 #[cfg(feature = "rehearsal")]
@@ -17,12 +22,15 @@ const REHEARSAL_CHAIN: &str = "testnet";
 
 pub const AI_CLEAR: u8 = 0;
 pub const AI_FLAGGED: u8 = 1;
-/// The advisor gave no valid answer, which ends in a hold whatever the prices say.
+/// The advisor gave no valid answer. Like a raised flag it blocks a buy, and like one it
+/// cannot stop a sell: an answer that a headline can break must not hold a stop-loss.
 pub const AI_SILENT: u8 = 2;
 
+pub mod advisor;
 pub mod sizing;
 pub mod sources;
 
+pub use advisor::Observed;
 pub use sizing::Limits;
 
 /// u128 as a decimal string, the only safe form for JSON readers.
@@ -53,16 +61,21 @@ pub struct Params {
     pub buy_usdc: u128,
     #[serde(with = "decimal")]
     pub sell_wnear: u128,
+    /// Sealed with the numbers: a prompt compiled into a public WASM would be no secret.
+    pub prompt: String,
 }
 
 // Canonical forms are fixed text, not serde output: any crate in a build can switch on
 // `serde_json/preserve_order`, near-sdk does, and that changes key order. The vault's
-// `reveal` has to produce these same bytes.
+// `reveal` has to produce these same bytes. The one string, the prompt, is a JSON string
+// escaped the serde_json way; `is_sound` keeps it to printable ASCII, newline and tab,
+// where that escaping is byte for byte Python's `json.dumps`.
 impl Params {
     pub fn canonical(&self) -> String {
         format!(
-            r#"{{"buy_usdc":"{}","risk_off_below":"{}","risk_on_above":"{}","sell_wnear":"{}","source_dev_bps":"{}"}}"#,
+            r#"{{"buy_usdc":"{}","prompt":{},"risk_off_below":"{}","risk_on_above":"{}","sell_wnear":"{}","source_dev_bps":"{}"}}"#,
             self.buy_usdc,
+            serde_json::Value::from(self.prompt.as_str()),
             self.risk_off_below,
             self.risk_on_above,
             self.sell_wnear,
@@ -77,7 +90,20 @@ impl Params {
             && self.buy_usdc > 0
             && self.sell_wnear > 0
             && (1..=BPS).contains(&self.source_dev_bps)
+            && !self.prompt.is_empty()
+            && self.prompt.bytes().all(is_prompt_byte)
+            && self.canonical().len() <= MAX_PARAMS_BYTES
     }
+}
+
+fn is_prompt_byte(byte: u8) -> bool {
+    byte == b'\n' || byte == b'\t' || (b' '..=b'~').contains(&byte)
+}
+
+/// A key goes into an `authorization` header as is, so one that cannot be sent there would
+/// leave the advisor silent for the life of the vault without anything to show for it.
+fn is_sendable_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= MAX_KEY_BYTES && key.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -132,7 +158,7 @@ impl Obs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Secret {
     pub chain: String,
@@ -140,6 +166,10 @@ pub struct Secret {
     /// 32 bytes in hex.
     pub salt: String,
     pub params: Params,
+    /// Without it the advisor stays silent. It never leaves for anywhere but NEAR AI, and
+    /// `reveal` does not publish it.
+    #[serde(default)]
+    pub ai_key: Option<String>,
     #[cfg(feature = "rehearsal")]
     #[serde(default)]
     pub rehearsal_obs: Option<Obs>,
@@ -173,6 +203,10 @@ pub struct Verdict {
 pub struct AiRef {
     pub chat_id: String,
     pub resp_sig_hash: String,
+    /// Index into `advisor::MODELS` of the model that answered, which NEAR AI's signature
+    /// names and its signature endpoint asks for. Absent while the advisor is silent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -228,7 +262,8 @@ pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
 
 /// Thresholds read `pb` only: the pool price can be pushed by anyone with capital.
 fn regime_of(params: &Params, now: u64, obs: &Obs) -> Regime {
-    if obs.ai_flag > AI_FLAGGED || !sources_agree(obs, now, params.source_dev_bps) {
+    // A flag past `AI_SILENT` can only come from a bug, so it holds everything.
+    if obs.ai_flag > AI_SILENT || !sources_agree(obs, now, params.source_dev_bps) {
         return Regime::Undetermined;
     }
     if obs.pb >= params.risk_on_above {
@@ -297,11 +332,11 @@ fn hash_fields(tag: &[u8], fields: &[&[u8]]) -> String {
         hasher.update((field.len() as u32).to_be_bytes());
         hasher.update(field);
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    to_hex(&hasher.finalize())
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn from_hex(text: &str) -> Option<Vec<u8>> {
@@ -316,7 +351,7 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
 
 fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
     let secret: Secret = serde_json::from_str(raw).ok()?;
-    if !secret.params.is_sound() {
+    if !secret.params.is_sound() || !secret.ai_key.as_deref().is_none_or(is_sendable_key) {
         return None;
     }
     let salt = from_hex(&secret.salt).filter(|salt| salt.len() == SALT_BYTES)?;
@@ -327,16 +362,17 @@ fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
 /// so it holds on every chain but testnet. A secret is sealed once and cannot stay fresh,
 /// so the prices take the vault's clock.
 #[cfg(feature = "rehearsal")]
-pub fn rehearsal_observe(secret: &Secret, input: &Input) -> Option<Obs> {
+pub fn rehearsal_observe(secret: &Secret, input: &Input) -> Option<Observed> {
     if secret.chain != REHEARSAL_CHAIN {
         return None;
     }
     let obs = secret.rehearsal_obs.clone()?;
-    Some(Obs {
+    let stamped = Obs {
         ta: input.now,
         tb: input.now,
         ..obs
-    })
+    };
+    Some(stamped.into())
 }
 
 /// OutLayer runs a binary that has no secret row, just without the secret. This answer
@@ -363,7 +399,7 @@ fn answer_without_secret(input: &Input) -> Decision {
 pub fn respond(
     input_data: &str,
     secret: Option<&str>,
-    observe: impl FnOnce(&Secret, &Input) -> Option<Obs>,
+    observe: impl FnOnce(&Secret, &Input) -> Option<Observed>,
 ) -> Result<Decision, BadInput> {
     let input: Input = serde_json::from_str(input_data).map_err(|_| BadInput)?;
     if input.v != INPUT_VERSION {
@@ -372,9 +408,8 @@ pub fn respond(
     let Some((secret, salt)) = secret.and_then(open_secret) else {
         return Ok(answer_without_secret(&input));
     };
-    let obs = observe(&secret, &input).unwrap_or_else(Obs::unread);
+    let Observed { obs, ai_ref } = observe(&secret, &input).unwrap_or_else(|| Obs::unread().into());
     let verdict = decide(&secret.params, &input, &obs);
-    let ai_ref = AiRef::default();
     Ok(Decision {
         v: DECISION_VERSION,
         chain: secret.chain.clone(),
@@ -398,6 +433,8 @@ pub fn respond(
     })
 }
 
+#[cfg(test)]
+mod advisor_tests;
 #[cfg(test)]
 mod sources_tests;
 #[cfg(test)]

@@ -6,16 +6,19 @@ const VAULT: &str = "vault.owner.near";
 // The vault test `the_input_matches_the_fixture_the_strategy_reads` pins the same file.
 const INPUT: &str = include_str!("../fixtures/input.json");
 // Computed with Python hashlib, independently of this crate.
-const KNOWN_COMMITMENT: &str = "496513afc2402651f0e0402133faf5c0f650395f6eae08d0561ec12825795396";
+const KNOWN_COMMITMENT: &str = "8838dc3c07993aa1f1488bbe99b5c55aafcc86de7445eaf35639f1dd21a4c2f4";
 const KNOWN_DIGEST: &str = "cc4937204b11b6ebf27d23913e8916cd3dac12c715f5a32abce503b9604ea41d";
 const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
-const DECISION_TARGET_BYTES: usize = 600;
+/// A full-cap sell with every field at its longest is 742 bytes; the vault's hard limit is 1024.
+const DECISION_TARGET_BYTES: usize = 768;
+const PROMPT: &str = "Classify the headlines.";
 const TIME_OF_OBS: u64 = 12;
 const MAX_ACCOUNT_BYTES: usize = 64;
 const HASH_HEX_BYTES: usize = 64;
+const MAX_CHAT_ID_BYTES: usize = 64;
 const FIXTURE_NOW: u64 = 1_800_000_000;
 
 fn params() -> Params {
@@ -25,6 +28,7 @@ fn params() -> Params {
         source_dev_bps: 100,
         buy_usdc: 1_000,
         sell_wnear: 2_000,
+        prompt: PROMPT.into(),
     }
 }
 
@@ -104,6 +108,7 @@ fn secret_json() -> String {
             "source_dev_bps": "100",
             "buy_usdc": "1000",
             "sell_wnear": "2000",
+            "prompt": PROMPT,
         },
     })
     .to_string()
@@ -118,8 +123,8 @@ fn fresh_obs(price: u128) -> Obs {
     }
 }
 
-fn observed(pb: u128) -> impl FnOnce(&Secret, &Input) -> Option<Obs> {
-    move |_, _| Some(fresh_obs(pb))
+fn observed(pb: u128) -> impl FnOnce(&Secret, &Input) -> Option<Observed> {
+    move |_, _| Some(fresh_obs(pb).into())
 }
 
 #[test]
@@ -271,7 +276,7 @@ fn a_zero_scale_holds() {
 
 #[test]
 fn canonical_params_are_fixed_text() {
-    let expected = r#"{"buy_usdc":"1000","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
+    let expected = r#"{"buy_usdc":"1000","prompt":"Classify the headlines.","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
 
     assert_eq!(params().canonical(), expected);
 }
@@ -453,13 +458,27 @@ fn a_silent_advisor_holds_a_buy() {
 
     let verdict = decide(&params(), &input(), &silent);
 
-    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.regime, Regime::RiskOn);
     assert_eq!(verdict.action, Action::None);
 }
 
+// Lead decision 2026-11-07: a headline that breaks the advisor's answer must not also
+// withhold a stop-loss. A sell only lowers exposure, and the two price sources still have
+// to agree for it.
 #[test]
-fn a_silent_advisor_holds_a_sell() {
+fn a_silent_advisor_cannot_stop_a_sell() {
     let mut silent = obs(390_000_000, 390_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::RiskOff);
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_silent_advisor_still_needs_the_sources_to_agree_for_a_sell() {
+    let mut silent = obs(390_000_000, 300_000_000);
     silent.ai_flag = AI_SILENT;
 
     let verdict = decide(&params(), &input(), &silent);
@@ -588,7 +607,7 @@ fn the_market_alone_cannot_trade_while_the_advisor_is_silent() {
     };
 
     let decision = respond(INPUT, Some(&secret_json()), |_, _| {
-        sources::observe_market(reply)
+        sources::observe_market(reply).map(Into::into)
     })
     .unwrap();
 
@@ -617,10 +636,61 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
         &format!(r#""wasm_hash":"{}""#, "b".repeat(HASH_HEX_BYTES)),
     );
 
-    let decision = respond(&input_data, Some(&secret), |_, _| Some(market)).unwrap();
+    let reading = Observed {
+        obs: market,
+        ai_ref: AiRef {
+            chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
+            resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+            m: Some(1),
+        },
+    };
+
+    let decision = respond(&input_data, Some(&secret), |_, _| Some(reading)).unwrap();
 
     assert_eq!(decision.vault.len(), MAX_ACCOUNT_BYTES);
     assert_eq!(decision.wasm_hash.len(), HASH_HEX_BYTES);
+    let size = serde_json::to_string(&decision).unwrap().len();
+    assert!(size <= DECISION_TARGET_BYTES, "{size}");
+}
+
+#[test]
+fn the_largest_decision_stays_under_the_target_size() {
+    // A full-cap sell with every variable field at its longest: a 64-byte vault, hash and
+    // chat id, ten-digit prices and a six-digit nonce.
+    let price: u128 = 9_700_000_000;
+    let cap = "4000000000000000000000000";
+    let input_data = INPUT
+        .replace(
+            r#""vault":"vault.owner.near""#,
+            &format!(r#""vault":"{}""#, "v".repeat(MAX_ACCOUNT_BYTES)),
+        )
+        .replace(r#""nonce":1"#, r#""nonce":123456"#)
+        .replace(r#""wnear_book":"0""#, &format!(r#""wnear_book":"{cap}""#));
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["wasm_hash"] = json!("b".repeat(HASH_HEX_BYTES));
+    secret["params"]["risk_on_above"] = json!("9900000000");
+    secret["params"]["risk_off_below"] = json!("9800000000");
+    secret["params"]["sell_wnear"] = json!(cap);
+    let reading = Observed {
+        obs: Obs {
+            pa: price,
+            pb: price,
+            ta: FIXTURE_NOW,
+            tb: FIXTURE_NOW,
+            ai_flag: AI_CLEAR,
+            ai_conf: 100,
+        },
+        ai_ref: AiRef {
+            chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
+            resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
+            m: Some(1),
+        },
+    };
+
+    let decision = respond(&input_data, Some(&secret.to_string()), |_, _| Some(reading)).unwrap();
+
+    assert_eq!(decision.action, Action::SellRisk);
+    assert_eq!(decision.amount_in.to_string().len(), cap.len());
     let size = serde_json::to_string(&decision).unwrap().len();
     assert!(size <= DECISION_TARGET_BYTES, "{size}");
 }
@@ -718,6 +788,152 @@ fn the_decision_has_the_wire_shape_the_vault_reads() {
 }
 
 #[test]
+fn the_reference_of_a_reading_reaches_the_decision() {
+    let reading = Observed {
+        obs: fresh_obs(431_000_000),
+        ai_ref: AiRef {
+            chat_id: "chat".into(),
+            resp_sig_hash: "abc".into(),
+            m: Some(0),
+        },
+    };
+    let expected = inputs_digest(INPUT, &reading.obs, "abc");
+
+    let decision = respond(INPUT, Some(&secret_json()), |_, _| Some(reading)).unwrap();
+
+    assert_eq!(decision.ai_ref.chat_id, "chat");
+    assert_eq!(decision.inputs_digest, expected);
+}
+
+#[test]
+fn the_key_stays_out_of_the_decision() {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["ai_key"] = json!("the-key");
+
+    let decision = respond(INPUT, Some(&secret.to_string()), observed(431_000_000)).unwrap();
+
+    assert!(!serde_json::to_string(&decision)
+        .unwrap()
+        .contains("the-key"));
+}
+
+fn secret_with_key(key: &str) -> String {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["ai_key"] = json!(key);
+    secret.to_string()
+}
+
+fn answers_with_secret(secret: &str) -> bool {
+    let decision = respond(INPUT, Some(secret), observed(431_000_000)).unwrap();
+    decision.commitment == KNOWN_COMMITMENT
+}
+
+/// A prompt whose published params come to exactly `size` bytes.
+fn prompt_for_params_of(size: usize) -> String {
+    let empty = Params {
+        prompt: String::new(),
+        ..params()
+    };
+    "p".repeat(size - empty.canonical().len())
+}
+
+#[test]
+fn a_secret_without_a_key_still_answers() {
+    let decision = respond(INPUT, Some(&secret_json()), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, KNOWN_COMMITMENT);
+}
+
+#[test]
+fn a_well_formed_key_is_accepted() {
+    assert!(answers_with_secret(&secret_with_key("sk-Abc_123.xyz")));
+}
+
+#[test]
+fn a_key_that_cannot_be_sent_is_refused() {
+    for key in ["", "sk-abc\n", "sk-abc\r\n", "sk abc", "sk-ä"] {
+        assert!(!answers_with_secret(&secret_with_key(key)), "{key:?}");
+    }
+}
+
+#[test]
+fn a_key_too_long_for_a_header_is_refused() {
+    assert!(!answers_with_secret(&secret_with_key(
+        &"k".repeat(MAX_KEY_BYTES + 1)
+    )));
+}
+
+#[test]
+fn a_prompt_is_required() {
+    refuses_param("prompt", "");
+}
+
+#[test]
+fn the_reveal_limit_is_the_vaults() {
+    let vault = include_str!("../../contracts/vault/src/reveal.rs");
+
+    assert!(vault.contains("pub const MAX_PARAMS_BYTES: usize = 8 * 1024;"));
+    assert_eq!(MAX_PARAMS_BYTES, 8 * 1024);
+}
+
+#[test]
+fn params_that_fill_the_reveal_limit_pass() {
+    let secret = secret_with_param("prompt", &prompt_for_params_of(MAX_PARAMS_BYTES));
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_ne!(decision.commitment, "");
+}
+
+#[test]
+fn params_past_the_reveal_limit_are_refused() {
+    refuses_param("prompt", &prompt_for_params_of(MAX_PARAMS_BYTES + 1));
+}
+
+#[test]
+fn the_reveal_limit_counts_escaped_bytes() {
+    // Each newline is published as two bytes.
+    refuses_param("prompt", &"\n".repeat(MAX_PARAMS_BYTES / 2));
+}
+
+#[test]
+fn newlines_and_tabs_are_allowed_in_a_prompt() {
+    let secret = secret_with_param("prompt", "Line one.\n\tLine two.");
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_ne!(decision.commitment, "");
+}
+
+#[test]
+fn a_prompt_outside_printable_ascii_is_refused() {
+    // Python's json.dumps escapes these where serde_json does not, so a sealing script
+    // and the WASM would commit to different bytes.
+    for prompt in [
+        "Don\u{2019}t buy",
+        "caf\u{e9}",
+        "a\u{7f}b",
+        "a\u{1}b",
+        "a\rb",
+    ] {
+        refuses_param("prompt", prompt);
+    }
+}
+
+#[test]
+fn a_prompt_with_quotes_stays_canonical_json() {
+    let quoted = Params {
+        prompt: "Say \"yes\".\nThen stop.".into(),
+        ..params()
+    };
+
+    let text = quoted.canonical();
+
+    let parsed: Params = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed, quoted);
+}
+
+#[test]
 fn a_decision_fits_the_target_size() {
     let long_vault = format!("{}.fdl-m3-738321.testnet", "v".repeat(20));
     let input = INPUT.replace(VAULT, &long_vault);
@@ -726,7 +942,7 @@ fn a_decision_fits_the_target_size() {
 
     let decision = respond(&input, Some(&secret), observed(431_000_000)).unwrap();
 
-    assert!(serde_json::to_vec(&decision).unwrap().len() <= 600);
+    assert!(serde_json::to_vec(&decision).unwrap().len() <= DECISION_TARGET_BYTES);
 }
 
 #[test]

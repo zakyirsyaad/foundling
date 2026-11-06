@@ -1,6 +1,7 @@
 //! Offline checks of a Foundling proof file, for `verify.py` and anyone who wants to repeat
 //! them. The quote signature and the replay need Rust; everything else lives in `verify.py`.
 
+pub mod ai_signature;
 pub mod attestation;
 pub mod hex;
 pub mod proof;
@@ -23,6 +24,7 @@ pub fn check(proof: &Proof) -> Report {
             &mut report,
         ));
         attestation::check_cycle(proof, cycle, &mut report);
+        ai_signature::check_cycle(cycle, &mut report);
     }
     if params.is_some() {
         report

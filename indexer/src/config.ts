@@ -30,6 +30,8 @@ const envSchema = z.object({
   TOOLS_DIR: z.string().min(1).optional(),
   VERIFY_BIN: z.string().min(1).default("foundling-verify"),
   PYTHON: z.string().min(1).default("python3"),
+  // A second key on the NEAR AI account whose key the vault holds sealed; fetch_proof.py archives signatures with it.
+  NEARAI_ARCHIVE_KEY: z.string().min(1).optional(),
 });
 
 export interface IndexerConfig {
@@ -66,6 +68,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         verify: e.VERIFY_BIN,
         rpcUrls: archival,
         timeoutMs: TOOL_TIMEOUT_MS,
+        ...(e.NEARAI_ARCHIVE_KEY ? { nearaiArchiveKey: e.NEARAI_ARCHIVE_KEY } : {}),
       },
     },
   };

@@ -49,7 +49,7 @@ beforeEach(async () => {
   await seed();
   logFile = join(mkdtempSync(join(tmpdir(), "fdl-proof-")), "calls.log");
   process.env.FAKE_LOG = logFile;
-  for (const k of ["FAKE_FETCH", "FAKE_VERIFY", "FAKE_RECHECK", "FAKE_OPENING"]) delete process.env[k];
+  for (const k of ["FAKE_FETCH", "FAKE_VERIFY", "FAKE_RECHECK", "FAKE_OPENING", "FAKE_ENV_LOG"]) delete process.env[k];
 });
 
 const calls = () => { try { return readFileSync(logFile, "utf8").trim().split("\n"); } catch { return []; } };
@@ -230,4 +230,19 @@ test("a thrown error is a problem with backoff, not a stuck head of the queue", 
   const r = await row();
   expect(r).toMatchObject({ attempts: 1, last_error: expect.stringMatching(/fastnear down/) });
   expect(r.next_attempt_at.getTime() - now.getTime()).toBe(5 * 60_000);
+});
+
+test("the NEAR AI archive key reaches fetch_proof and no other tool", async () => {
+  const envLog = join(mkdtempSync(join(tmpdir(), "fdl-env-")), "env.log");
+  process.env.FAKE_ENV_LOG = envLog;
+  expect(await processOne(deps({ tools: { ...tools, nearaiArchiveKey: "sk-archive" } }))).toBe(true);
+  const seen = readFileSync(envLog, "utf8").trim().split("\n");
+  expect(seen).toEqual(["fetch key=sk-archive", "verify key=none", "recheck key=none"]);
+});
+
+test("without an archive key fetch_proof runs without one", async () => {
+  const envLog = join(mkdtempSync(join(tmpdir(), "fdl-env-")), "env.log");
+  process.env.FAKE_ENV_LOG = envLog;
+  expect(await processOne(deps())).toBe(true);
+  expect(readFileSync(envLog, "utf8").trim().split("\n")[0]).toBe("fetch key=none");
 });

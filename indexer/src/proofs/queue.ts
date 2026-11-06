@@ -7,7 +7,7 @@ import { and, asc, eq, lte, sql } from "drizzle-orm";
 import type { Fastnear } from "../fastnear";
 import { describeError } from "../loop";
 import type { ArchivalRpc } from "../rpc";
-import { type Counts, GIVE_UP_AFTER_MS, describeRun, nextAttempt, parseSummary, replayResult, runTool } from "./run";
+import { ARCHIVE_KEY_ENV, type Counts, GIVE_UP_AFTER_MS, describeRun, nextAttempt, parseSummary, replayResult, runTool } from "./run";
 
 export interface ToolPaths {
   python: string;
@@ -18,6 +18,8 @@ export interface ToolPaths {
   /** Archival RPCs handed to fetch_proof.py as --rpc, for backlogs older than regular nodes keep. */
   rpcUrls: string[];
   timeoutMs: number;
+  /** Handed to fetch_proof.py alone, so it can archive the NEAR AI signature of each decision. */
+  nearaiArchiveKey?: string;
 }
 
 export interface ProofDeps {
@@ -173,7 +175,8 @@ async function work(deps: ProofDeps, s: WorkState, reveal: Reveal | null, trigge
   if (!s.bundle) {
     const rpcArgs = tools.rpcUrls.flatMap((u) => ["--rpc", u]);
     const extra = [...rpcArgs, ...(await revealArgs(deps, reveal))];
-    const r = await runTool(tools.python, [tools.fetchProof, "--chain", deps.chain, "--vault", deps.vaultId, "--collateral-bin", tools.verify, "--out", file, ...extra, trigger], tools.timeoutMs);
+    const archiveEnv: Record<string, string> = tools.nearaiArchiveKey ? { [ARCHIVE_KEY_ENV]: tools.nearaiArchiveKey } : {};
+    const r = await runTool(tools.python, [tools.fetchProof, "--chain", deps.chain, "--vault", deps.vaultId, "--collateral-bin", tools.verify, "--out", file, ...extra, trigger], tools.timeoutMs, archiveEnv);
     if (r.code !== 0 || r.timedOut) {
       s.problem = describeRun("fetch_proof.py", r, tools.timeoutMs);
       return;
