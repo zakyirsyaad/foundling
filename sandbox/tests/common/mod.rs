@@ -272,7 +272,16 @@ pub async fn wait_seconds(env: &Foundling, seconds: u64) -> anyhow::Result<()> {
 /// Which of `codes` a refused call names, for a method that refuses by panicking.
 pub fn refusal<'a>(text: Option<&str>, codes: &[&'a str]) -> Option<&'a str> {
     let text = text?;
-    codes.iter().copied().find(|code| text.contains(code))
+    codes.iter().copied().find(|code| {
+        // A reason code is matched whole, so EXPIRED does not accept NOT_EXPIRED; a lower-case
+        // message ("not enough shares") is matched as text.
+        if code.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+            text.split(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+                .any(|token| token == *code)
+        } else {
+            text.contains(code)
+        }
+    })
 }
 
 pub fn refused_text(result: &ExecutionFinalResult) -> Option<String> {
@@ -424,11 +433,12 @@ pub struct Run {
     refusals: RefCell<Vec<String>>,
 }
 
-/// The panic codes of SPEC 3.7, plus `FROZEN` and `HALTED` (the SPEC lists them under `Rejected`, and
-/// the vault also panics with them) and `NOT_ALLOWED`, which the SPEC dropped. Keeping that last one
-/// is a tripwire: a vault that starts to emit it shows up as an unexpected code. A refusal that
-/// carries one is recorded as observed whether or not the step says so, so the registry's code list
-/// is checked against everything the run saw.
+/// The panic codes of SPEC 3.7 (the test in tests/test_attack_batch2.py keeps it equal to what the
+/// vault panics with), plus `FROZEN` and `HALTED`, which the SPEC lists under `Rejected` and the
+/// vault also panics with, and `NOT_ALLOWED`, which the SPEC dropped. Keeping that last one is a
+/// tripwire: a vault that starts to emit it shows up as an unexpected code. A refusal that carries
+/// one is recorded as observed whether or not the step says so, so the registry's code list is
+/// checked against everything the run saw.
 const SPEC_PANIC_CODES: &[&str] = &[
     "NOT_KEEPER",
     "NOT_ALLOWED",

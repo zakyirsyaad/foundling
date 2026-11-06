@@ -151,7 +151,8 @@ class BatchScriptsTest(unittest.TestCase):
 
 def vault_panic_codes():
     """Every upper-case code the vault panics with: the literals inside require!(...) and
-    panic_str(...) calls, and the &str consts policy.rs hands to panic_str."""
+    panic_str(...) calls, and the upper-case &str consts of the sources (policy.rs hands two of them to
+    panic_str; the rest are other reason codes, which SPEC 3.7 lists too)."""
     codes = {}
     for source in sorted((ROOT / "contracts" / "vault" / "src").glob("*.rs")):
         text = re.sub(r"(?m)^\s*//.*$", "", source.read_text())
@@ -165,7 +166,7 @@ def vault_panic_codes():
                 for code in re.findall(r'"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)"', text[at:end]):
                     codes.setdefault(code, source.name)
                 start = end
-        for code in re.findall(r'(?m)^\s*(?:pub )?const [A-Z_]+: &str = "([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)";', text):
+        for code in re.findall(r"""(?m)^\s*(?:pub )?const [A-Z_]+: &(?:'static )?str = "([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)";""", text):
             codes.setdefault(code, source.name)
     return codes
 
@@ -175,7 +176,7 @@ class SpecReasonCodesTest(unittest.TestCase):
         # SPEC 3.7 calls itself the one canonical list, so a code the vault adds must be added there.
         section = (ROOT / "docs" / "SPEC.md").read_text().split("### 3.7", 1)[1].split("\n### ", 1)[0]
         codes = vault_panic_codes()
-        self.assertGreater(len(codes), 15, codes)
+        self.assertGreater(len(codes), 20, codes)
         missing = {code: file for code, file in codes.items() if f"`{code}`" not in section}
         self.assertEqual(missing, {}, "panic codes missing from SPEC 3.7")
 
@@ -194,12 +195,54 @@ class CiAndBuildTest(unittest.TestCase):
             self.assertIn("touch target/near/*.wasm", plan, target)
             self.assertLess(plan.index("cargo near build"), plan.index("touch target/near/*.wasm"), target)
 
-    def test_the_soft_run_calls_out_attacks_that_ended_in_error(self):
+    @staticmethod
+    def soft_run_script():
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-        soft = workflow.split("  attack-lab-run:", 1)[1].split("\n  workflow:", 1)[0]
-        self.assertIn("ERROR=[1-9]", soft)
-        self.assertIn("::error::", soft)
-        self.assertLess(soft.index("ERROR=[1-9]"), soft.index('exit "$status"'))
+        step = workflow.split("      - name: Run every core attack\n        run: |\n", 1)[1]
+        lines = []
+        for line in step.splitlines():
+            if line.startswith("          ") or line == "":
+                lines.append(line[10:])
+            else:
+                break
+        return "\n".join(lines)
+
+    def run_soft_step(self, table, code):
+        """Runs the soft job's step under `bash -e`, as GitHub does without `shell:`, with a fake
+        run-all that prints `table` and exits `code`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "fake-run-all"
+            fake.write_text(f"#!/bin/sh\ncat <<'EOF'\n{table}\nEOF\nexit {code}\n")
+            fake.chmod(0o755)
+            script = self.soft_run_script()
+            self.assertIn("python3 tools/attack.py run-all", script)
+            script = script.replace("python3 tools/attack.py run-all", str(fake))
+            path = Path(tmp) / "step.sh"
+            path.write_text(script)
+            env = {**os.environ, "RUNNER_TEMP": tmp, "GITHUB_STEP_SUMMARY": str(Path(tmp) / "summary.md")}
+            return subprocess.run(["bash", "-e", str(path)], capture_output=True, text=True, env=env)
+
+    def test_the_soft_step_exits_with_what_run_all_exits(self):
+        # Without pipefail, `run-all | tee ... || status=$?` records tee's status and the step is always 0.
+        result = self.run_soft_step("over-cap PASS\nPASS=1 FAIL=1 NOT_IMPLEMENTED=0 ERROR=0", 1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_the_soft_step_fails_loudly_when_attacks_end_in_error(self):
+        result = self.run_soft_step("PASS=0 FAIL=0 NOT_IMPLEMENTED=5 ERROR=10", 2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("::error::run-all reported ERROR", result.stdout)
+        # Even if run-all itself had exited 0 with ERROR in its table, the step must not.
+        self.assertNotEqual(self.run_soft_step("PASS=3 FAIL=0 NOT_IMPLEMENTED=0 ERROR=2", 0).returncode, 0)
+
+    def test_the_soft_step_fails_when_no_attack_ran_at_all(self):
+        result = self.run_soft_step("PASS=0 FAIL=0 NOT_IMPLEMENTED=15 ERROR=0", 0)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ran no attack", result.stdout)
+
+    def test_the_soft_step_stays_green_on_a_clean_run(self):
+        result = self.run_soft_step("PASS=10 FAIL=0 NOT_IMPLEMENTED=5 ERROR=0", 0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("::error::", result.stdout)
 
 
 if __name__ == "__main__":

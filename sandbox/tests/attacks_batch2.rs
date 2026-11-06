@@ -1176,8 +1176,28 @@ async fn kill_agent() -> anyhow::Result<()> {
         .transact()
         .await?
         .into_result()?;
+    anyhow::ensure!(
+        env.worker.view_account(env.keeper.id()).await.is_ok(),
+        "setup failed: the keeper id should exist again"
+    );
     let nonce_before: u64 = env.view_vault("last_nonce", json!({})).await?;
     let revived_nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
+    // Every wallet that is not the vault's, on both tokens, and the vault's own, before the trade.
+    let bystanders = [
+        env.parent.id(),
+        env.stranger.id(),
+        env.governor.id(),
+        env.guardian.id(),
+        env.alice.id(),
+        env.keeper.id(),
+    ];
+    let mut wallets_before = Vec::new();
+    for account in bystanders {
+        wallets_before.push(wallet_of(&env, &env.usdc, account).await?);
+        wallets_before.push(wallet_of(&env, &env.wnear, account).await?);
+    }
+    let vault_usdc_before = wallet_of(&env, &env.usdc, &env.vault_id).await?;
+    let (book_usdc_before, _) = book(&env).await?;
     let executed = execute(&env, revived_nonce).await?;
     let registered: Vec<String> = [
         env.keeper.id(),
@@ -1207,30 +1227,45 @@ async fn kill_agent() -> anyhow::Result<()> {
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("policy has no ops_budget"))?
         .parse()?;
+    let mut wallets_after = Vec::new();
+    for account in bystanders {
+        wallets_after.push(wallet_of(&env, &env.usdc, account).await?);
+        wallets_after.push(wallet_of(&env, &env.wnear, account).await?);
+    }
+    let vault_usdc_after = wallet_of(&env, &env.usdc, &env.vault_id).await?;
+    let (book_usdc_after, _) = book(&env).await?;
+    let revival_held = env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_before + 1
+        && swapped(&executed)
+        && swap_amount == Some(json!("1000000"))
+        && outside.is_empty()
+        && wallets_after == wallets_before
+        && vault_usdc_before - vault_usdc_after == 1_000_000
+        && book_usdc_before - book_usdc_after == 1_000_000
+        && ops <= budget;
     run.step(
         "the keeper id created again by its parent, with OutLayer alive: it runs a cycle and executes the strategy's decision, nothing else",
-        env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_before + 1
-            && swapped(&executed)
-            && swap_amount == Some(json!("1000000"))
-            && outside.is_empty()
-            && wallet_of(&env, &env.usdc, env.keeper.id()).await? == 0
-            && wallet_of(&env, &env.wnear, env.keeper.id()).await? == 0
-            && ops <= budget,
+        revival_held,
         None,
         json!({"nonce": revived_nonce, "swap_amount_in": swap_amount, "decision_amount_in": "1000000",
-               "accounts_outside_the_registered_set": outside, "keeper_holds_tokens": false, "ops_within_budget": ops <= budget}),
+               "vault_usdc_wallet_drop": (vault_usdc_before - vault_usdc_after).to_string(),
+               "vault_usdc_book_drop": (book_usdc_before - book_usdc_after).to_string(),
+               "accounts_outside_the_registered_set": outside,
+               "other_wallets_unchanged": wallets_after == wallets_before, "ops_within_budget": ops <= budget}),
     );
-    run.finding(
-        "KEEPER_ID_REUSE",
-        "The vault binds the keeper role to an account id, not to a key. After the keeper account is \
-         deleted, whoever controls the id's parent (anyone, for a top-level id) can create it again. \
-         Measured with OutLayer alive: the new keeper started a cycle and executed the strategy's own \
-         decision (the 1 USDC buy the mock OutLayer returned, inside the caps); every receipt of the \
-         execution ran on a registered account, the keeper account holds no token, and spending stayed \
-         within ops_budget. With OutLayer gone it can start a cycle and nothing trades. Not measured: \
-         a trade other than the strategy's (Decision v1 has no field to name one). Mitigation: keeper \
-         ids under a parent the lead controls, and rotation through schedule_keeper_change.",
-    );
+    if revival_held {
+        run.finding(
+            "KEEPER_ID_REUSE",
+            "The vault binds the keeper role to an account id, not to a key. After the keeper account is \
+             deleted, whoever controls the id's parent (anyone, for a top-level id) can create it again. \
+             Measured with OutLayer alive: the new keeper started a cycle and executed the strategy's own \
+             decision (the 1 USDC buy the mock OutLayer returned, inside the caps). The vault's USDC wallet \
+             and book fell by exactly that amount, every receipt of the execution ran on a registered \
+             account, no other wallet on either token changed, and spending stayed within ops_budget. \
+             Not measured: a trade other than the strategy's (Decision v1 has no field to name one). \
+             Mitigation: keeper ids under a parent the lead controls, and rotation through \
+             schedule_keeper_change.",
+        );
+    }
     wait_seconds(&env, COOLDOWN + 1).await?;
 
     // A decision is ready, then OutLayer disappears while the keeper is still there.
