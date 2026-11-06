@@ -38,7 +38,7 @@ test("the partial table labels itself and shows missing decisions", () => {
   expect(screen.getByText("No decision to verify")).toBeInTheDocument();
 });
 test("the detail shows the timeline, the limit check, the proof and a copyable command", () => {
-  render(<CycleDetail row={row(39n, "rejected", "PRICE_WIDE")} proof={{ verifier: done, obsRecheck: null, replay: "sealed" }} decision={'{"action":"buy"}'} revealAfter={1000n} chainTime={999n} network="testnet" vaultId="vault.foundling.testnet" />);
+  render(<CycleDetail row={row(39n, "rejected", "PRICE_WIDE")} proof={{ verifier: done, obsRecheck: null, replay: "sealed", verifierCommit: null }} decision={'{"action":"buy"}'} revealAfter={1000n} chainTime={999n} network="testnet" vaultId="vault.foundling.testnet" />);
   expect(screen.getByRole("heading", { name: "Cycle 39" })).toBeInTheDocument();
   expect(screen.getByText("rejected (PRICE_WIDE)")).toBeInTheDocument();
   expect(screen.getByText("Rejected by the contract: PRICE_WIDE.")).toBeInTheDocument();
@@ -50,4 +50,22 @@ test("an executed cycle says every limit held", () => {
   render(<CycleDetail row={row(41n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
   expect(screen.getByText("Every limit held; the trade ran.")).toBeInTheDocument();
   expect(screen.getByText("No decision to verify")).toBeInTheDocument();
+});
+
+const SHA = "b6339b3c0a8c5e2f1d4e7a9b0c3d6e9f2a5b8c1d";
+const code = () => screen.getByText((_, el) => el?.tagName === "CODE");
+test("the command checks out the verifier commit that built this proof", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={{ verifier: done, obsRecheck: null, replay: "sealed", verifierCommit: SHA }} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(code().textContent).toMatch(new RegExp(`^git checkout ${SHA} && python3 tools/fetch_proof.py `));
+});
+test("without a known verifier commit the command names the one to check out", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(code().textContent).toMatch(/^git checkout VERIFIER_COMMIT && /);
+  expect(screen.getByText("Replace VERIFIER_COMMIT with the commit that built this vault's binary.")).toBeInTheDocument();
+});
+test("the proof note ties the NEAR AI check to the verifier commit", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.queryByText(/not covered yet/)).toBeNull();
+  expect(screen.getByText(/Newer verifiers also check the advisor's archived NEAR AI signature/)).toBeInTheDocument();
+  expect(screen.getByText(/the commit in the command decides which checks run/)).toBeInTheDocument();
 });

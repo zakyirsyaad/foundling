@@ -170,6 +170,19 @@ test("an unexpected failure is 500 with the envelope and no detail", async () =>
   expect(logged).toEqual(["api error"]);
 });
 
+test("a proof names the verifier commit that checked it", async () => {
+  const admin = new pg.Client({ connectionString: url });
+  await admin.connect();
+  try {
+    await admin.query("update proofs set verifier_commit = 'b6339b3c0a8c5e2f1d4e7a9b0c3d6e9f2a5b8c1d' where nonce = 1");
+    expect((await (await get(app(), "/v1/proofs/1")).json()).data.verifier_commit).toBe("b6339b3c0a8c5e2f1d4e7a9b0c3d6e9f2a5b8c1d");
+    expect((await (await get(app(), "/v1/proofs/2")).json()).data.verifier_commit).toBeNull();
+  } finally {
+    await admin.query("update proofs set verifier_commit = null where nonce = 1");
+    await admin.end();
+  }
+});
+
 test("a proof carries its bundle, NUL and all, and no bundle before one is fetched", async () => {
   const one = (await (await get(app(), "/v1/proofs/1")).json()).data;
   expect(one.bundle.cycles[0].collateral.pck_certificate_chain).toBe("-----END CERTIFICATE-----\n\u0000");

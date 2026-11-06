@@ -40,3 +40,21 @@ test("Overview with no snapshot shows the unreadable banner", async () => {
   await act(async () => render(<Overview initial={null} nav={{ status: "pending", reason: "http" }} />));
   expect(screen.getByText("Vault not readable")).toBeInTheDocument();
 });
+
+test("the ops budget meter counts NEAR, not USDC", async () => {
+  read.mockReset(); // the test before left `read` rejecting, and the fixture reads through it
+  const base = await fixtureSnapshot();
+  const s = { ...base, opsSpent: 150_000_000_000_000_000_000_000n, policy: { ...base.policy, opsBudget: 600_000_000_000_000_000_000_000n } };
+  read.mockResolvedValue(s);
+  await act(async () => render(<Overview initial={s} nav={nav} />));
+  expect(screen.getByText("0.15 / 0.6 NEAR")).toBeInTheDocument();
+});
+
+test("the ops meter keeps a cycle's NEAR spend visible", async () => {
+  read.mockReset();
+  const base = await fixtureSnapshot();
+  const s = { ...base, opsSpent: 1_500_000_000_000_000_000_000n, policy: { ...base.policy, opsBudget: 600_000_000_000_000_000_000_000n } };
+  read.mockResolvedValue(s);
+  await act(async () => render(<Overview initial={s} nav={nav} />));
+  expect(screen.getByText("0.0015 / 0.6 NEAR")).toBeInTheDocument();
+});

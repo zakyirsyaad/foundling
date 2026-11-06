@@ -42,6 +42,14 @@ test("LimitMeter is an accessible meter and says when it is an estimate", () => 
   expect(m).toHaveAttribute("aria-valuemax", "100");
   expect(screen.getByText(/estimate/i)).toBeInTheDocument();
 });
+test("LimitMeter gives ARIA plain percent numbers, even for tiny yoctoNEAR amounts", () => {
+  render(<LimitMeter label="Ops budget" used={1_250_000n} cap={5_000_000n} decimals={24} unit="NEAR" />);
+  const m = screen.getByRole("meter", { name: "Ops budget" });
+  expect(m).toHaveAttribute("aria-valuemin", "0");
+  expect(m).toHaveAttribute("aria-valuemax", "100");
+  expect(m).toHaveAttribute("aria-valuenow", "25");
+  expect(m.getAttribute("aria-valuetext")).toMatch(/NEAR$/);
+});
 test("LimitMeter without a price says so instead of showing zero", () => {
   render(<LimitMeter label="Exposure" used={null} cap={null} decimals={6} />);
   expect(screen.getByText("Price unavailable")).toBeInTheDocument();

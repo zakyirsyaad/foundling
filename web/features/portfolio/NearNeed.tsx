@@ -1,8 +1,7 @@
-import { formatUnits } from "@/lib/format/units";
+import { NEAR_DECIMALS, formatUnits } from "@/lib/format/units";
 import type { WalletTx } from "@/lib/wallet/calls";
 import { nearShortfallFor } from "@/lib/vault/deposit";
 
-const NEAR_DECIMALS = 24;
 
 /** The exact NEAR an action still needs for its deposits and gas (WEBSITE §3 and §7). Nothing when enough. */
 export function NearNeed({ txs, near, gasPrice }: { txs: WalletTx[]; near: bigint; gasPrice: bigint }) {
