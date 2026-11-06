@@ -10,6 +10,7 @@ permissions:
 
 # A step with no shell runs as `bash -e {0}`, with no pipefail, so `cmd | tee file` reports tee's
 # status and hides a failed cmd. `shell: bash` runs `bash --noprofile --norc -eo pipefail {0}`.
+# A job's own `defaults: run` replaces this whole block, so such a job repeats `shell: bash`.
 defaults:
   run:
     shell: bash
@@ -28,10 +29,11 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
+        shell: bash
         working-directory: strategy
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # This job has its own `defaults: run`, so this shows the workflow's `shell: bash` still applies.
+      # This job has its own `defaults: run`, which replaces the workflow's; this shows its shell has pipefail.
       - name: The default shell has pipefail
         run: '[[ -o pipefail ]]'
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -86,6 +88,7 @@ jobs:
         crate: [vault, mock-ref, mock-oracle, mock-outlayer, mock-token]
     defaults:
       run:
+        shell: bash
         working-directory: contracts/${{ matrix.crate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,6 +117,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
+        shell: bash
         working-directory: cli
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
