@@ -90,6 +90,20 @@ pub struct ModelReport {
     pub request_nonce: String,
     /// Hex, unlike OutLayer's base64.
     pub intel_quote: String,
+    /// dstack's measured boot log: RTMR3 replays from its `imr` 3 events, among them `app-id`.
+    pub event_log: Vec<LogEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogEvent {
+    pub imr: u32,
+    pub event_type: u32,
+    /// Hex SHA-384; empty for dstack's runtime events, whose digest comes from the fields below.
+    pub digest: String,
+    pub event: String,
+    /// Hex.
+    pub event_payload: String,
 }
 
 /// The reply of `/attestations/by-tx/<tx>`. Unknown fields pass on purpose: the Task Hash

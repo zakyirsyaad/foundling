@@ -54,11 +54,21 @@ ARCHIVE_KEY_ENV = "NEARAI_ARCHIVE_KEY"
 # The strategy's `advisor::MODELS`, in order: `ai_ref.m` indexes it. A test keeps the two the same.
 MODELS = ("z-ai/glm-5.3-flash", "Qwen/Qwen3.8-27B")
 NOT_FOUND = 404
-REPORT_FIELDS = ("model_name", "signing_address", "request_nonce", "intel_quote")
+REFUSED = (401, 403)
+# The worker asks seconds after the cycle; a signature NEAR AI has not stored yet answers 404 at first.
+NEARAI_ATTEMPTS = 5
+NEARAI_WAIT_SECONDS = 2
+# `event_log` lets the verifier replay RTMR3 and read the app id dstack measured.
+REPORT_FIELDS = ("model_name", "signing_address", "request_nonce", "intel_quote", "event_log")
 
 
 class SourceError(Exception):
     pass
+
+
+class Unarchivable(Exception):
+    """NEAR AI will not give this record (gone, or the key is refused): kept as `missing`, not retried,
+    so the rest of the proof is not held up by it."""
 
 
 ACTIVE_RPCS = None
@@ -143,15 +153,25 @@ def collateral_of_bytes(binary, raw_quote):
     return json.loads(done.stdout)
 
 
-def nearai_get(path, query, key):
-    """One NEAR AI call. A 404 is None (the record is gone); any other failure is a SourceError."""
+def nearai_get(what, path, query, key):
+    """One NEAR AI record, asked up to NEARAI_ATTEMPTS times. A refused key, or a 404 to the last
+    attempt, is Unarchivable; any other failure to the last attempt is a SourceError."""
     url = f"{NEARAI}{path}?{urllib.parse.urlencode(query)}"
-    try:
-        return read_json(url, headers={"authorization": f"Bearer {key}"})
-    except urllib.error.HTTPError as error:
-        if error.code == NOT_FOUND:
-            return None
-        raise SourceError(f"NEAR AI {path.split('/')[1]}: HTTP {error.code}") from None
+    last, gone = "", False
+    for attempt in range(NEARAI_ATTEMPTS):
+        if attempt:
+            time.sleep(NEARAI_WAIT_SECONDS * attempt)
+        try:
+            return read_json(url, headers={"authorization": f"Bearer {key}"})
+        except urllib.error.HTTPError as error:
+            if error.code in REFUSED:
+                raise Unarchivable(f"{what}: key refused (HTTP {error.code})") from None
+            last, gone = f"{what}: HTTP {error.code}", error.code == NOT_FOUND
+        except (OSError, ValueError) as error:  # network, timeout, or a reply that is not JSON
+            last, gone = f"{what}: {type(error).__name__}", False
+    if gone:
+        raise Unarchivable(last)
+    raise SourceError(f"NEAR AI {last}")
 
 
 def ai_signature_of(binary, decision_text, key):
@@ -163,20 +183,26 @@ def ai_signature_of(binary, decision_text, key):
     index = ai.get("m")
     if type(index) is not int or not 0 <= index < len(MODELS):
         raise SourceError(f"chat {chat_id} names no model the advisor asks (m={index!r})")
-    model = MODELS[index]
-    signature = nearai_get(f"/signature/{chat_id}", {"model": model, "signing_algo": "ecdsa"}, key)
-    if signature is None:
-        return {"missing": f"signature: HTTP {NOT_FOUND}"}
+    try:
+        return archive_of(binary, chat_id, MODELS[index], ai["resp_sig_hash"], key)
+    except Unarchivable as reason:
+        return {"missing": str(reason)}
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise SourceError(f"NEAR AI reply for chat {chat_id} is malformed ({type(error).__name__}: {error})") from None
+
+
+def archive_of(binary, chat_id, model, reply_hash, key):
+    signature = nearai_get("signature", f"/signature/{chat_id}", {"model": model, "signing_algo": "ecdsa"}, key)
     signer = signature["signing_address"]
     # The reply hash as the nonce: the report then shows it was made after this reply existed.
-    query = {"model": model, "signing_algo": "ecdsa", "signing_address": signer, "nonce": ai["resp_sig_hash"]}
-    report = nearai_get("/attestation/report", query, key)
-    if report is None:
-        return {"missing": f"attestation report: HTTP {NOT_FOUND}"}
-    entries = [e for e in report.get("model_attestations", []) if e.get("signing_address", "").lower() == signer.lower()]
+    query = {"model": model, "signing_algo": "ecdsa", "signing_address": signer, "nonce": reply_hash}
+    report = nearai_get("attestation report", "/attestation/report", query, key)
+    entries = [e for e in report["model_attestations"] if e["signing_address"].lower() == signer.lower()]
     if len(entries) != 1:
         raise SourceError(f"the attestation report has {len(entries)} entries for signer {signer}")
     entry = {field: entries[0][field] for field in REPORT_FIELDS}
+    if isinstance(entry["event_log"], str):
+        entry["event_log"] = json.loads(entry["event_log"])
     return {
         "model": model,
         "text": signature["text"],

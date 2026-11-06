@@ -97,23 +97,38 @@ def decision(chat_id=CHAT, m=0):
     return json.dumps({"ai_ref": ai, "nonce": 1})
 
 
-def nearai_world(calls, signature_status=200, report_status=200):
-    """A fake NEAR AI: records each call and answers like the real endpoints."""
+EVENTS = [{"imr": 3, "event_type": 134217729, "digest": "", "event": "app-id", "event_payload": "2c0a"}]
+
+
+def nearai_world(calls, signature_status=200, report_status=200, signature=None):
+    """A fake NEAR AI: records each call and answers like the real endpoints. A status may be a list,
+    one per call, for a reply that changes between attempts."""
+    statuses = {"signature": signature_status, "report": report_status}
+
+    def status_of(name):
+        value = statuses[name]
+        if isinstance(value, list):
+            return value.pop(0) if len(value) > 1 else value[0]
+        return value
 
     def reply(url, body=None, headers=None):
         calls.append((url, dict(headers or {})))
         parsed = urllib.parse.urlparse(url)
         query = dict(urllib.parse.parse_qsl(parsed.query))
         if "/signature/" in parsed.path:
-            if signature_status != 200:
-                raise urllib.error.HTTPError(url, signature_status, "x", {}, None)
+            status = status_of("signature")
+            if status != 200:
+                raise urllib.error.HTTPError(url, status, "x", {}, None)
+            if signature is not None:
+                return signature
             return {"text": f"{query['model']}:{'ab' * 32}:{RESP}", "signature": "0x" + "11" * 65,
                     "signing_address": SIGNER, "signing_algo": "ecdsa", "signature_kind": "provider_tee"}
         if parsed.path.endswith("/attestation/report"):
-            if report_status != 200:
-                raise urllib.error.HTTPError(url, report_status, "x", {}, None)
+            status = status_of("report")
+            if status != 200:
+                raise urllib.error.HTTPError(url, status, "x", {}, None)
             entry = {"model_name": query["model"], "signing_address": query["signing_address"],
-                     "request_nonce": query["nonce"], "intel_quote": "0400", "nvidia_payload": "{}", "event_log": []}
+                     "request_nonce": query["nonce"], "intel_quote": "0400", "nvidia_payload": "{}", "event_log": EVENTS}
             other = dict(entry, signing_address="0x" + "22" * 20)
             return {"gateway_attestation": {}, "model_attestations": [other, entry]}
         raise AssertionError(url)
@@ -125,6 +140,7 @@ class AdvisorSignature(unittest.TestCase):
     def archive(self, text, key=KEY, **world):
         calls = []
         with mock.patch.object(fetch, "read_json", side_effect=nearai_world(calls, **world)), \
+                mock.patch.object(fetch.time, "sleep"), \
                 mock.patch.object(fetch, "collateral_of_bytes", return_value={"tcb_info": "c"}) as collateral:
             result = fetch.ai_signature_of("/bin/fv", text, key)
         return result, calls, collateral
@@ -158,7 +174,7 @@ class AdvisorSignature(unittest.TestCase):
         self.assertEqual(result["text"], f"{fetch.MODELS[0]}:{'ab' * 32}:{RESP}")
         self.assertEqual(result["signing_address"], SIGNER)
         self.assertEqual(result["report"], {"model_name": fetch.MODELS[0], "signing_address": SIGNER,
-                                            "request_nonce": RESP, "intel_quote": "0400"})
+                                            "request_nonce": RESP, "intel_quote": "0400", "event_log": EVENTS})
         self.assertEqual(result["collateral"], {"tcb_info": "c"})
         collateral.assert_called_once_with("/bin/fv", bytes.fromhex("0400"))
         self.assertIsInstance(result["collateral_fetched_at"], int)
@@ -167,16 +183,43 @@ class AdvisorSignature(unittest.TestCase):
         result, _, _ = self.archive(decision())
         self.assertNotIn(KEY, json.dumps(result))
 
-    def test_a_signature_nearai_no_longer_has_is_recorded_as_missing(self):
+    def test_a_signature_nearai_never_has_is_recorded_as_missing_after_retries(self):
         result, calls, _ = self.archive(decision(), signature_status=404)
         self.assertEqual(result, {"missing": "signature: HTTP 404"})
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), fetch.NEARAI_ATTEMPTS)
 
-    def test_a_refused_key_is_a_source_error(self):
-        with self.assertRaises(fetch.SourceError):
-            self.archive(decision(), signature_status=401)
+    def test_a_signature_that_appears_a_moment_later_is_archived(self):
+        result, calls, _ = self.archive(decision(), signature_status=[404, 404, 200])
+        self.assertEqual(result["signing_address"], SIGNER)
+        self.assertEqual(len(calls), 4)
 
-    def test_nearai_down_is_a_source_error(self):
+    def test_a_refused_key_is_recorded_without_blocking_the_proof(self):
+        for status in (401, 403):
+            with self.subTest(status=status):
+                result, calls, _ = self.archive(decision(), signature_status=status)
+                self.assertEqual(result, {"missing": f"signature: key refused (HTTP {status})"})
+                self.assertEqual(len(calls), 1)
+
+    def test_a_malformed_reply_is_a_source_error(self):
+        for signature in ({"text": "x"}, ["not", "an", "object"], {"text": "x", "signature": "s", "signing_algo": "ecdsa", "signing_address": 7}):
+            with self.subTest(signature=signature), self.assertRaises(fetch.SourceError):
+                self.archive(decision(), signature=signature)
+
+    def test_a_report_quote_that_is_not_hex_is_a_source_error(self):
+        calls = []
+        world = nearai_world(calls)
+
+        def bad_quote(url, body=None, headers=None):
+            answer = world(url, body, headers)
+            if "attestation" in url:
+                answer["model_attestations"][1]["intel_quote"] = "zz"
+            return answer
+
+        with mock.patch.object(fetch, "read_json", side_effect=bad_quote), mock.patch.object(fetch.time, "sleep"), \
+                self.assertRaises(fetch.SourceError):
+            fetch.ai_signature_of("/bin/fv", decision(), KEY)
+
+    def test_nearai_down_is_a_source_error_after_retries(self):
         with self.assertRaises(fetch.SourceError):
             self.archive(decision(), report_status=502)
 

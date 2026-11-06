@@ -55,6 +55,7 @@ fn the_real_archive_passes_every_check() {
             "PASS nonce 1 ai report",
             "PASS nonce 1 ai quote",
             "PASS nonce 1 ai report data",
+            "PASS nonce 1 ai app",
         ]
     );
 }
@@ -141,7 +142,8 @@ fn a_report_not_made_for_this_reply_fails() {
 fn a_real_quote_that_binds_something_else_fails() {
     let mut proof = proof();
     // The OutLayer worker's quote with its own collateral: genuine, so Intel vouches for it,
-    // but its REPORTDATA is a Task Hash, not the NEAR AI signer and this reply.
+    // but its REPORTDATA is a Task Hash, not the NEAR AI signer and this reply, and NEAR AI's
+    // dstack log does not replay to its RTMR3.
     let cycle = proof.cycles[0].clone();
     let outlayer = STANDARD.decode(&cycle.attestation.tdx_quote).unwrap();
     let archive = archived(&mut proof);
@@ -152,7 +154,10 @@ fn a_real_quote_that_binds_something_else_fails() {
     let report = check(&proof);
 
     assert!(report.lines.contains(&"PASS nonce 1 ai quote".to_string()));
-    assert_eq!(failed(&report), ["nonce 1 ai report data"]);
+    assert_eq!(
+        failed(&report),
+        ["nonce 1 ai report data", "nonce 1 ai app"]
+    );
 }
 
 #[test]
@@ -191,4 +196,71 @@ fn a_silent_advisor_has_no_signature_to_check() {
         serde_json::from_str(include_str!("../fixtures/testnet-proof.json")).unwrap();
 
     assert!(ai_lines(&check(&silent)).is_empty());
+}
+
+fn with_decision(proof: &mut Proof, from: &str, to: &str) {
+    let decision = &mut proof.cycles[0].decision;
+    assert!(decision.contains(from), "{from} is not in {decision}");
+    *decision = decision.replacen(from, to, 1);
+}
+
+#[test]
+fn a_decision_without_a_model_index_fails_the_model_check() {
+    for (from, to) in [(r#""m":0,"#, ""), (r#""m":0"#, r#""m":7"#)] {
+        let mut proof = proof();
+        with_decision(&mut proof, from, to);
+
+        assert!(
+            failed(&check(&proof)).contains(&"nonce 1 ai model"),
+            "{from} -> {to}"
+        );
+    }
+}
+
+fn set_event(proof: &mut Proof, name: &str, payload: &str) {
+    let event = archived(proof)
+        .report
+        .event_log
+        .iter_mut()
+        .find(|event| event.imr == 3 && event.event == name)
+        .unwrap();
+    event.event_payload = payload.into();
+}
+
+#[test]
+fn a_report_from_another_dstack_app_fails() {
+    let mut proof = proof();
+    // A genuine TDX VM that is not NEAR AI's model app: its log names another app id. The log
+    // still has to replay to the quote, so this one fails that too.
+    set_event(
+        &mut proof,
+        "app-id",
+        "0000000000000000000000000000000000000000",
+    );
+
+    assert_eq!(failed(&check(&proof)), ["nonce 1 ai app"]);
+}
+
+#[test]
+fn an_event_log_that_does_not_replay_to_the_quote_fails() {
+    let mut proof = proof();
+    set_event(&mut proof, "compose-hash", "00");
+
+    assert_eq!(failed(&check(&proof)), ["nonce 1 ai app"]);
+}
+
+#[test]
+fn an_archived_reason_cannot_forge_report_lines() {
+    let mut proof = proof();
+    proof.cycles[0].ai_signature = Some(AiArchive::Missing {
+        missing: "x\nPASS nonce 1 ai signer\nSUMMARY pass=99 skip=0 fail=0".into(),
+    });
+
+    let report = check(&proof);
+
+    assert!(report.lines.iter().all(|line| !line.contains('\n')));
+    assert!(!report
+        .lines
+        .iter()
+        .any(|line| line == "PASS nonce 1 ai signer"));
 }
