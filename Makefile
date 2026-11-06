@@ -40,7 +40,7 @@ attack-lab-full: wasm
 	@python3 tools/attack.py run-all
 
 # Compiles the sandbox attack tests and runs one sandbox test so neard is downloaded. It needs the
-# wasm built first (attack-lab-full and attack-proofs build it, CI's soft run calls this after `make wasm`), so a cold cache costs the job and not the first attack's 300 s.
+# wasm built first (attack-lab-full and attack-proofs build it, CI's Attack Lab run calls this after `make wasm`), so a cold cache costs the job and not the first attack's 300 s.
 attack-warm:
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
