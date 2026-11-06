@@ -7,9 +7,12 @@ import type { CycleRow, ProofResult } from "@/lib/history/client";
 import { cycleWord } from "@/lib/cycles/outcome";
 import { proofWord, replayWord } from "@/lib/proof/tally";
 
+/** Shell-safe, like TRIGGER_TX: a `<…>` placeholder would be read as a redirect. */
+const COMMIT_PLACEHOLDER = "VERIFIER_COMMIT";
+
 /** Pinned to the verifier's commit: a newer verifier can replay a sealed rule differently and fail a good proof. */
 function verifyCommand(network: Network, vaultId: string, tx: string | undefined, commit: string | null): string {
-  return `git checkout ${commit ?? "<verifier_commit>"} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
+  return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
 }
 
 function TallyLine({ name, t }: { name: string; t: ProofResult["verifier"] }) {
@@ -69,8 +72,8 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
             <dd><Status group="proof" word={replayWord(revealAfter, chainTime, proof?.replay ?? "sealed")} /></dd>
           </div>
         </dl>
-        <p className="mt-3 text-[13px] text-muted-foreground">With an archived NEAR AI signature the verifier checks the advisor&apos;s answer too; without one, that check is a skip. A result shown here is a claim; the command below is the answer.</p>
-        {commit ? null : <p className="mt-1 text-[13px] text-muted-foreground">Replace &lt;verifier_commit&gt; with the commit that built this vault&apos;s binary.</p>}
+        <p className="mt-3 text-[13px] text-muted-foreground">Newer verifiers also check the advisor&apos;s archived NEAR AI signature and count a missing one as a skip; the commit in the command decides which checks run. A result shown here is a claim; the command below is the answer.</p>
+        {commit ? null : <p className="mt-1 text-[13px] text-muted-foreground">{`Replace ${COMMIT_PLACEHOLDER} with the commit that built this vault's binary.`}</p>}
         <div className="fm-code mt-3">
           <code className="break-all">{cmd}</code>
           <CopyButton text={cmd} label="Copy command" />

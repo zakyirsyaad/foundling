@@ -7,7 +7,7 @@ import { Status } from "@/components/fm/Status";
 import type { VaultSnapshot } from "@/lib/chain/types";
 import { useVaultSnapshot } from "@/lib/chain/useVaultSnapshot";
 import { navUsdc, sharePrice } from "@/lib/chain/vault";
-import { formatUnits } from "@/lib/format/units";
+import { NEAR_DECIMALS, formatUnits } from "@/lib/format/units";
 import type { CycleRow, HistoryResult, NavPoint } from "@/lib/history/client";
 import { cycleWord } from "@/lib/cycles/outcome";
 import { limitMeters, sharePriceSinceStart, vaultWord } from "@/lib/vault/overview";
@@ -15,8 +15,8 @@ import { SharePriceChart } from "./SharePriceChart";
 import { StuckPanelLive } from "./StuckPanelLive";
 import { VaultBanner } from "./VaultBanner";
 
-/** The ops budget and what it has spent are native NEAR in yoctoNEAR, not USDC. */
-const NEAR_DECIMALS = 24;
+/** The ops budget and what it has spent are native NEAR, not USDC; a cycle costs about 0.0014 NEAR. */
+const NEAR_DIGITS = 4;
 
 const USDC = 6;
 
@@ -78,7 +78,7 @@ export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSna
         <h2 id="limits-title" className="text-lg font-semibold">Limits</h2>
         <div className="grid gap-6 sm:grid-cols-2">
           <LimitMeter label="Epoch window" used={meters.epochWindow.used} cap={meters.epochWindow.cap} decimals={d} />
-          <LimitMeter label="Ops budget" used={meters.opsBudget.used} cap={meters.opsBudget.cap} decimals={NEAR_DECIMALS} unit="NEAR" />
+          <LimitMeter label="Ops budget" used={meters.opsBudget.used} cap={meters.opsBudget.cap} decimals={NEAR_DECIMALS} digits={NEAR_DIGITS} unit="NEAR" />
           <LimitMeter label="TVL against tvl_cap" used={meters.tvl.used} cap={meters.tvl.cap} decimals={d} estimate />
           <LimitMeter label="wNEAR exposure" used={meters.exposure.used} cap={meters.exposure.cap} decimals={d} />
         </div>

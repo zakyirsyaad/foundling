@@ -60,11 +60,12 @@ test("the command checks out the verifier commit that built this proof", () => {
 });
 test("without a known verifier commit the command names the one to check out", () => {
   render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
-  expect(code().textContent).toMatch(/^git checkout <verifier_commit> && /);
-  expect(screen.getByText(/the commit that built this vault's binary/)).toBeInTheDocument();
+  expect(code().textContent).toMatch(/^git checkout VERIFIER_COMMIT && /);
+  expect(screen.getByText("Replace VERIFIER_COMMIT with the commit that built this vault's binary.")).toBeInTheDocument();
 });
-test("the proof note says the verifier checks an archived NEAR AI signature", () => {
+test("the proof note ties the NEAR AI check to the verifier commit", () => {
   render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
   expect(screen.queryByText(/not covered yet/)).toBeNull();
-  expect(screen.getByText(/archived NEAR AI signature/)).toBeInTheDocument();
+  expect(screen.getByText(/Newer verifiers also check the advisor's archived NEAR AI signature/)).toBeInTheDocument();
+  expect(screen.getByText(/the commit in the command decides which checks run/)).toBeInTheDocument();
 });

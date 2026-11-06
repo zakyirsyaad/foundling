@@ -55,3 +55,8 @@ test("a slow API is pending/timeout", async () => {
     vi.useRealTimers();
   }
 });
+
+test("a verifier commit that is not a full sha leaves the rest of the proof intact", async () => {
+  const r = await client(() => ok({ verifier: { pass: 3, skip: 1, fail: 0, state: "done" }, obs_recheck: null, replay: "sealed", verifier_commit: "abc1234" })).proof(7n);
+  expect(r).toEqual({ status: "ok", cursor: null, data: { verifier: { pass: 3, skip: 1, fail: 0, state: "done" }, obsRecheck: null, replay: "sealed", verifierCommit: null } });
+});
