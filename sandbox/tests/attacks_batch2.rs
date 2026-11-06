@@ -1071,7 +1071,10 @@ async fn governor_loosen() -> anyhow::Result<()> {
             amount(&policy0[field]) * numerator / denominator,
         )
     };
+    // tvl_cap, per_user_cap, cap_sell_bps, max_risk_bps and max_mint_per_cycle have no floor in the
+    // SPEC 3.6 text; the vault gives the first four the 10% of every cap and max_mint_per_cycle 1.
     let limits = [
+        ("dust_wnear", json!("0")),
         ("cap_bps", at("cap_bps", 1, 10)),
         ("epoch_cap_bps", at("epoch_cap_bps", 1, 10)),
         ("epoch_cap_usdc", at("epoch_cap_usdc", 1, 10)),
@@ -1257,8 +1260,9 @@ async fn kill_agent() -> anyhow::Result<()> {
     }
 
     // The role is an account id, and the account that created the id can create it again with a
-    // new key. That is not a defence of the vault; the step records what the revived keeper can do.
+    // new key. That is not a defence of the vault: the step measures what the revived keeper can do.
     let books = balances(&env).await?;
+    let nonce_before: u64 = env.view_vault("last_nonce", json!({})).await?;
     let revived = env
         .worker
         .root_account()?
@@ -1273,27 +1277,40 @@ async fn kill_agent() -> anyhow::Result<()> {
     );
     let comeback = env.call_vault(&revived, "trigger_cycle", json!({})).await?;
     let can_trigger = comeback.is_success();
+    let nonce_after: u64 = env.view_vault("last_nonce", json!({})).await?;
+    let ops: u128 = env
+        .view_vault::<String>("ops_spent", json!({}))
+        .await?
+        .parse()?;
+    let budget: u128 = env
+        .view_vault::<serde_json::Value>("policy", json!({}))
+        .await?["ops_budget"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("policy has no ops_budget"))?
+        .parse()?;
     run.step(
-        "the keeper id created again by its parent starts a cycle: OutLayer is gone, so it fails and nothing trades",
-        !swapped(&comeback)
+        "the keeper id created again by its parent starts a cycle: one run fee inside ops_budget, no trade",
+        nonce_after == nonce_before + u64::from(can_trigger)
+            && ops <= budget
+            && !swapped(&comeback)
             && stage(&env).await? == json!("Idle")
-            && balances(&env).await? == books
-            && (!can_trigger || code_of(event_data(&comeback, "cycle_failed")).is_some()),
+            && balances(&env).await? == books,
         None,
-        json!({"id": revived.id(), "triggered": can_trigger, "cycle_failed": code_of(event_data(&comeback, "cycle_failed")),
+        json!({"id": revived.id(), "triggered": can_trigger, "nonce_before": nonce_before, "nonce_after": nonce_after,
+               "cycle_failed": code_of(event_data(&comeback, "cycle_failed")), "ops_within_budget": ops <= budget,
                "refused": run.refused(&comeback)}),
     );
-    run.note(
-        "KEEPER_ID_REUSE",
-        if can_trigger {
-            "FINDING: the vault binds the keeper role to an account id, so whoever controls the id's parent \
-             (or anyone, for a top-level id) can create it again after it is deleted and trigger cycles again. \
-             Cycles can still not trade without OutLayer, and the cap, cooldown and freeze limits still hold. \
-             Choose keeper ids whose parent the lead controls and say so in the threat model"
-        } else {
-            "the keeper id created again by its parent could not trigger a cycle"
-        },
-    );
+    if can_trigger {
+        run.finding(
+            "KEEPER_ID_REUSE",
+            "The vault binds the keeper role to an account id, not to a key. After the keeper account is \
+             deleted, whoever controls the id's parent (anyone, for a top-level id) can create it again and \
+             trigger cycles; each one spends outlayer_deposit, up to ops_budget per window. Measured here: \
+             one cycle started, nothing traded (OutLayer was gone in this sandbox, so execute_decision was \
+             not reached), spending stayed within ops_budget, and the vault ended Idle. Mitigation: keeper \
+             ids under a parent the lead controls, and rotation through schedule_keeper_change.",
+        );
+    }
 
     // The guardian freezes too, and the exit is still open.
     freeze(&env).await?;

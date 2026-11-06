@@ -347,10 +347,13 @@ pub async fn claimable(env: &Foundling, who: &Account, token: &str) -> anyhow::R
 
 pub async fn book(env: &Foundling) -> anyhow::Result<(u128, u128)> {
     let book: Value = env.view_vault("book", json!({})).await?;
-    Ok((
-        book["usdc"].as_str().unwrap_or("0").parse()?,
-        book["wnear"].as_str().unwrap_or("0").parse()?,
-    ))
+    let amount = |token: &str| -> anyhow::Result<u128> {
+        Ok(book[token]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("book has no {token}: {book}"))?
+            .parse()?)
+    };
+    Ok((amount("usdc")?, amount("wnear")?))
 }
 
 pub async fn total_shares(env: &Foundling) -> anyhow::Result<u128> {
@@ -417,11 +420,15 @@ pub struct Run {
     /// Behind a RefCell so `refused` can be called inside the arguments of `step`.
     observed: RefCell<Vec<String>>,
     notes: Vec<Value>,
+    findings: Vec<Value>,
     refusals: RefCell<Vec<String>>,
 }
 
-/// The panic codes of SPEC 3.7. A refusal that carries one is recorded as observed whether or not
-/// the step says so, so the registry's code list is checked against everything the run saw.
+/// The panic codes of SPEC 3.7, plus `FROZEN` and `HALTED` (the SPEC lists them under `Rejected`, and
+/// the vault also panics with them) and `NOT_ALLOWED`, which the SPEC dropped. Keeping that last one
+/// is a tripwire: a vault that starts to emit it shows up as an unexpected code. A refusal that
+/// carries one is recorded as observed whether or not the step says so, so the registry's code list
+/// is checked against everything the run saw.
 const SPEC_PANIC_CODES: &[&str] = &[
     "NOT_KEEPER",
     "NOT_ALLOWED",
@@ -449,7 +456,7 @@ fn refusal_message(text: &str) -> String {
             return kind.to_string();
         }
     }
-    text.chars().take(80).collect()
+    "other error".to_string()
 }
 
 impl Run {
@@ -461,6 +468,7 @@ impl Run {
             steps: Vec::new(),
             observed: RefCell::new(Vec::new()),
             notes: Vec::new(),
+            findings: Vec::new(),
             refusals: RefCell::new(Vec::new()),
         }
     }
@@ -508,6 +516,12 @@ impl Run {
             .push(json!({"step": label, "held": null, "observed": null, "detail": detail}));
     }
 
+    /// Something the attack found that is not a defence of the vault and not a reason to fail the
+    /// run: a property of the design the lead should decide on (threat model, deployment).
+    pub fn finding(&mut self, id: &str, what: &str) {
+        self.findings.push(json!({"id": id, "finding": what}));
+    }
+
     pub fn note(&mut self, code: &str, why: &str) {
         self.notes.push(json!({"code": code, "note": why}));
     }
@@ -552,6 +566,7 @@ impl Run {
             "ledger_after": after,
             "steps": self.steps,
             "refusal_texts": self.refusals.borrow().clone(),
+            "findings": self.findings,
             "not_exercised": self.notes,
         });
         std::fs::write(

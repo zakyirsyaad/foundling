@@ -35,11 +35,12 @@ attack-lab:
 # The same, with the wasm and the sandbox tests built first, and one sandbox test run so the neard
 # binary is downloaded now. Builds or a download inside an attack would count against its 300 s
 # limit and report ERROR for what is only a cold cache.
-attack-lab-full: wasm attack-warm
+attack-lab-full: wasm
+	@$(MAKE) --no-print-directory attack-warm
 	@python3 tools/attack.py run-all
 
-# Compiles the sandbox attack tests and runs one sandbox test so neard is downloaded. CI's soft run
-# calls this after `make wasm`, so a cold cache costs the job and not the first attack's 300 s.
+# Compiles the sandbox attack tests and runs one sandbox test so neard is downloaded. It needs the
+# wasm built first (attack-lab-full and attack-proofs build it, CI's soft run calls this after `make wasm`), so a cold cache costs the job and not the first attack's 300 s.
 attack-warm:
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
@@ -55,7 +56,5 @@ attack-proofs:
 		echo "== build $$c"; \
 		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null) || exit 1; \
 	done
-	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
-	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
-	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
+	@$(MAKE) --no-print-directory attack-warm
 	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack/reproducible python3 tools/attack.py run-all
