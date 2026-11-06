@@ -343,7 +343,8 @@ impl Redeemed {
     }
 }
 
-fn delta(before: u128, after: u128) -> i128 {
+/// `after - before`, signed: a number a step can judge, not an underflow panic.
+pub fn delta(before: u128, after: u128) -> i128 {
     after as i128 - before as i128
 }
 
