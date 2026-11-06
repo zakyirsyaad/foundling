@@ -612,6 +612,10 @@ impl Run {
         std::fs::create_dir_all(&dir)?;
         // A step can be right about its own condition and still have seen the wrong code, so
         // the codes are held to the registry's list on top of the steps.
+        // Sorted, so a proof does not change with the order a race happened to deliver the refusals in.
+        let mut refusal_texts = self.refusals.borrow().clone();
+        refusal_texts.sort();
+        refusal_texts.dedup();
         let observed = self.observed.borrow().clone();
         let unexpected: Vec<&String> = observed
             .iter()
@@ -632,7 +636,7 @@ impl Run {
             "ledger_before": before,
             "ledger_after": after,
             "steps": self.steps,
-            "refusal_texts": self.refusals.borrow().clone(),
+            "refusal_texts": refusal_texts,
             "findings": self.findings,
             "not_exercised": self.notes,
         });

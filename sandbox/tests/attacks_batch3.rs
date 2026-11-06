@@ -53,12 +53,16 @@ fn policy_amount(policy: &Value, field: &str) -> anyhow::Result<u128> {
         .parse()?)
 }
 
-/// Sends `amount` of USDC straight to the vault's wallet, as anyone can.
-async fn donate_usdc(env: &Foundling, amount: u128) -> anyhow::Result<()> {
-    env.mint(&env.usdc, env.stranger.id(), amount).await?;
+/// Sends `amount` of `token` straight to the vault's wallet, as anyone can.
+async fn donate(
+    env: &Foundling,
+    token: &near_workspaces::Contract,
+    amount: u128,
+) -> anyhow::Result<()> {
+    env.mint(token, env.stranger.id(), amount).await?;
     let sent = env
         .stranger
-        .call(env.usdc.id(), "ft_transfer")
+        .call(token.id(), "ft_transfer")
         .args_json(json!({"receiver_id": env.vault_id, "amount": amount.to_string()}))
         .deposit(NearToken::from_yoctonear(1))
         .max_gas()
@@ -113,19 +117,29 @@ async fn inflated_nav() -> anyhow::Result<()> {
     );
     wait_seconds(&env, COOLDOWN + 1).await?;
 
-    // A donation of 1,000 USDC is not NAV.
-    let wallet_before = wallet_of(&env, &env.usdc, &env.vault_id).await?;
-    donate_usdc(&env, 1_000_000_000).await?;
-    let donated = wallet_of(&env, &env.usdc, &env.vault_id).await? - wallet_before;
+    // A donation of 1,000 USDC and 1,000 wNEAR is not NAV.
+    let usdc_wallet = wallet_of(&env, &env.usdc, &env.vault_id).await?;
+    let wnear_wallet = wallet_of(&env, &env.wnear, &env.vault_id).await?;
+    donate(&env, &env.usdc, 1_000_000_000).await?;
+    donate(&env, &env.wnear, 1_000 * WNEAR).await?;
+    let donated = delta(
+        usdc_wallet,
+        wallet_of(&env, &env.usdc, &env.vault_id).await?,
+    );
+    let donated_wnear = delta(
+        wnear_wallet,
+        wallet_of(&env, &env.wnear, &env.vault_id).await?,
+    );
     let after_gift = decide(&env, priced("buy_risk", one_over, NEAR_PRICE)).await?;
     run.step(
-        "1,000 USDC sent straight to the vault: the books and the bps cap do not move",
+        "1,000 USDC and 1,000 wNEAR sent straight to the vault: the books and the bps cap do not move",
         donated == 1_000_000_000
+            && donated_wnear == (1_000 * WNEAR) as i128
             && books(&env).await? == start
             && after_gift.rejected.as_deref() == Some("OVER_CAP")
             && !after_gift.started,
         None,
-        json!({"donated": donated.to_string(), "refused_with": after_gift.rejected, "books_unchanged": books(&env).await? == start}),
+        json!({"donated_usdc": donated.to_string(), "donated_wnear": donated_wnear.to_string(), "refused_with": after_gift.rejected, "books_unchanged": books(&env).await? == start}),
     );
     wait_seconds(&env, COOLDOWN + 1).await?;
 
@@ -174,10 +188,13 @@ async fn inflated_nav() -> anyhow::Result<()> {
     );
     run.note(
         "LEDGER",
-        "ledger_after differs from ledger_before by the 1,000 USDC donated to the vault's wallet; the books, shares and Ref ledger are equal, which each step asserts",
+        "ledger_after differs from ledger_before by the 1,000 USDC and 1,000 wNEAR donated to the vault's wallet; the books, shares and Ref ledger are equal, which each step asserts",
     );
     run.finish(&env, before, ledger(&env).await?)
 }
+
+/// Chain seconds a stalled step waits before `advance` may touch it, in the slow-answer scenarios.
+const STUCK_AFTER: u64 = 30;
 
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 
@@ -291,12 +308,29 @@ async fn deflated_sell() -> anyhow::Result<()> {
         "control failed: exactly cap_wnear should trade: {}",
         failures(&sold)
     );
+    let min_out = event_data(&sold, "swap_started")
+        .and_then(|data| data["min_amount_out"].as_str().map(str::to_string))
+        .ok_or_else(|| anyhow::anyhow!("swap_started carries no min_amount_out"))?;
+    let slippage_bps = policy["slippage_bps"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("policy has no slippage_bps"))?
+        as u128;
+    let honest_min = tight * NEAR_PRICE / 10u128.pow(26) * (10_000 - slippage_bps) / 10_000;
+    run.finding(
+        "SLIPPAGE_FOLLOWS_THE_ANCHOR",
+        &format!(
+            "min_amount_out is computed from the anchor price. With the anchor at 1/100, the sell of {tight} wNEAR \
+             was sent to Ref with a floor of {min_out} USDC units where the honest price gives about {honest_min}. \
+             The pool still paid its own price here, but the slippage floor protects nothing against a wrong anchor: \
+             only cap_wnear (and cap_sell_bps) bound what a sell can lose. Not a breach of I13."
+        ),
+    );
     let (usdc_after, wnear_after) = book(&env).await?;
     run.step(
         "control: a sell of exactly cap_wnear at 1/100 of the price goes through, and the wNEAR book falls by that much only",
         delta(wnear_before, wnear_after) == -(tight as i128) && delta(usdc_before, usdc_after) > 0,
         None,
-        json!({"amount_in": tight.to_string(), "wnear_book_drop": (-delta(wnear_before, wnear_after)).to_string(),
+        json!({"amount_in": tight.to_string(), "min_amount_out": min_out, "wnear_book_drop": (-delta(wnear_before, wnear_after)).to_string(),
                "usdc_book_gain": delta(usdc_before, usdc_after).to_string()}),
     );
     run.note(
@@ -565,9 +599,8 @@ async fn setup_spam() -> anyhow::Result<()> {
         calls.len() == 100,
         "setup failed: the barrage should be 100 calls"
     );
-    if completed(&calls, "Rhea") == 1 && completed(&calls, "RheaTokens") == 0 {
-        calls.extend(barrage(&env, &accounts[..10], 1, &["RheaTokens"]).await?);
-    }
+    // RheaTokens waits for Ref, so ten more calls for it, whether or not the first wave got it done.
+    calls.extend(barrage(&env, &accounts[..10], 1, &["RheaTokens"]).await?);
     let mut refused = 0;
     for (_, result) in &calls {
         if run.refused(result).is_some() {
@@ -580,8 +613,11 @@ async fn setup_spam() -> anyhow::Result<()> {
         .collect();
     let (near_after, _) = vault_near(&env).await?;
     let fixed = 2 * TOKEN_STORAGE + REF_STORAGE + 1;
+    // Under one more token registration, so a second registration of any target shows.
+    let margin = NEAR / 1000;
+    let paid = -delta(near_before, near_after);
     run.step(
-        "100 simultaneous setup_storage calls: each target is registered exactly once",
+        "100 setup_storage calls from 25 accounts at once, then 10 more for RheaTokens: each target is registered exactly once",
         per_target == [1, 1, 1, 1]
             && env.view_vault::<bool>("is_setup_done", json!({})).await?
             && refused == calls.len() - 4,
@@ -591,10 +627,9 @@ async fn setup_spam() -> anyhow::Result<()> {
     );
     run.step(
         "the NEAR the vault paid is the four registrations and not more",
-        delta(near_before, near_after) <= 0 && (near_before - near_after) <= fixed + NEAR / 100,
+        paid >= fixed as i128 - margin as i128 && paid <= fixed as i128 + margin as i128,
         None,
-        json!({"paid": (near_before.saturating_sub(near_after)).to_string(), "registrations": fixed.to_string(),
-               "margin": (NEAR / 100).to_string()}),
+        json!({"paid": paid.to_string(), "registrations": fixed.to_string(), "margin": margin.to_string()}),
     );
 
     // B. A reserve that leaves room for the two token registrations (0.0025 NEAR) and not for Ref (0.01).
@@ -611,6 +646,7 @@ async fn setup_spam() -> anyhow::Result<()> {
     let (tight_before, _) = vault_near(&tight).await?;
     let accounts = spam_accounts(&tight, 25).await?;
     let calls = barrage(&tight, &accounts, 4, &TARGETS).await?;
+    let rhea_calls = calls.iter().filter(|(target, _)| *target == "Rhea").count();
     let mut ref_refusals = 0;
     for (target, result) in &calls {
         if let Some(text) = run.refused(result) {
@@ -627,9 +663,9 @@ async fn setup_spam() -> anyhow::Result<()> {
     let floor = tight_usage * BYTE_COST + reserve;
     run.step(
         "with room for two token registrations only, Ref's storage deposit is refused with NEAR_RESERVE every time",
-        per_target == [1, 1, 0, 0] && ref_refusals > 0 && !tight.view_vault::<bool>("is_setup_done", json!({})).await?,
+        per_target == [1, 1, 0, 0] && rhea_calls > 0 && ref_refusals == rhea_calls && !tight.view_vault::<bool>("is_setup_done", json!({})).await?,
         Some("NEAR_RESERVE"),
-        json!({"completed_per_target": per_target, "rhea_refused_near_reserve": ref_refusals}),
+        json!({"completed_per_target": per_target, "rhea_calls": rhea_calls, "rhea_refused_near_reserve": ref_refusals}),
     );
     run.step(
         "the vault's NEAR never fell under stake + near_reserve",
@@ -696,6 +732,35 @@ async fn donate_at_rhea(env: &Foundling, amount: u128) -> anyhow::Result<()> {
         .await?;
     anyhow::ensure!(given.is_success(), "mft_transfer: {}", failures(&given));
     Ok(())
+}
+
+/// Waits for a transaction whose Ref answer is held back for a few hundred blocks. Each poll is bounded
+/// and the chain moves a little between polls: a poll of a pending transaction can block without end when
+/// nothing else moves the chain, and a wait that outlasts the RPC's patience is an error.
+async fn finish_hung(
+    env: &Foundling,
+    running: near_workspaces::operations::TransactionStatus,
+) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    let mut last = String::from("no poll answered");
+    for _ in 0..30 {
+        env.worker.fast_forward(60).await?;
+        match tokio::time::timeout(std::time::Duration::from_secs(5), running.status()).await {
+            Ok(Ok(std::task::Poll::Ready(result))) => return Ok(result),
+            Ok(Ok(_)) => last = "still pending".to_string(),
+            Ok(Err(err)) => last = format!("{err:#}"),
+            Err(_) => last = "the poll did not answer in 5 s".to_string(),
+        }
+    }
+    anyhow::bail!("the hung execute_decision never finished ({last})")
+}
+
+/// The chain second the stage `Swapping` was entered, so a check that needs to land before
+/// `stuck_after` can tell when it did not.
+async fn swapping_since(env: &Foundling) -> anyhow::Result<u64> {
+    let stage = stage(env).await?;
+    stage["Swapping"]["entered_at"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("the vault is not Swapping: {stage}"))
 }
 
 /// `advance` is open to everyone and marks `Probing` before it reads Ref, so a second call finds a
@@ -794,6 +859,12 @@ async fn advance_race() -> anyhow::Result<()> {
         json!({"callers": 5, "succeeded": wins, "probing_events": probing, "swap_reverted_events": reverted,
                "refused_not_stuck": losers_say_not_stuck}),
     );
+    run.note(
+        "RACE",
+        "the five advances are submitted back to back with transact_async, so they land in the same or in adjacent blocks; \
+         that they overlap the winner's own receipts is likely and not forced. A call that comes after the swap is Idle reads \
+         NOT_STUCK as well, so the Probing lock is shown by the single probing event, not by the count of refusals alone",
+    );
     let (held_usdc, held_wnear) = rhea_holds(&env).await?;
     run.step(
         "afterwards the vault is Idle with the books it had, and Ref holds the ledger plus the donation only",
@@ -808,7 +879,7 @@ async fn advance_race() -> anyhow::Result<()> {
 
     // B. A swap whose real answer is still in flight (Ref's answer comes about 200 blocks late).
     let slow = attack_env_with(Setup {
-        policy: json!({"epoch_len": EPOCH_LEN, "cooldown": COOLDOWN, "stuck_after": 10, "halt_after": 600}),
+        policy: json!({"epoch_len": EPOCH_LEN, "cooldown": COOLDOWN, "stuck_after": STUCK_AFTER, "halt_after": 600}),
         ..Default::default()
     })
     .await?;
@@ -825,10 +896,15 @@ async fn advance_race() -> anyhow::Result<()> {
         .transact_async()
         .await?;
     wait_for_stage(&slow, "Swapping").await?;
+    let entered = swapping_since(&slow).await?;
     let early = slow
         .call_vault(&slow.stranger, "advance", json!({"nonce": hung_nonce}))
         .await?;
     let early_text = run.refused(&early);
+    anyhow::ensure!(
+        head_second(&slow).await? < entered + STUCK_AFTER,
+        "the early advance came after stuck_after on this machine, so the check means nothing"
+    );
     run.step(
         "advance while the real answer is in flight and stuck_after has not passed",
         refusal(early_text.as_deref(), &["NOT_STUCK"]).is_some()
@@ -836,7 +912,7 @@ async fn advance_race() -> anyhow::Result<()> {
         Some("NOT_STUCK"),
         json!({"stage": "Swapping"}),
     );
-    wait_seconds(&slow, 11).await?;
+    wait_seconds(&slow, STUCK_AFTER + 1).await?;
     let rescue = slow
         .call_vault(&slow.stranger, "advance", json!({"nonce": hung_nonce}))
         .await?;
@@ -845,22 +921,7 @@ async fn advance_race() -> anyhow::Result<()> {
         "advance after stuck_after: {}",
         failures(&rescue)
     );
-    // Poll the first transaction instead of waiting on it: a wait that outlasts the RPC's patience is an
-    // error, and the yield times out only after about 200 blocks.
-    // Each poll of a transaction that is still waiting can block for seconds, so go past the timeout first.
-    for _ in 0..5 {
-        slow.worker.fast_forward(60).await?;
-    }
-    let mut original = None;
-    for _ in 0..40 {
-        if let Ok(std::task::Poll::Ready(result)) = running.status().await {
-            original = Some(result);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-    let original =
-        original.ok_or_else(|| anyhow::anyhow!("the hung execute_decision never finished"))?;
+    let original = finish_hung(&slow, running).await?;
     let executed = event_data(&rescue, "executed");
     let amount_out: u128 = executed
         .as_ref()
@@ -892,9 +953,74 @@ async fn advance_race() -> anyhow::Result<()> {
         None,
         json!({"in_ref": "0", "ledger": "0"}),
     );
+    // C. The same slow answer, with a donation of the swap's input token at Ref at least the size of the swap.
+    // Recovery reads Ref's balance to tell whether the swap ran, and the donation can read like the input.
+    let masked = attack_env_with(Setup {
+        policy: json!({"epoch_len": EPOCH_LEN, "cooldown": COOLDOWN, "stuck_after": STUCK_AFTER, "halt_after": 600}),
+        ..Default::default()
+    })
+    .await?;
+    settle_deposit(&masked).await?;
+    let (usdc_pre, wnear_pre) = book(&masked).await?;
+    set_fault(&masked, "SwapHang").await?;
+    let masked_nonce = decision_ready(&masked, template("buy_risk", 1_000_000)).await?;
+    let masked_run = masked
+        .keeper
+        .call(&masked.vault_id, "execute_decision")
+        .args_json(json!({ "nonce": masked_nonce }))
+        .max_gas()
+        .transact_async()
+        .await?;
+    wait_for_stage(&masked, "Swapping").await?;
+    donate_at_rhea(&masked, 1_000_000).await?;
+    wait_seconds(&masked, STUCK_AFTER + 1).await?;
+    let masked_rescue = masked
+        .call_vault(&masked.stranger, "advance", json!({"nonce": masked_nonce}))
+        .await?;
+    anyhow::ensure!(
+        masked_rescue.is_success(),
+        "advance after stuck_after: {}",
+        failures(&masked_rescue)
+    );
+    let masked_original = finish_hung(&masked, masked_run).await?;
+    let executed_events =
+        event_count(&masked_rescue, "executed") + event_count(&masked_original, "executed");
+    let reverted_events = event_count(&masked_rescue, "swap_reverted")
+        + event_count(&masked_original, "swap_reverted");
+    let (usdc_post, wnear_post) = book(&masked).await?;
+    let (ref_usdc, ref_wnear) = rhea_holds(&masked).await?;
+    let outcome = match (executed_events, reverted_events) {
+        (1, 0) => "executed",
+        (0, 1) => "swap_reverted",
+        _ => "something else",
+    };
+    run.step(
+        "a donation of the input token at Ref, as large as the swap, while the answer is in flight: the swap ends one way, the ledger is empty, the wallets equal the books and the USDC book does not rise",
+        outcome != "something else"
+            && stage(&masked).await? == json!("Idle")
+            && rhea_ledger(&masked).await? == (0, 0)
+            && wallet_of(&masked, &masked.usdc, &masked.vault_id).await? == usdc_post
+            && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post
+            && usdc_post <= usdc_pre,
+        None,
+        json!({"outcome": outcome, "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
+               "book_after": {"usdc": usdc_post.to_string(), "wnear": wnear_post.to_string()},
+               "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()}}),
+    );
+    run.finding(
+        "DONATION_MASKS_A_LANDED_SWAP",
+        &format!(
+            "With the swap landed and its answer in flight, a donation of 1 USDC at Ref (the swap's size) was added to the vault's \
+             account there before advance. advance ended the swap as {outcome}. Book (USDC/wNEAR) {usdc_pre}/{wnear_pre} -> \
+             {usdc_post}/{wnear_post}; Ref holds {ref_usdc}/{ref_wnear} for the vault and the vault's ledger is empty. \
+             Tokens are conserved, the wallets equal the books and the USDC book does not rise. Where the outcome is swap_reverted, \
+             recovery read the donation as the swap's input: the real output stays at Ref and in no book, and the donor's USDC took \
+             its place in the book. That is a loss of the output for a gift of the same value, not a way to raise the share price."
+        ),
+    );
     run.note(
         "LEDGER",
-        "ledger_after differs from ledger_before: the recovered swap returned the USDC; the donation sits at Ref and in no book",
+        "ledger_after differs from ledger_before only in the turnover window, because the swap that was undone still counts there; books, shares and wallets are equal",
     );
     run.finish(&env, before, ledger(&env).await?)
 }
