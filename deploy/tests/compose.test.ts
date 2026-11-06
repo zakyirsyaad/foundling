@@ -99,3 +99,10 @@ test("the build context never ships secrets or local state", () => {
 test("the worker runs under an init process, which reaps tool processes killed on timeout", () => {
   expect(compose.services.worker!.init).toBe(true);
 });
+
+test("the NEAR AI archive key goes to the worker and nowhere else", () => {
+  expect(compose.services.worker!.environment!.NEARAI_ARCHIVE_KEY).toBe("${NEARAI_ARCHIVE_KEY}");
+  for (const name of Object.keys(compose.services).filter((n) => n !== "worker")) {
+    expect(compose.services[name]!.environment ?? {}, name).not.toHaveProperty("NEARAI_ARCHIVE_KEY");
+  }
+});

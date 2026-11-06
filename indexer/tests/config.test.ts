@@ -52,3 +52,9 @@ test("VERIFIER_COMMIT must be a full 40-character sha, as BuildKit git contexts 
   expect(() => loadConfig({ ...base, VERIFIER_COMMIT: "26ac6d0" })).toThrow();
   expect(loadConfig({ ...base, VERIFIER_COMMIT: "a".repeat(40) }).proofs.verifierCommit).toBe("a".repeat(40));
 });
+
+test("the NEAR AI archive key is read for fetch_proof only when it is set", () => {
+  expect(loadConfig({ ...base, NEARAI_ARCHIVE_KEY: "sk-archive" }).proofs.tools.nearaiArchiveKey).toBe("sk-archive");
+  expect(loadConfig({ ...base, NEARAI_ARCHIVE_KEY: "" }).proofs.tools).not.toHaveProperty("nearaiArchiveKey");
+  expect(loadConfig(base).proofs.tools).not.toHaveProperty("nearaiArchiveKey");
+});

@@ -52,3 +52,15 @@ test("a failed run is described with the tool's last stderr line", async () => {
   const r = await runTool("/bin/sh", ["-c", "echo working; echo 'error: the vault is revealed, so pass --reveal-tx' >&2; exit 2"], 2000);
   expect(describeRun("fetch_proof.py", r, 2000)).toBe("fetch_proof.py exit 2: error: the vault is revealed, so pass --reveal-tx");
 });
+
+test("runTool hands a tool the env it is given and keeps the archive key from every other tool", async () => {
+  process.env.NEARAI_ARCHIVE_KEY = "from-the-worker";
+  try {
+    const plain = await runTool("/bin/sh", ["-c", "echo ${NEARAI_ARCHIVE_KEY:-none} ${X:-unset}"], 2000, { X: "given" });
+    expect(plain.stdout.trim()).toBe("none given");
+    const handed = await runTool("/bin/sh", ["-c", "echo ${NEARAI_ARCHIVE_KEY:-none}"], 2000, { NEARAI_ARCHIVE_KEY: "handed" });
+    expect(handed.stdout.trim()).toBe("handed");
+  } finally {
+    delete process.env.NEARAI_ARCHIVE_KEY;
+  }
+});

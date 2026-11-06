@@ -56,6 +56,8 @@ services:
       RPC_URLS: ${RPC_URLS}
       ARCHIVAL_RPC_URLS: ${ARCHIVAL_RPC_URLS}
       FASTNEAR_API_KEY: ${FASTNEAR_API_KEY}
+      # Handed to fetch_proof.py alone; the other proof tools never see it.
+      NEARAI_ARCHIVE_KEY: ${NEARAI_ARCHIVE_KEY}
     # The proof tools run in their own process groups and are killed on timeout; init reaps what is left.
     init: true
     # db has no way out; egress reaches FastNEAR, RPC and the proof sources.
