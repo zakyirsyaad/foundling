@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A step with no shell runs as `bash -e {0}`, with no pipefail, so `cmd | tee file` reports tee's
+# status and hides a failed cmd. `shell: bash` runs `bash --noprofile --norc -eo pipefail {0}`.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -162,7 +168,7 @@ jobs:
       - name: Test
         run: python3 -m unittest tests.test_attack_lab
       - name: Test the sandbox attack runner and the make targets
-        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make tests.test_attack_batch2
+        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make tests.test_attack_batch2 tests.test_attack_batch3
 
   keeper:
     name: Keeper bot
@@ -402,9 +408,10 @@ jobs:
       - name: Images start and refuse an empty env
         run: |
           api=$(docker run --rm foundling-api:ci 2>&1 || true)
-          echo "$api" | grep -q DATABASE_URL_READER
+          # Here-strings, not `echo | grep -q`: under pipefail a long output could SIGPIPE the echo.
+          grep -q DATABASE_URL_READER <<< "$api"
           worker=$(docker run --rm foundling-worker:ci 2>&1 || true)
-          echo "$worker" | grep -q ACTIVE_VAULT_ID
+          grep -q ACTIVE_VAULT_ID <<< "$worker"
           docker run --rm --entrypoint python3 foundling-worker:ci /app/tools/fetch_proof.py --help > /dev/null
           docker run --rm --entrypoint sh foundling-worker:ci -c 'test -x /usr/local/bin/foundling-verify && test "$(id -u)" != 0'
 
@@ -430,8 +437,10 @@ jobs:
           for crate in contracts/vault contracts/mock-ref contracts/mock-oracle \
             contracts/mock-outlayer contracts/mock-token; do
             for package in crypto-bigint zstd zstd-safe; do
-              if cargo tree --locked --manifest-path "$crate/Cargo.toml" \
-                --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -q "$package"; then
+              # grep -c reads all of cargo tree's output. `grep -q` would stop at the first match,
+              # and under pipefail cargo tree's SIGPIPE would then make the `if` false.
+              if [ "$(cargo tree --locked --manifest-path "$crate/Cargo.toml" \
+                --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -c "$package")" -ne 0 ]; then
                 echo "::error::$package reached the WASM of $crate"
                 exit 1
               fi
@@ -492,10 +501,12 @@ jobs:
         run: make attack-warm
       - name: Run every core attack
         run: |
-          # GitHub's default `bash -e` has no pipefail, so without this `status` is tee's, always 0.
+          # The workflow's default shell already has pipefail; the step sets it too, so `status` stays
+          # run-all's and not tee's when the step runs under plain `bash -e` (tests/test_attack_batch2.py).
+          # --strict: a registry attack with no script exits 2 instead of passing as NOT_IMPLEMENTED.
           set -o pipefail
           status=0
-          python3 tools/attack.py run-all | tee "$RUNNER_TEMP/attacks.txt" || status=$?
+          python3 tools/attack.py run-all --strict | tee "$RUNNER_TEMP/attacks.txt" || status=$?
           {
             echo '### Attack Lab (run-all)'
             echo "exit status: $status"

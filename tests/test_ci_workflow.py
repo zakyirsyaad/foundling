@@ -26,6 +26,12 @@ REQUIRED_JOBS = {
     "vault-wasm", "sandbox", "web", "dependencies", "secrets", SOFT_JOB, "workflow",
     "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
 }
+# GitHub runs a step with no shell as `bash -e {0}`, which has no pipefail, so `cmd | tee`
+# reports tee's status. A workflow default of `shell: bash` runs `bash -eo pipefail {0}`.
+DEFAULT_SHELL = "defaults:\n  run:\n    shell: bash\n"
+# Every Attack Lab unittest module must run in the scaffold job, so a new batch cannot be
+# added without its binding tests reaching CI.
+ATTACK_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_attack_*.py"))
 # Patterns that make a failing command succeed. Every `||` is rejected separately, except
 # `|| status=$?`, which records the status and lets the step fail on it, and the two lines
 # below: the Web job runs an image that is meant to refuse an empty env, captures what it
@@ -103,8 +109,10 @@ def check(text):
     for match in re.finditer(r"\|\|\s*(\S*)", shell_only):
         if match.group(1) != "status=$?":
             problems.append(f"`|| {match.group(1)}` can swallow a failure; only `|| status=$?` is allowed")
-    if re.search(r"(?m)^\s*(?:-\s*)?shell:", code):
-        problems.append("`shell:` can drop -e and pipefail, which GitHub's default bash keeps")
+    if not re.search(rf"(?m)^{re.escape(DEFAULT_SHELL)}", head + "\n"):
+        problems.append("the workflow must set `defaults: run: shell: bash`, which adds pipefail to GitHub's `bash -e`")
+    if len(re.findall(r"(?m)^\s*(?:-\s*)?shell:", code)) != 1:
+        problems.append("`shell:` may appear only as the workflow default; anywhere else it can drop -e or pipefail")
 
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
     if len(flagged) != 1:
@@ -115,8 +123,8 @@ def check(text):
         problems.append(f"{SOFT_JOB} must carry `    continue-on-error: true`")
     elif lines[lines.index("    continue-on-error: true") - 1].strip() != PROMOTION_NOTE:
         problems.append("the promotion note must sit directly above continue-on-error")
-    if not re.search(r"python3 tools/attack\.py run-all\b", soft):
-        problems.append(f"{SOFT_JOB} must run `python3 tools/attack.py run-all`")
+    if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", soft):
+        problems.append(f"{SOFT_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
     if 'exit "$status"' not in soft:
         problems.append(f'{SOFT_JOB} must end with exit "$status" so a failure stays visible')
 
@@ -125,6 +133,10 @@ def check(text):
             problems.append(f"{job}: expected a step `run: {pattern}`")
 
     runs("attack-lab", r"python3 -m unittest tests\.test_attack_lab")
+    scaffold_modules = set(re.findall(r"\btests\.(test_attack_\w+)", jobs.get("attack-lab", "")))
+    for module in ATTACK_TESTS:
+        if module not in scaffold_modules:
+            problems.append(f"attack-lab: tests.{module} is never run")
     runs("offline-verifier", r"python3 verify\.py")
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
@@ -220,6 +232,10 @@ class TamperingTest(unittest.TestCase):
             "attack-lab command replaced": tampered(b, "run: python3 -m unittest tests.test_attack_lab\n", "run: 'true'\n"),
             "workflow command only echoed": tampered(b, "run: python3 -m unittest tests.test_ci_workflow\n", "run: echo python3 -m unittest tests.test_ci_workflow\n"),
             "run-all replaced": tampered(b, "python3 tools/attack.py run-all", "echo skip"),
+            "run-all without --strict": tampered(b, "run-all --strict", "run-all"),
+            "workflow default shell removed": tampered(b, DEFAULT_SHELL, ""),
+            "workflow default shell drops pipefail": tampered(b, DEFAULT_SHELL, "defaults:\n  run:\n    shell: bash -e {0}\n"),
+            "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
             "soft job swallows the status": tampered(b, 'exit "$status"', "true"),
             "action pinned to a tag": tampered(b, sha, "actions/checkout@v4"),
             "no timeout": tampered(b, workflow + "    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n", workflow + "    runs-on: ubuntu-24.04\n"),
