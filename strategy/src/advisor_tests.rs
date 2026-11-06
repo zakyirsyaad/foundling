@@ -14,6 +14,8 @@ const CHAT_ID: &str = "chatcmpl-0123456789abcdef";
 const FEED_HOST: &str = "www.theblock.co";
 const BACKUP_FEED_HOST: &str = "cointelegraph.com";
 const CHAT_HOST: &str = "cloud-api.near.ai";
+const NONCE: u64 = 7;
+const SALT_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
 fn reply_with(id: &str, content: &str, finish_reason: &str) -> Vec<u8> {
     json!({"id": id, "model": MODELS[0], "choices": [{"index": 0, "finish_reason": finish_reason,
@@ -34,7 +36,7 @@ fn secret(ai_key: Option<&str>) -> Secret {
     Secret {
         chain: "testnet".into(),
         wasm_hash: "bb".into(),
-        salt: String::new(),
+        salt: SALT_HEX.into(),
         params: Params {
             risk_on_above: 420_000_000,
             risk_off_below: 400_000_000,
@@ -92,7 +94,7 @@ fn world(broken: &'static [&'static str]) -> impl FnMut(&Call) -> Option<Vec<u8>
 fn hosts_called(ai_key: Option<&str>, broken: &'static [&'static str]) -> Vec<&'static str> {
     let mut hosts = Vec::new();
     let mut inner = world(broken);
-    observe(&secret(ai_key), |call: &Call| {
+    observe(&secret(ai_key), NONCE, |call: &Call| {
         hosts.push(call.host);
         inner(call)
     });
@@ -102,7 +104,7 @@ fn hosts_called(ai_key: Option<&str>, broken: &'static [&'static str]) -> Vec<&'
 fn chat_call_of(ai_key: &str) -> (Vec<(&'static str, String)>, serde_json::Value) {
     let mut seen = None;
     let mut inner = world(&[]);
-    observe(&secret(Some(ai_key)), |call: &Call| {
+    observe(&secret(Some(ai_key)), NONCE, |call: &Call| {
         if call.host == CHAT_HOST {
             seen = Some((
                 call.headers.clone(),
@@ -314,7 +316,7 @@ fn the_reference_points_at_the_signed_reply() {
 
 #[test]
 fn the_advice_lands_in_the_reading() {
-    let reading = observe(&secret(Some(KEY)), world(&[])).unwrap();
+    let reading = observe(&secret(Some(KEY)), NONCE, world(&[])).unwrap();
 
     assert_eq!(reading.obs.ai_flag, AI_FLAGGED);
     assert_eq!(reading.obs.ai_conf, 80);
@@ -324,7 +326,7 @@ fn the_advice_lands_in_the_reading() {
 
 #[test]
 fn no_key_leaves_the_advisor_silent_and_makes_no_call() {
-    let reading = observe(&secret(None), world(&[])).unwrap();
+    let reading = observe(&secret(None), NONCE, world(&[])).unwrap();
 
     assert_eq!(reading.obs.ai_flag, AI_SILENT);
     assert_eq!(reading.ai_ref, AiRef::default());
@@ -333,7 +335,7 @@ fn no_key_leaves_the_advisor_silent_and_makes_no_call() {
 
 #[test]
 fn a_market_that_cannot_be_read_spends_no_credit() {
-    assert_eq!(observe(&secret(Some(KEY)), world(&["trades"])), None);
+    assert_eq!(observe(&secret(Some(KEY)), NONCE, world(&["trades"])), None);
     assert!(!hosts_called(Some(KEY), &["trades"]).contains(&CHAT_HOST));
 }
 
@@ -354,7 +356,7 @@ fn the_backup_feed_is_left_alone_when_the_first_works() {
 fn no_feed_leaves_the_advisor_silent_and_spends_no_credit() {
     let broken = &[FEED_HOST, BACKUP_FEED_HOST];
 
-    let reading = observe(&secret(Some(KEY)), world(broken)).unwrap();
+    let reading = observe(&secret(Some(KEY)), NONCE, world(broken)).unwrap();
 
     assert_eq!(reading.obs.ai_flag, AI_SILENT);
     assert!(!hosts_called(Some(KEY), broken).contains(&CHAT_HOST));
@@ -364,14 +366,14 @@ fn no_feed_leaves_the_advisor_silent_and_spends_no_credit() {
 fn the_second_model_answers_when_the_first_is_gone() {
     static FIRST: [&str; 1] = [MODELS[0]];
 
-    let reading = observe(&secret(Some(KEY)), world(&FIRST)).unwrap();
+    let reading = observe(&secret(Some(KEY)), NONCE, world(&FIRST)).unwrap();
 
     assert_eq!(reading.obs.ai_flag, AI_FLAGGED);
 }
 
 #[test]
 fn no_model_leaves_the_advisor_silent() {
-    let reading = observe(&secret(Some(KEY)), world(&["chat"])).unwrap();
+    let reading = observe(&secret(Some(KEY)), NONCE, world(&["chat"])).unwrap();
 
     assert_eq!(reading.obs.ai_flag, AI_SILENT);
     assert_eq!(reading.obs.pb, 390_000_000);
@@ -382,7 +384,7 @@ fn no_model_leaves_the_advisor_silent() {
 fn the_key_goes_only_to_the_chat_host() {
     let mut carried = Vec::new();
     let mut inner = world(&[]);
-    observe(&secret(Some(KEY)), |call: &Call| {
+    observe(&secret(Some(KEY)), NONCE, |call: &Call| {
         if !call.headers.is_empty() {
             carried.push(call.host);
         }
@@ -423,8 +425,73 @@ fn the_headlines_are_the_user_message() {
     assert_eq!(body["messages"][1]["role"], "user");
     assert_eq!(
         body["messages"][1]["content"],
-        "First headline\nSecond headline"
+        format!(
+            "First headline\nSecond headline\n\nref:{}",
+            tag_of(SALT_HEX, NONCE)
+        )
     );
+}
+
+/// The tag written out by hand: SHA-256 of the domain, then each field after its u32 length.
+fn tag_of(salt_hex: &str, nonce: u64) -> String {
+    let salt: Vec<u8> = (0..salt_hex.len())
+        .step_by(2)
+        .map(|start| u8::from_str_radix(&salt_hex[start..start + 2], 16).unwrap())
+        .collect();
+    let mut hasher = Sha256::new();
+    hasher.update(b"foundling/v1/request-tag");
+    for field in [salt.as_slice(), &nonce.to_be_bytes()] {
+        hasher.update((field.len() as u32).to_be_bytes());
+        hasher.update(field);
+    }
+    to_hex(&hasher.finalize())
+}
+
+fn headlines_sent(salt_hex: &'static str, nonce: u64) -> String {
+    let mut sent = None;
+    let mut inner = world(&[]);
+    let secret = Secret {
+        salt: salt_hex.into(),
+        ..secret(Some(KEY))
+    };
+    observe(&secret, nonce, |call: &Call| {
+        if call.host == CHAT_HOST {
+            let body: serde_json::Value =
+                serde_json::from_str(call.body.as_deref().unwrap()).unwrap();
+            sent = Some(body["messages"][1]["content"].as_str().unwrap().to_string());
+        }
+        inner(call)
+    });
+    sent.unwrap()
+}
+
+#[test]
+fn the_request_carries_a_tag_only_the_salt_can_give() {
+    // Without it, the request hash NEAR AI signs is a hash of the prompt and public
+    // headlines alone, and anyone holding the signature could test guesses of the prompt.
+    let other_salt = "ff".repeat(32);
+
+    assert_ne!(
+        headlines_sent(SALT_HEX, NONCE),
+        headlines_sent(Box::leak(other_salt.into_boxed_str()), NONCE)
+    );
+}
+
+#[test]
+fn the_tag_changes_with_each_cycle() {
+    assert_ne!(headlines_sent(SALT_HEX, 1), headlines_sent(SALT_HEX, 2));
+}
+
+#[test]
+fn a_secret_whose_salt_cannot_be_read_spends_no_credit() {
+    let secret = Secret {
+        salt: "zz".into(),
+        ..secret(Some(KEY))
+    };
+
+    let reading = observe(&secret, NONCE, world(&[])).unwrap();
+
+    assert_eq!(reading.obs.ai_flag, AI_SILENT);
 }
 
 #[test]
@@ -443,7 +510,7 @@ fn chat_bodies(
 ) -> (Option<Observed>, Vec<serde_json::Value>) {
     let mut bodies = Vec::new();
     let mut inner = world(broken);
-    let reading = observe(&secret(Some(KEY)), |call: &Call| {
+    let reading = observe(&secret(Some(KEY)), NONCE, |call: &Call| {
         if call.host != CHAT_HOST {
             return inner(call);
         }

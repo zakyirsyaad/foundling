@@ -22,9 +22,9 @@ const READ_CHUNK_BYTES: u64 = 16 * 1024;
 /// vault's execution limit (45 seconds in SPEC) would turn the run into a `null`.
 const RUN_BUDGET_NANOS: u64 = 30_000_000_000;
 
-pub fn observe(secret: &Secret, _input: &Input) -> Option<Observed> {
+pub fn observe(secret: &Secret, input: &Input) -> Option<Observed> {
     let run_deadline = monotonic_clock::now() + RUN_BUDGET_NANOS;
-    advisor::observe(secret, |call| {
+    advisor::observe(secret, input.nonce, |call| {
         send(call, call_deadline(monotonic_clock::now(), run_deadline))
     })
 }

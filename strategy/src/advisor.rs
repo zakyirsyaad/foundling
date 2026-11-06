@@ -7,7 +7,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::sources::{observe_market, Call};
-use crate::{to_hex, AiRef, Obs, Secret, AI_CLEAR, AI_FLAGGED};
+use crate::{from_hex, hash_fields, to_hex, AiRef, Obs, Secret, AI_CLEAR, AI_FLAGGED};
 
 /// General crypto news: The Block first, Cointelegraph if that feed is down.
 const FEEDS: [(&str, &str); 2] = [
@@ -29,6 +29,7 @@ pub const MAX_TITLE_CHARS: usize = 160;
 const MAX_CONFIDENCE: u8 = 100;
 const MAX_CHAT_ID_BYTES: usize = 64;
 const FINISHED: &str = "stop";
+const REQUEST_TAG: &[u8] = b"foundling/v1/request-tag";
 
 #[derive(Debug, PartialEq)]
 pub struct Advice {
@@ -80,13 +81,15 @@ struct Answer {
 /// Prices first: a market that cannot be read ends the run without spending credit.
 pub fn observe(
     secret: &Secret,
+    nonce: u64,
     mut send: impl FnMut(&Call) -> Option<Vec<u8>>,
 ) -> Option<Observed> {
     let obs = observe_market(&mut send)?;
-    let Some(key) = secret.ai_key.as_deref() else {
-        return Some(obs.into());
-    };
-    let Some(advice) = ask(&secret.params.prompt, key, &mut send) else {
+    let advice = secret.ai_key.as_deref().and_then(|key| {
+        let tag = request_tag(&from_hex(&secret.salt)?, nonce);
+        ask(&secret.params.prompt, &tag, key, &mut send)
+    });
+    let Some(advice) = advice else {
         return Some(obs.into());
     };
     Some(Observed {
@@ -99,7 +102,20 @@ pub fn observe(
     })
 }
 
-fn ask(prompt: &str, key: &str, send: &mut impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<Advice> {
+/// Ties the signed request to the sealed salt. NEAR AI's signature covers the hash of the
+/// request, and without this that is a hash of the prompt and public headlines alone, which
+/// would let anyone holding the signature test guesses of the prompt before `reveal`. After
+/// `reveal` anyone can recompute it from the salt and the cycle's nonce.
+fn request_tag(salt: &[u8], nonce: u64) -> String {
+    hash_fields(REQUEST_TAG, &[salt, &nonce.to_be_bytes()])
+}
+
+fn ask(
+    prompt: &str,
+    tag: &str,
+    key: &str,
+    send: &mut impl FnMut(&Call) -> Option<Vec<u8>>,
+) -> Option<Advice> {
     let titles = FEEDS.iter().find_map(|&(host, path)| {
         let feed = send(&Call {
             host,
@@ -109,7 +125,7 @@ fn ask(prompt: &str, key: &str, send: &mut impl FnMut(&Call) -> Option<Vec<u8>>)
         })?;
         read_titles(&feed)
     })?;
-    let headlines = titles.join("\n");
+    let headlines = format!("{}\n\nref:{tag}", titles.join("\n"));
     let reply = MODELS.iter().find_map(|model| {
         send(&Call {
             host: CHAT_HOST,
