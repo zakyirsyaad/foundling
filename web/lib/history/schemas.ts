@@ -38,8 +38,14 @@ export const statusSchema = z
 export type WorkerStatus = z.output<typeof statusSchema>;
 
 export const proofSchema = z
-  .object({ verifier: tallySchema.nullable(), obs_recheck: tallySchema.nullable(), replay: z.enum(["sealed", "pass", "fail", "skip"]) })
-  .transform((p) => ({ verifier: p.verifier, obsRecheck: p.obs_recheck, replay: p.replay }));
+  .object({
+    verifier: tallySchema.nullable(),
+    obs_recheck: tallySchema.nullable(),
+    replay: z.enum(["sealed", "pass", "fail", "skip"]),
+    // Absent from an API older than this field.
+    verifier_commit: z.string().regex(/^[0-9a-f]{40}$/).nullable().optional(),
+  })
+  .transform((p) => ({ verifier: p.verifier, obsRecheck: p.obs_recheck, replay: p.replay, verifierCommit: p.verifier_commit ?? null }));
 export type ProofResult = z.output<typeof proofSchema>;
 
 export const envelopeSchema = z.object({

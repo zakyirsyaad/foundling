@@ -15,6 +15,9 @@ import { SharePriceChart } from "./SharePriceChart";
 import { StuckPanelLive } from "./StuckPanelLive";
 import { VaultBanner } from "./VaultBanner";
 
+/** The ops budget and what it has spent are native NEAR in yoctoNEAR, not USDC. */
+const NEAR_DECIMALS = 24;
+
 const USDC = 6;
 
 function pct(bps: bigint | null): string {
@@ -75,7 +78,7 @@ export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSna
         <h2 id="limits-title" className="text-lg font-semibold">Limits</h2>
         <div className="grid gap-6 sm:grid-cols-2">
           <LimitMeter label="Epoch window" used={meters.epochWindow.used} cap={meters.epochWindow.cap} decimals={d} />
-          <LimitMeter label="Ops budget" used={meters.opsBudget.used} cap={meters.opsBudget.cap} decimals={d} />
+          <LimitMeter label="Ops budget" used={meters.opsBudget.used} cap={meters.opsBudget.cap} decimals={NEAR_DECIMALS} unit="NEAR" />
           <LimitMeter label="TVL against tvl_cap" used={meters.tvl.used} cap={meters.tvl.cap} decimals={d} estimate />
           <LimitMeter label="wNEAR exposure" used={meters.exposure.used} cap={meters.exposure.cap} decimals={d} />
         </div>

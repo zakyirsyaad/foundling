@@ -23,3 +23,10 @@ export async function fallbackCycles(rpc: RpcClient, vaultId: string, lastNonce:
   );
   return { rows, partial: true };
 }
+
+/** What the cycles page says when the history API has nothing: the vault is to blame only when the chain read failed too. */
+export function historyPendingText(vaultReadable: boolean): string {
+  return vaultReadable
+    ? "History is pending, and the latest cycles could not be read from the chain right now. Try again in a moment."
+    : "History is pending and the vault is not readable right now.";
+}

@@ -4,7 +4,7 @@ import { config } from "@/config";
 import { CycleFilterBar, CycleMap, CycleTable, PartialTable } from "@/features/cycles/CycleList";
 import { createRpcClient } from "@/lib/chain/rpc";
 import { getSnapshot } from "@/lib/chain/source";
-import { fallbackCycles } from "@/lib/cycles/fallback";
+import { fallbackCycles, historyPendingText } from "@/lib/cycles/fallback";
 import { filterCycles } from "@/lib/cycles/outcome";
 import { type CycleFilter, createHistoryClient } from "@/lib/history/client";
 
@@ -40,7 +40,7 @@ export default async function CyclesPage({ searchParams }: { searchParams: Promi
   return (
     <div className="grid gap-6">
       <h1 className="text-2xl font-semibold tracking-[-0.02em]">Cycles</h1>
-      {partial ? <PartialTable rows={partial.rows} /> : <p>History is pending and the vault is not readable right now.</p>}
+      {partial ? <PartialTable rows={partial.rows} /> : <p>{historyPendingText(snap.ok)}</p>}
     </div>
   );
 }

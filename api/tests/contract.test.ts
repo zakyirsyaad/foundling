@@ -45,7 +45,7 @@ test("/v1/cycles/:nonce, /v1/nav, /v1/status and /v1/proofs/:nonce match their s
   const status = statusSchema.parse((await body("/v1/status")).data);
   // The last successful round scanned to the tip it read, so nothing is behind.
   expect(status.tipLag).toBe(0n);
-  expect(proofSchema.parse((await body("/v1/proofs/1")).data)).toEqual({ verifier: { pass: 9, skip: 2, fail: 0, state: "done" }, obsRecheck: { pass: 0, skip: 0, fail: 0, state: "queued" }, replay: "pass" });
+  expect(proofSchema.parse((await body("/v1/proofs/1")).data)).toEqual({ verifier: { pass: 9, skip: 2, fail: 0, state: "done" }, obsRecheck: { pass: 0, skip: 0, fail: 0, state: "queued" }, replay: "pass", verifierCommit: null });
 });
 
 test("/v1/events pages with a cursor and filters by name", async () => {

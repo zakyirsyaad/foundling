@@ -43,7 +43,7 @@ test("nav points and the worker status parse", async () => {
 });
 test("a proof result parses", async () => {
   const r = await client(() => ok({ verifier: { pass: 3, skip: 1, fail: 0, state: "done" }, obs_recheck: null, replay: "sealed" })).proof(7n);
-  expect(r).toEqual({ status: "ok", cursor: null, data: { verifier: { pass: 3, skip: 1, fail: 0, state: "done" }, obsRecheck: null, replay: "sealed" } });
+  expect(r).toEqual({ status: "ok", cursor: null, data: { verifier: { pass: 3, skip: 1, fail: 0, state: "done" }, obsRecheck: null, replay: "sealed", verifierCommit: null } });
 });
 test("a slow API is pending/timeout", async () => {
   vi.useFakeTimers();

@@ -21,7 +21,8 @@ export function proofRoutes(deps: RouteDeps) {
     const [p] = await deps.db.select().from(proofs).where(and(eq(proofs.vaultId, deps.vaultId), eq(proofs.nonce, nonce)));
     if (!p) return failure(c, 404, "no proof for this cycle");
     // The bundle is the one record the chain cannot give back; the live-proofs job archives it from here.
-    return ok(c, { verifier: tally(p.verifier, p.verifierState), obs_recheck: tally(p.obsRecheck, p.obsState), replay: p.replay, bundle: bundleOf(p.bundle) });
+    // The commit that built the verifier, so a reader runs the same checks (a newer replay can differ).
+    return ok(c, { verifier: tally(p.verifier, p.verifierState), obs_recheck: tally(p.obsRecheck, p.obsState), replay: p.replay, verifier_commit: p.verifierCommit, bundle: bundleOf(p.bundle) });
   });
   return r;
 }

@@ -2,7 +2,7 @@ import { formatUnits } from "@/lib/format/units";
 
 const PERCENT = 100n;
 
-export function LimitMeter({ label, used, cap, decimals, estimate = false }: { label: string; used: bigint | null; cap: bigint | null; decimals: number; estimate?: boolean }) {
+export function LimitMeter({ label, used, cap, decimals, estimate = false, unit }: { label: string; used: bigint | null; cap: bigint | null; decimals: number; estimate?: boolean; unit?: string }) {
   if (used === null || cap === null) {
     return (
       <div className="fm-meter">
@@ -27,7 +27,7 @@ export function LimitMeter({ label, used, cap, decimals, estimate = false }: { l
         <div className="fm-meter-fill" style={{ width: `${pct}%` }} data-near={pct >= 80 ? "true" : undefined} />
       </div>
       <div className="mono fm-small">
-        {formatUnits(used, decimals, 2)} / {formatUnits(cap, decimals, 2)}
+        {formatUnits(used, decimals, 2)} / {formatUnits(cap, decimals, 2)}{unit ? ` ${unit}` : ""}
       </div>
     </div>
   );
