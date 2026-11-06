@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use foundling_sandbox::{failures, Foundling, NEAR_FEED, NEAR_PRICE};
+use foundling_sandbox::{event_data, failures, Foundling, Setup, NEAR_FEED, NEAR_PRICE};
 use near_workspaces::types::NearToken;
 use serde_json::{json, Value};
 
@@ -175,6 +175,133 @@ async fn inflated_nav() -> anyhow::Result<()> {
     run.note(
         "LEDGER",
         "ledger_after differs from ledger_before by the 1,000 USDC donated to the vault's wallet; the books, shares and Ref ledger are equal, which each step asserts",
+    );
+    run.finish(&env, before, ledger(&env).await?)
+}
+
+const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
+
+/// A sell has no price in it: its caps are in wNEAR, the smaller of `cap_wnear` and `cap_sell_bps`
+/// of the wNEAR book (a book at or under `cap_wnear` may be swept whole). So lowering the anchor
+/// price cannot make the vault sell more. The same sell is refused at the honest price, at a tenth
+/// and at a hundredth of it, first with the bps line binding and then, after the governor tightens
+/// `cap_wnear`, with the absolute one. A sell exactly at the cap still goes through, and moves no more.
+#[tokio::test]
+async fn deflated_sell() -> anyhow::Result<()> {
+    let env = attack_env_with(Setup {
+        policy: json!({
+            "epoch_len": EPOCH_LEN, "cooldown": COOLDOWN,
+            "cap_wnear": (3 * WNEAR / 10).to_string(), "epoch_cap_wnear": WNEAR.to_string(),
+        }),
+        ..Default::default()
+    })
+    .await?;
+    let mut run = Run::new("deflated-sell", &["OVER_ABS_CAP"]);
+    settle_deposit(&env).await?;
+    let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
+    anyhow::ensure!(
+        bought.started,
+        "setup failed: the buy should trade: {bought:?}"
+    );
+    wait_seconds(&env, COOLDOWN + 1).await?;
+
+    let policy: Value = env.view_vault("policy", json!({})).await?;
+    let cap_sell_bps = policy["cap_sell_bps"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("policy has no cap_sell_bps"))?
+        as u128;
+    let cap_wnear = policy_amount(&policy, "cap_wnear")?;
+    let (_, wnear_book) = book(&env).await?;
+    let bps_line = wnear_book * cap_sell_bps / 10_000;
+    anyhow::ensure!(
+        wnear_book > cap_wnear && bps_line < cap_wnear,
+        "setup failed: the book should be over cap_wnear with the bps line under it: {wnear_book} {cap_wnear} {bps_line}"
+    );
+    let before = ledger(&env).await?;
+    let start = books(&env).await?;
+    // Over the bps line and under the absolute cap: only cap_sell_bps can refuse it.
+    let over_bps = (bps_line + cap_wnear) / 2;
+    run.context(
+        "setup: the wNEAR book is over cap_wnear and the bps line is the lower one",
+        json!({"wnear_book": wnear_book.to_string(), "cap_wnear": cap_wnear.to_string(), "bps_line": bps_line.to_string(), "sell": over_bps.to_string()}),
+    );
+
+    for divisor in [1u128, 10, 100] {
+        let price = NEAR_PRICE / divisor;
+        set_near_price(&env, price).await?;
+        let outcome = decide(&env, priced("sell_risk", over_bps, price)).await?;
+        run.step(
+            &format!("anchor price 1/{divisor}, sell over cap_sell_bps of the book"),
+            outcome.rejected.as_deref() == Some("OVER_ABS_CAP") && !outcome.started && books(&env).await? == start,
+            outcome.rejected.as_deref(),
+            json!({"price": price.to_string(), "amount_in": over_bps.to_string(), "nonce": outcome.nonce, "books_unchanged": books(&env).await? == start}),
+        );
+        wait_seconds(&env, COOLDOWN + 1).await?;
+    }
+
+    // The governor tightens cap_wnear under the bps line, so the absolute cap is the one that binds.
+    let tight = cap_wnear / 3;
+    let tightened = env
+        .call_vault(
+            &env.governor,
+            "tighten_policy",
+            json!({"change": {"cap_wnear": tight.to_string()}}),
+        )
+        .await?;
+    anyhow::ensure!(
+        tightened.is_success(),
+        "tighten_policy: {}",
+        failures(&tightened)
+    );
+    let between = (tight + bps_line) / 2;
+    let price = NEAR_PRICE / 100;
+    anyhow::ensure!(
+        between > tight && between < bps_line,
+        "setup failed: the sell should sit between the two lines"
+    );
+    run.context(
+        "the governor tightens cap_wnear under the bps line",
+        json!({"cap_wnear": tight.to_string(), "bps_line": bps_line.to_string(), "sell": between.to_string()}),
+    );
+    let outcome = decide(&env, priced("sell_risk", between, price)).await?;
+    run.step(
+        "anchor price 1/100, sell over cap_wnear and under the bps line",
+        outcome.rejected.as_deref() == Some("OVER_ABS_CAP") && !outcome.started && books(&env).await? == start,
+        outcome.rejected.as_deref(),
+        json!({"amount_in": between.to_string(), "cap_wnear": tight.to_string(), "nonce": outcome.nonce, "books_unchanged": books(&env).await? == start}),
+    );
+    wait_seconds(&env, COOLDOWN + 1).await?;
+
+    // Control: exactly cap_wnear trades, so the line is the cap itself, and the swap moves that much and no more.
+    let (usdc_before, wnear_before) = book(&env).await?;
+    let at_cap = priced("sell_risk", tight, price);
+    env.set_next(json!({"Decision": {"template": at_cap}}))
+        .await?;
+    let triggered = env.trigger_cycle().await?;
+    anyhow::ensure!(
+        triggered.is_success(),
+        "trigger_cycle: {}",
+        failures(&triggered)
+    );
+    let nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
+    let sold = execute(&env, nonce).await?;
+    let sold_amount = event_data(&sold, "swap_started").map(|data| data["amount_in"].clone());
+    anyhow::ensure!(
+        swapped(&sold) && sold_amount == Some(json!(tight.to_string())),
+        "control failed: exactly cap_wnear should trade: {}",
+        failures(&sold)
+    );
+    let (usdc_after, wnear_after) = book(&env).await?;
+    run.step(
+        "control: a sell of exactly cap_wnear at 1/100 of the price goes through, and the wNEAR book falls by that much only",
+        delta(wnear_before, wnear_after) == -(tight as i128) && delta(usdc_before, usdc_after) > 0,
+        None,
+        json!({"amount_in": tight.to_string(), "wnear_book_drop": (-delta(wnear_before, wnear_after)).to_string(),
+               "usdc_book_gain": delta(usdc_before, usdc_after).to_string()}),
+    );
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before by the one control sell at the cap; every refused sell asserts the books, shares and Ref ledger unchanged",
     );
     run.finish(&env, before, ledger(&env).await?)
 }

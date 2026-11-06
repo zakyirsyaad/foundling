@@ -98,7 +98,8 @@
       "expected": "`Rejected(OVER_ABS_CAP)` oleh `cap_wnear` dan `cap_sell_bps`",
       "codes": [
         "OVER_ABS_CAP"
-      ]
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "never-flat",
