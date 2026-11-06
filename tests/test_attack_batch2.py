@@ -146,7 +146,7 @@ class BatchScriptsTest(unittest.TestCase):
         source = (ROOT / "sandbox" / "tests" / "attacks_batch2.rs").read_text()
         for name in BATCH2:
             self.assertIn(f"async fn {name.replace('-', '_')}()", source)
-            self.assertIn(f'Run::new("{name}"', source)
+            self.assertRegex(source, rf'Run::new\(\s*"{name}"')
 
 
 def vault_panic_codes():
