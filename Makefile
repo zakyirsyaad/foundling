@@ -19,7 +19,7 @@ quick:
 wasm:
 	@for c in $(CONTRACTS); do \
 		echo "== build $$c"; \
-		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null) || exit 1; \
+		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null && touch target/near/*.wasm) || exit 1; \
 	done
 
 # near-workspaces tests against a local sandbox node. The first run downloads neard.
@@ -51,10 +51,10 @@ attack-warm:
 # needs Docker and a committed checkout, and the audited vault is the only reproducible build: the
 # mocks are built the usual way. A plain `make attack-lab` writes to the ignored proofs/attack/local.
 attack-proofs:
-	cd contracts/vault && cargo near build reproducible-wasm < /dev/null
+	cd contracts/vault && cargo near build reproducible-wasm < /dev/null && touch target/near/*.wasm
 	@for c in $(MOCKS); do \
 		echo "== build $$c"; \
-		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null) || exit 1; \
+		(cd contracts/$$c && cargo near build non-reproducible-wasm --no-embed-abi < /dev/null && touch target/near/*.wasm) || exit 1; \
 	done
 	@$(MAKE) --no-print-directory attack-warm
 	@FOUNDLING_PROOF_DIR=$(CURDIR)/proofs/attack/reproducible python3 tools/attack.py run-all

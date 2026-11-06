@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -146,6 +147,59 @@ class BatchScriptsTest(unittest.TestCase):
         for name in BATCH2:
             self.assertIn(f"async fn {name.replace('-', '_')}()", source)
             self.assertIn(f'Run::new("{name}"', source)
+
+
+def vault_panic_codes():
+    """Every upper-case code the vault panics with: the literals inside require!(...) and
+    panic_str(...) calls, and the &str consts policy.rs hands to panic_str."""
+    codes = {}
+    for source in sorted((ROOT / "contracts" / "vault" / "src").glob("*.rs")):
+        text = re.sub(r"(?m)^\s*//.*$", "", source.read_text())
+        for opener in ("require!(", "panic_str("):
+            start = 0
+            while (at := text.find(opener, start)) >= 0:
+                depth, end = 1, at + len(opener)
+                while depth and end < len(text):
+                    depth += {"(": 1, ")": -1}.get(text[end], 0)
+                    end += 1
+                for code in re.findall(r'"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)"', text[at:end]):
+                    codes.setdefault(code, source.name)
+                start = end
+        for code in re.findall(r'(?m)^\s*(?:pub )?const [A-Z_]+: &str = "([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)";', text):
+            codes.setdefault(code, source.name)
+    return codes
+
+
+class SpecReasonCodesTest(unittest.TestCase):
+    def test_every_code_the_vault_panics_with_is_in_spec_3_7(self):
+        # SPEC 3.7 calls itself the one canonical list, so a code the vault adds must be added there.
+        section = (ROOT / "docs" / "SPEC.md").read_text().split("### 3.7", 1)[1].split("\n### ", 1)[0]
+        codes = vault_panic_codes()
+        self.assertGreater(len(codes), 15, codes)
+        missing = {code: file for code, file in codes.items() if f"`{code}`" not in section}
+        self.assertEqual(missing, {}, "panic codes missing from SPEC 3.7")
+
+    def test_the_scanner_finds_the_codes_it_is_meant_to(self):
+        codes = vault_panic_codes()
+        for code in ("NOT_KEEPER", "LOW_GAS", "NOT_EXPIRED", "NOT_STALE", "POLICY_NOT_TIGHTER", "TIMELOCK", "PARAMS_TOO_LONG"):
+            self.assertIn(code, codes)
+
+
+class CiAndBuildTest(unittest.TestCase):
+    def test_a_successful_wasm_build_touches_the_wasm_so_a_warm_cache_is_not_stale(self):
+        # actions/cache restores target/ with old mtimes while checkout gives the sources new ones;
+        # _sandbox.py compares the two, so make wasm has to be what makes the wasm current.
+        for target in ("wasm", "attack-proofs"):
+            plan = dry_run(target)
+            self.assertIn("touch target/near/*.wasm", plan, target)
+            self.assertLess(plan.index("cargo near build"), plan.index("touch target/near/*.wasm"), target)
+
+    def test_the_soft_run_calls_out_attacks_that_ended_in_error(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        soft = workflow.split("  attack-lab-run:", 1)[1].split("\n  workflow:", 1)[0]
+        self.assertIn("ERROR=[1-9]", soft)
+        self.assertIn("::error::", soft)
+        self.assertLess(soft.index("ERROR=[1-9]"), soft.index('exit "$status"'))
 
 
 if __name__ == "__main__":
