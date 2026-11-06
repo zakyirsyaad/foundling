@@ -54,8 +54,8 @@
         "expect": "PASS commitment"
       }
     ],
-    "status": "pass",
-    "downgrade": "Sealing is designed, not yet checked on this vault."
+    "status": "skip",
+    "downgrade": "Sealing is designed. It is checked on this vault once the parameters are revealed and replayed."
   },
   {
     "id": "g2-bounded-loss",

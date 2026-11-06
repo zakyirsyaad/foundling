@@ -13,10 +13,11 @@ const GUARANTEE_IDS = ["born-without-keys", "g1-confidentiality", "g2-bounded-lo
 export function Home({ claims, keysLine }: { claims: Claim[]; keysLine: string }) {
   const intents = claimText(claims, "near-intents");
   const advisor = claimText(claims, "near-ai-advisor");
+  const keyless = claimText(claims, "born-without-keys");
   return (
     <main>
       <section id="hero" className="mx-auto max-w-[1120px] px-4 pt-24 pb-16 max-sm:pt-16">
-        <h1 className="max-w-[14ch] text-[64px] leading-none font-semibold tracking-[-0.04em] max-md:text-[56px]">{HERO.title}</h1>
+        <h1 className="max-w-[14ch] text-[64px] leading-none font-semibold tracking-[-0.04em] max-md:text-[56px]">{keyless.downgraded ? HERO.titleUnchecked : HERO.title}</h1>
         <p className="mt-6 max-w-[65ch] text-base leading-relaxed text-muted-foreground">{HERO.lead}</p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Link href="/app" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Open app</Link>
