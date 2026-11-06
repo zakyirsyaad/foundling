@@ -3,8 +3,9 @@
 `check(text)` returns the problems it finds. The real workflow must have none, and every
 tampering in TamperingTest must produce at least one, so a weakened check fails here too.
 
-What it guards: only the Attack Lab run may fail without failing the workflow, nothing
-can turn a red result green, and no job can be skipped or disabled. Jobs outside
+What it guards: no job may fail without failing the workflow (the Attack Lab run was the
+last soft job, made required after T9), nothing can turn a red result green, and no job
+can be skipped or disabled. Jobs outside
 REQUIRED_JOBS may be added, renamed or changed freely. It cannot stop the same pull
 request from editing this file, so changes to it need a human reviewer.
 """
@@ -17,13 +18,12 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 RUNNER = "ubuntu-24.04"
-SOFT_JOB = "attack-lab-run"
-PROMOTION_NOTE = "# becomes required (remove continue-on-error) after T7-T9"
+ATTACK_RUN_JOB = "attack-lab-run"
 # Jobs whose removal would silently weaken the pipeline. Deleting one needs a deliberate
 # edit of this list.
 REQUIRED_JOBS = {
     "strategy", "contract", "verifier", "offline-verifier", "attack-lab", "keeper",
-    "vault-wasm", "sandbox", "web", "dependencies", "secrets", SOFT_JOB, "workflow",
+    "vault-wasm", "sandbox", "web", "dependencies", "secrets", ATTACK_RUN_JOB, "workflow",
     "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
 }
 # GitHub runs a step with no shell as `bash -e {0}`, which has no pipefail, so `cmd | tee`
@@ -125,18 +125,13 @@ def check(text):
             problems.append(f"`shell:{value}` can drop -e or pipefail; only `shell: bash` is allowed")
 
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
-    if len(flagged) != 1:
-        problems.append(f"continue-on-error must appear exactly once, found {len(flagged)}")
-    soft = jobs.get(SOFT_JOB, "")
-    lines = soft.splitlines()
-    if "    continue-on-error: true" not in lines:
-        problems.append(f"{SOFT_JOB} must carry `    continue-on-error: true`")
-    elif lines[lines.index("    continue-on-error: true") - 1].strip() != PROMOTION_NOTE:
-        problems.append("the promotion note must sit directly above continue-on-error")
-    if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", soft):
-        problems.append(f"{SOFT_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
-    if 'exit "$status"' not in soft:
-        problems.append(f'{SOFT_JOB} must end with exit "$status" so a failure stays visible')
+    if flagged:
+        problems.append(f"continue-on-error lets a job or step fail without failing the workflow; found {len(flagged)}")
+    run_body = jobs.get(ATTACK_RUN_JOB, "")
+    if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", run_body):
+        problems.append(f"{ATTACK_RUN_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
+    if 'exit "$status"' not in run_body:
+        problems.append(f'{ATTACK_RUN_JOB} must end with exit "$status" so a failure stays visible')
 
     def runs(job, pattern):
         if not re.search(rf"(?m)^\s+run: {pattern}\s*$", jobs.get(job, "")):
@@ -167,16 +162,16 @@ def check(text):
     if built < 0 or audited < 0 or built > audited:
         problems.append("vault-reproducible: must build reproducibly and then audit that file")
 
-    # The sandbox attacks deploy the WASM, so the soft job needs the same build tools as Sandbox.
+    # The sandbox attacks deploy the WASM, so the attack run needs the same build tools as Sandbox.
     for needle, why in (
         ("rustup toolchain install", "needs the pinned Rust toolchain"),
         ("cargo-near-x86_64-unknown-linux-gnu.tar.gz", "needs cargo-near"),
         ("sha256sum --check", "must verify the cargo-near checksum"),
     ):
-        contains(SOFT_JOB, needle, why)
-    make_wasm, run_all = soft.find("make wasm"), soft.find("python3 tools/attack.py run-all")
+        contains(ATTACK_RUN_JOB, needle, why)
+    make_wasm, run_all = run_body.find("make wasm"), run_body.find("python3 tools/attack.py run-all")
     if make_wasm < 0 or run_all < 0 or make_wasm > run_all:
-        problems.append(f"{SOFT_JOB}: must run `make wasm` before run-all")
+        problems.append(f"{ATTACK_RUN_JOB}: must run `make wasm` before run-all")
 
     wasm = jobs.get("vault-wasm", "")
     build = wasm.find("cargo near build non-reproducible-wasm")
@@ -223,6 +218,7 @@ class TamperingTest(unittest.TestCase):
         attack_lab = "  attack-lab:\n    name: Attack Lab scaffold\n"
         sandbox = "  sandbox:\n    name: Sandbox\n"
         workflow = "  workflow:\n    name: Workflow shape\n"
+        attack_run = "  attack-lab-run:\n    name: Attack Lab (run-all)\n"
         cases = {
             "verify.py || true": tampered(b, "run: python3 verify.py\n", "run: python3 verify.py || true\n"),
             "|| : after a command": tampered(b, "run: make sandbox\n", "run: make sandbox || :\n"),
@@ -238,8 +234,7 @@ class TamperingTest(unittest.TestCase):
             "continue-on-error quoted": tampered(b, sandbox, sandbox + '    "continue-on-error": true\n'),
             "continue-on-error with a space": tampered(b, sandbox, sandbox + "    continue-on-error : true\n"),
             "continue-on-error on attack-lab": tampered(b, attack_lab, attack_lab + "    continue-on-error: true\n"),
-            "promotion note removed": tampered(b, PROMOTION_NOTE, "# todo"),
-            "promotion note moved": tampered(b, f"    {PROMOTION_NOTE}\n    continue-on-error: true\n", "    continue-on-error: true\n    # note\n"),
+            "continue-on-error back on the attack run": tampered(b, attack_run, attack_run + "    continue-on-error: true\n"),
             "attack-lab command replaced": tampered(b, "run: python3 -m unittest tests.test_attack_lab\n", "run: 'true'\n"),
             "workflow command only echoed": tampered(b, "run: python3 -m unittest tests.test_ci_workflow\n", "run: echo python3 -m unittest tests.test_ci_workflow\n"),
             "run-all replaced": tampered(b, "python3 tools/attack.py run-all", "echo skip"),
@@ -255,7 +250,7 @@ class TamperingTest(unittest.TestCase):
             "set +o pipefail": tampered(b, "run: make sandbox\n", "run: set +o pipefail; make sandbox\n"),
             "set +eo pipefail": tampered(b, "run: make sandbox\n", "run: set +eo pipefail; make sandbox\n"),
             "set +o errexit": tampered(b, "run: make sandbox\n", "run: set +o errexit; make sandbox\n"),
-            "soft job swallows the status": tampered(b, 'exit "$status"', "true"),
+            "attack run swallows the status": tampered(b, 'exit "$status"', "true"),
             "action pinned to a tag": tampered(b, sha, "actions/checkout@v4"),
             "no timeout": tampered(b, workflow + "    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n", workflow + "    runs-on: ubuntu-24.04\n"),
             "macos runner": tampered(b, workflow + "    runs-on: ubuntu-24.04", workflow + "    runs-on: macos-latest"),
@@ -280,9 +275,9 @@ class TamperingTest(unittest.TestCase):
             "hash compare no longer requires one hash": tampered_in(b, "vault-reproducible-compare", '-eq 1', '-ge 1'),
             "hash compare no longer needs the builds": tampered_in(b, "vault-reproducible-compare", "    needs: vault-reproducible\n", ""),
             "recheck-obs ignores a real mismatch": tampered_in(b, "recheck-obs", 'test "$status" -ne 1', "true"),
-            "soft job has no rust toolchain": tampered_in(b, SOFT_JOB, "rustup toolchain install", "true"),
-            "soft job has no cargo-near": tampered_in(b, SOFT_JOB, "cargo-near-x86_64-unknown-linux-gnu.tar.gz", "other.tar.gz"),
-            "soft job does not build the wasm": tampered_in(b, SOFT_JOB, "make wasm", "true"),
+            "attack run has no rust toolchain": tampered_in(b, ATTACK_RUN_JOB, "rustup toolchain install", "true"),
+            "attack run has no cargo-near": tampered_in(b, ATTACK_RUN_JOB, "cargo-near-x86_64-unknown-linux-gnu.tar.gz", "other.tar.gz"),
+            "attack run does not build the wasm": tampered_in(b, ATTACK_RUN_JOB, "make wasm", "true"),
             "job header with a comment": b +"\n  evil: # sneaky\n    runs-on: macos-latest\n    steps: [{run: 'true'}]\n",
             "flow-style job": b + "\n  evil: {runs-on: macos-latest, steps: []}\n",
         }

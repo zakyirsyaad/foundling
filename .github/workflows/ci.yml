@@ -481,8 +481,6 @@ jobs:
 
   attack-lab-run:
     name: Attack Lab (run-all)
-    # becomes required (remove continue-on-error) after T7-T9
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -527,7 +525,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$status" -ne 0 ]; then
-            echo "::warning::run-all exited $status; this job does not fail the workflow yet"
+            echo "::error::run-all exited $status"
           fi
           if grep -Eq 'ERROR=[1-9]' "$RUNNER_TEMP/attacks.txt"; then
             echo "::error::run-all reported ERROR attacks: a build or tool problem, not an attack result"
