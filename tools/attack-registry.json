@@ -104,7 +104,8 @@
     {
       "name": "never-flat",
       "expected": "Vault kembali datar (`wnear_book` ≤ `dust_wnear`) dan deposit dicetak",
-      "codes": []
+      "codes": [],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "setup-spam",

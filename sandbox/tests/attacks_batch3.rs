@@ -305,3 +305,159 @@ async fn deflated_sell() -> anyhow::Result<()> {
     );
     run.finish(&env, before, ledger(&env).await?)
 }
+
+async fn pending_of(env: &Foundling, who: &near_workspaces::Account) -> anyhow::Result<u128> {
+    let pending: String = env
+        .view_vault("pending_of", json!({"account": who.id()}))
+        .await?;
+    Ok(pending.parse()?)
+}
+
+/// Shares are minted only while the vault is flat (`wnear_book` at or under `dust_wnear`), and they
+/// are minted without a price. The risk: the wNEAR book can only be sold down by `cap_sell_bps` of
+/// itself per decision, so if it never reached flat the queue would wait for ever. A book at or under
+/// `cap_wnear` may be swept whole, which is what lets it get there. The vault sells down in capped
+/// steps (the lowest cap each time), the deposit queued meanwhile stays queued, and the next cycle
+/// after the vault is flat mints it, at a price that does not dilute the holder before.
+#[tokio::test]
+async fn never_flat() -> anyhow::Result<()> {
+    const NEW_DEPOSIT: u128 = 5_000_000;
+    let env = attack_env_with(Setup {
+        open_deposits: true,
+        policy: json!({
+            "epoch_len": EPOCH_LEN, "cooldown": COOLDOWN,
+            "cap_wnear": (WNEAR / 10).to_string(), "epoch_cap_wnear": (WNEAR / 2).to_string(),
+        }),
+        ..Default::default()
+    })
+    .await?;
+    let mut run = Run::new("never-flat", &[]);
+    settle_deposit(&env).await?;
+    let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
+    anyhow::ensure!(
+        bought.started,
+        "setup failed: the buy should trade: {bought:?}"
+    );
+    wait_seconds(&env, COOLDOWN + 1).await?;
+
+    let policy: Value = env.view_vault("policy", json!({})).await?;
+    let dust = policy_amount(&policy, "dust_wnear")?;
+    let cap_wnear = policy_amount(&policy, "cap_wnear")?;
+    let cap_sell_bps = policy["cap_sell_bps"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("policy has no cap_sell_bps"))?
+        as u128;
+    let (_, wnear_book) = book(&env).await?;
+    anyhow::ensure!(
+        wnear_book > dust,
+        "setup failed: the vault should hold wNEAR"
+    );
+
+    // A new depositor queues USDC while the vault holds wNEAR.
+    env.register(&env.stranger).await?;
+    env.mint(&env.usdc, env.stranger.id(), NEW_DEPOSIT).await?;
+    let queued = env
+        .stranger
+        .call(env.usdc.id(), "ft_transfer_call")
+        .args_json(json!({"receiver_id": env.vault_id, "amount": NEW_DEPOSIT.to_string(), "msg": "deposit"}))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?;
+    anyhow::ensure!(queued.is_success(), "deposit: {}", failures(&queued));
+    anyhow::ensure!(
+        pending_of(&env, &env.stranger).await? == NEW_DEPOSIT,
+        "setup failed: the deposit should be queued"
+    );
+    let before = ledger(&env).await?;
+    let total_before = total_shares(&env).await?;
+    run.context(
+        "setup: the vault holds wNEAR and a new depositor's USDC is queued",
+        json!({"wnear_book": wnear_book.to_string(), "dust_wnear": dust.to_string(), "queued": NEW_DEPOSIT.to_string()}),
+    );
+
+    let held = decide(&env, template("none", 0)).await?;
+    anyhow::ensure!(
+        held.rejected.is_none() && held.failed.is_none() && !held.started,
+        "{held:?}"
+    );
+    run.step(
+        "a cycle while the vault holds wNEAR does not mint the queue",
+        pending_of(&env, &env.stranger).await? == NEW_DEPOSIT
+            && shares_of(&env, &env.stranger).await? == 0
+            && total_shares(&env).await? == total_before,
+        None,
+        json!({"pending": NEW_DEPOSIT.to_string(), "shares": "0"}),
+    );
+    wait_seconds(&env, COOLDOWN + 1).await?;
+
+    // Sell down in capped steps: each one the lowest of cap_wnear and cap_sell_bps of the book; once
+    // the book is at or under cap_wnear, sweep all but half the dust.
+    let mut sells = Vec::new();
+    for _ in 0..12 {
+        let (_, current) = book(&env).await?;
+        if current <= dust {
+            break;
+        }
+        let amount = if current <= cap_wnear {
+            current - dust / 2
+        } else {
+            cap_wnear.min(current * cap_sell_bps / 10_000)
+        };
+        let outcome = decide(&env, template("sell_risk", amount)).await?;
+        anyhow::ensure!(
+            outcome.started && outcome.rejected.is_none(),
+            "a sell at the limit should trade, so the book can reach flat: {outcome:?} (book {current}, amount {amount})"
+        );
+        let (_, after) = book(&env).await?;
+        sells.push(json!({"amount_in": amount.to_string(), "book_before": current.to_string(), "book_after": after.to_string()}));
+        wait_seconds(&env, COOLDOWN + 1).await?;
+    }
+    let (usdc_flat, wnear_flat) = book(&env).await?;
+    run.step(
+        "capped sells bring the wNEAR book to or under the dust line",
+        wnear_flat <= dust && wnear_flat > 0,
+        None,
+        json!({"sells": sells, "wnear_book": wnear_flat.to_string(), "dust_wnear": dust.to_string()}),
+    );
+
+    // The next cycle mints the queue.
+    let price_before_book = usdc_flat;
+    let shares_at_flat = total_shares(&env).await?;
+    let minted_cycle = decide(&env, template("none", 0)).await?;
+    anyhow::ensure!(
+        minted_cycle.rejected.is_none() && minted_cycle.failed.is_none(),
+        "{minted_cycle:?}"
+    );
+    let new_shares = shares_of(&env, &env.stranger).await?;
+    let (usdc_after, _) = book(&env).await?;
+    let total_after = total_shares(&env).await?;
+    run.step(
+        "the next cycle, with the vault flat, mints the queued deposit",
+        pending_of(&env, &env.stranger).await? == 0
+            && new_shares > 0
+            && total_after == shares_at_flat + new_shares
+            && delta(usdc_flat, usdc_after) == NEW_DEPOSIT as i128,
+        None,
+        json!({"new_shares": new_shares.to_string(), "usdc_book_gain": delta(usdc_flat, usdc_after).to_string()}),
+    );
+    // The share price must not fall: book / shares after is at least book / shares before.
+    run.step(
+        "the mint does not dilute the holder before: the USDC book per share did not fall",
+        usdc_after * shares_at_flat >= price_before_book * total_after,
+        None,
+        json!({"book_before": price_before_book.to_string(), "shares_before": shares_at_flat.to_string(),
+               "book_after": usdc_after.to_string(), "shares_after": total_after.to_string()}),
+    );
+    run.step(
+        "the new depositor's shares are worth no more than what was deposited",
+        new_shares * usdc_after / total_after <= NEW_DEPOSIT,
+        None,
+        json!({"value": (new_shares * usdc_after / total_after).to_string(), "deposited": NEW_DEPOSIT.to_string()}),
+    );
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before by the sells and the mint; each step asserts what it claims",
+    );
+    run.finish(&env, before, ledger(&env).await?)
+}
