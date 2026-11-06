@@ -9,9 +9,7 @@
       "contracts/vault/src/lib.rs"
     ],
     "test_refs": [],
-    "evidence": [
-      "proofs/access_keys.json"
-    ],
+    "evidence": [],
     "checks": [
       {
         "tier": "1",
@@ -84,7 +82,7 @@
         ],
         "network": "sandbox",
         "seconds": 600,
-        "expect": "over-cap held"
+        "expect": "over-cap PASS"
       }
     ],
     "status": "pass",
@@ -107,13 +105,13 @@
     "checks": [
       {
         "tier": "0b",
-        "cmd": "cargo test --manifest-path contracts/vault/Cargo.toml recovery",
+        "cmd": "cargo test --manifest-path contracts/vault/Cargo.toml redeem",
         "requires": [
           "cargo"
         ],
         "network": "offline",
         "seconds": 120,
-        "expect": "test result: ok"
+        "expect": "redeem_works_while_frozen, redeem_works_while_halted and a_redeem_while_stuck_keeps_its_claim pass"
       }
     ],
     "status": "pass",
@@ -123,7 +121,8 @@
     "id": "g4-traceability",
     "claim": "Every cycle links to its transactions and its proof.",
     "tracks": [
-      "verifiability"
+      "security",
+      "privacy"
     ],
     "code_refs": [
       "indexer/src/proofs/queue.ts",
@@ -136,9 +135,10 @@
     "evidence": [],
     "checks": [
       {
-        "tier": "2",
-        "cmd": "python3 tools/fetch_proof.py --chain <network> --vault <vault> --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json",
+        "tier": "1",
+        "cmd": "git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json",
         "requires": [
+          "git",
           "python3",
           "cargo"
         ],
@@ -154,7 +154,7 @@
     "id": "near-intents",
     "claim": "NEAR Intents (1Click) for deposits from other chains.",
     "tracks": [
-      "near-intents"
+      "defi"
     ],
     "code_refs": [
       "web/lib/crosschain"
@@ -169,7 +169,7 @@
     "id": "near-ai-advisor",
     "claim": "NEAR AI as an advisor that can only lower exposure.",
     "tracks": [
-      "near-ai"
+      "privacy"
     ],
     "code_refs": [],
     "test_refs": [],
