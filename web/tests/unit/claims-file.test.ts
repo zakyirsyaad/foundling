@@ -63,3 +63,19 @@ test("a check that reads the live chain without writing is Tier 1", () => {
     }
   }
 });
+
+test("a claim that passes names a check, the code and the tests behind it", () => {
+  for (const c of claims.filter((claim) => claim.status === "pass")) {
+    expect(c.checks.length, c.id).toBeGreaterThan(0);
+    expect(c.code_refs.length, c.id).toBeGreaterThan(0);
+    expect(c.test_refs.length, c.id).toBeGreaterThan(0);
+  }
+});
+
+test("the advisor claim is checked offline on the archived NEAR AI signature", () => {
+  const advisor = claims.find((c) => c.id === "near-ai-advisor")!;
+  expect(advisor.status).toBe("pass");
+  const checks = advisor.checks as Check[];
+  expect(checks.some((check) => check.network === "offline" && check.cmd.includes("check cli/fixtures/testnet-advisor-proof.json"))).toBe(true);
+  expect(advisor.evidence).toContain("cli/fixtures/testnet-advisor-proof.json");
+});
