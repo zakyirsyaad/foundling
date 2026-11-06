@@ -298,6 +298,41 @@ pub async fn freeze(env: &Foundling) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Tells the mock Ref to misbehave once, as its `Fault` enum names it.
+pub async fn set_fault(env: &Foundling, fault: &str) -> anyhow::Result<()> {
+    let result = env
+        .parent
+        .call(env.rhea.id(), "set_fault")
+        .args_json(json!({ "fault": fault }))
+        .transact()
+        .await?;
+    anyhow::ensure!(result.is_success(), "set_fault: {}", failures(&result));
+    Ok(())
+}
+
+pub async fn has_stage(env: &Foundling, key: &str) -> anyhow::Result<bool> {
+    Ok(stage(env).await?.get(key).is_some())
+}
+
+/// Polls the stage until it is `key`; a run that cannot get there is a tool error, not a verdict.
+pub async fn wait_for_stage(env: &Foundling, key: &str) -> anyhow::Result<()> {
+    for _ in 0..150 {
+        if has_stage(env, key).await? {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    anyhow::bail!("the vault never reached {key}: {}", stage(env).await?)
+}
+
+/// How many times `event` was logged in every receipt of `result`.
+pub fn event_count(result: &ExecutionFinalResult, event: &str) -> usize {
+    events(result)
+        .iter()
+        .filter(|e| e["event"] == event)
+        .count()
+}
+
 /// What one `redeem` did, against what the book said it should pay. Every delta is signed: a
 /// bug that grows the book, mints shares or shrinks a claim must show up as a wrong number in a
 /// step, which the proof records as a breach, and not as an underflow panic, which reads as a

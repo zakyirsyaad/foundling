@@ -644,3 +644,257 @@ async fn setup_spam() -> anyhow::Result<()> {
         json!({"vault_near": near_after.to_string()}),
     )
 }
+
+/// What Ref says the vault holds there, as (USDC, wNEAR).
+async fn rhea_holds(env: &Foundling) -> anyhow::Result<(u128, u128)> {
+    let mut held = Vec::new();
+    for token in [&env.usdc, &env.wnear] {
+        let amount: String = env
+            .view_contract(
+                &env.rhea,
+                "get_deposit",
+                json!({"account_id": env.vault_id, "token_id": token.id()}),
+            )
+            .await?;
+        held.push(amount.parse::<u128>()?);
+    }
+    Ok((held[0], held[1]))
+}
+
+/// What the vault thinks it holds at Ref (`rhea_bal`), as (USDC, wNEAR).
+async fn rhea_ledger(env: &Foundling) -> anyhow::Result<(u128, u128)> {
+    let ledger: Value = env.view_vault("rhea_book", json!({})).await?;
+    let amount = |token: &str| -> anyhow::Result<u128> {
+        Ok(ledger[token]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("rhea_book has no {token}: {ledger}"))?
+            .parse()?)
+    };
+    Ok((amount("usdc")?, amount("wnear")?))
+}
+
+/// Anyone can credit the vault's account at Ref with `mft_transfer`: put `amount` of USDC in Ref
+/// under `stranger` first, then give it to the vault.
+async fn donate_at_rhea(env: &Foundling, amount: u128) -> anyhow::Result<()> {
+    env.mint(&env.usdc, env.stranger.id(), amount).await?;
+    let funded = env
+        .stranger
+        .call(env.usdc.id(), "ft_transfer_call")
+        .args_json(json!({"receiver_id": env.rhea.id(), "amount": amount.to_string(), "msg": ""}))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?;
+    anyhow::ensure!(funded.is_success(), "funding Ref: {}", failures(&funded));
+    let given = env
+        .stranger
+        .call(env.rhea.id(), "mft_transfer")
+        .args_json(json!({"token_id": env.usdc.id(), "receiver_id": env.vault_id, "amount": amount.to_string()}))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?;
+    anyhow::ensure!(given.is_success(), "mft_transfer: {}", failures(&given));
+    Ok(())
+}
+
+/// `advance` is open to everyone and marks `Probing` before it reads Ref, so a second call finds a
+/// stage that is neither `Stuck` nor timed out and is refused: one retry per stall, not one per
+/// caller. First five accounts call it on one stuck swap at once. Then a swap whose real answer is
+/// still in flight: an `advance` before `stuck_after` is refused, one after it recovers the swap,
+/// and the late original callback finds another attempt and does nothing. Ref's balance matches the
+/// vault's ledger throughout, apart from what a donation added there, which never reaches the books.
+#[tokio::test]
+async fn advance_race() -> anyhow::Result<()> {
+    let mut run = Run::new("advance-race", &["NOT_STUCK"]);
+
+    // A. A swap stuck at its swap step, and five accounts advancing it at once.
+    let env = attack_env(testnet_timing()).await?;
+    settle_deposit(&env).await?;
+    let before = ledger(&env).await?;
+    let idle_books = books(&env).await?;
+    let idle_wallet = wallet_of(&env, &env.usdc, &env.vault_id).await?;
+    set_fault(&env, "SwapGarbageNotApplied").await?;
+    let nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
+    let started = execute(&env, nonce).await?;
+    anyhow::ensure!(
+        started.is_success(),
+        "execute_decision: {}",
+        failures(&started)
+    );
+    anyhow::ensure!(
+        stage(&env).await?["Stuck"]["step"] == "Swap",
+        "setup failed: the swap should be stuck: {}",
+        stage(&env).await?
+    );
+    let (ledger_usdc, ledger_wnear) = rhea_ledger(&env).await?;
+    anyhow::ensure!(
+        (ledger_usdc, ledger_wnear) == (1_000_000, 0) && rhea_holds(&env).await? == (1_000_000, 0),
+        "setup failed: Ref and the ledger should both hold the 1 USDC that went in"
+    );
+    run.context(
+        "setup: a buy is stuck at the swap step, and Ref's balance equals the vault's ledger",
+        json!({"nonce": nonce, "in_ref": "1000000", "ledger": "1000000"}),
+    );
+    let flight_books = books(&env).await?;
+
+    donate_at_rhea(&env, 3_000_000).await?;
+    run.step(
+        "3 USDC given to the vault's account at Ref while the swap is stuck: the books and the ledger do not move",
+        books(&env).await? == flight_books
+            && rhea_ledger(&env).await? == (1_000_000, 0)
+            && rhea_holds(&env).await? == (4_000_000, 0),
+        None,
+        json!({"in_ref": "4000000", "ledger": "1000000", "books_unchanged": books(&env).await? == flight_books}),
+    );
+
+    let racers = [
+        &env.stranger,
+        &env.alice,
+        &env.governor,
+        &env.guardian,
+        &env.keeper,
+    ];
+    let mut pending = Vec::new();
+    for account in racers {
+        pending.push(
+            account
+                .call(&env.vault_id, "advance")
+                .args_json(json!({ "nonce": nonce }))
+                .max_gas()
+                .transact_async()
+                .await?,
+        );
+    }
+    let mut results = Vec::new();
+    for status in pending {
+        results.push(status.await?);
+    }
+    let wins = results.iter().filter(|result| result.is_success()).count();
+    let mut losers_say_not_stuck = 0;
+    for result in &results {
+        if let Some(text) = run.refused(result) {
+            if refusal(Some(&text), &["NOT_STUCK"]).is_some() {
+                losers_say_not_stuck += 1;
+            }
+        }
+    }
+    let probing: usize = results
+        .iter()
+        .map(|result| event_count(result, "probing"))
+        .sum();
+    let reverted: usize = results
+        .iter()
+        .map(|result| event_count(result, "swap_reverted"))
+        .sum();
+    run.step(
+        "five advances at once on one stuck swap: one goes through, the other four read NOT_STUCK",
+        wins == 1 && probing == 1 && reverted == 1 && losers_say_not_stuck == 4,
+        Some("NOT_STUCK"),
+        json!({"callers": 5, "succeeded": wins, "probing_events": probing, "swap_reverted_events": reverted,
+               "refused_not_stuck": losers_say_not_stuck}),
+    );
+    let (held_usdc, held_wnear) = rhea_holds(&env).await?;
+    run.step(
+        "afterwards the vault is Idle with the books it had, and Ref holds the ledger plus the donation only",
+        stage(&env).await? == json!("Idle")
+            && books(&env).await? == idle_books
+            && rhea_ledger(&env).await? == (0, 0)
+            && (held_usdc, held_wnear) == (3_000_000, 0)
+            && wallet_of(&env, &env.usdc, &env.vault_id).await? == idle_wallet,
+        None,
+        json!({"in_ref": held_usdc.to_string(), "ledger": "0", "donation": "3000000", "books_unchanged": books(&env).await? == idle_books}),
+    );
+
+    // B. A swap whose real answer is still in flight (Ref's answer comes about 200 blocks late).
+    let slow = attack_env_with(Setup {
+        policy: json!({"epoch_len": EPOCH_LEN, "cooldown": COOLDOWN, "stuck_after": 10, "halt_after": 600}),
+        ..Default::default()
+    })
+    .await?;
+    settle_deposit(&slow).await?;
+    let slow_before = books(&slow).await?;
+    let (usdc_book, wnear_book) = book(&slow).await?;
+    set_fault(&slow, "SwapHang").await?;
+    let hung_nonce = decision_ready(&slow, template("buy_risk", 1_000_000)).await?;
+    let running = slow
+        .keeper
+        .call(&slow.vault_id, "execute_decision")
+        .args_json(json!({ "nonce": hung_nonce }))
+        .max_gas()
+        .transact_async()
+        .await?;
+    wait_for_stage(&slow, "Swapping").await?;
+    let early = slow
+        .call_vault(&slow.stranger, "advance", json!({"nonce": hung_nonce}))
+        .await?;
+    let early_text = run.refused(&early);
+    run.step(
+        "advance while the real answer is in flight and stuck_after has not passed",
+        refusal(early_text.as_deref(), &["NOT_STUCK"]).is_some()
+            && has_stage(&slow, "Swapping").await?,
+        Some("NOT_STUCK"),
+        json!({"stage": "Swapping"}),
+    );
+    wait_seconds(&slow, 11).await?;
+    let rescue = slow
+        .call_vault(&slow.stranger, "advance", json!({"nonce": hung_nonce}))
+        .await?;
+    anyhow::ensure!(
+        rescue.is_success(),
+        "advance after stuck_after: {}",
+        failures(&rescue)
+    );
+    // Poll the first transaction instead of waiting on it: a wait that outlasts the RPC's patience is an
+    // error, and the yield times out only after about 200 blocks.
+    // Each poll of a transaction that is still waiting can block for seconds, so go past the timeout first.
+    for _ in 0..5 {
+        slow.worker.fast_forward(60).await?;
+    }
+    let mut original = None;
+    for _ in 0..40 {
+        if let Ok(std::task::Poll::Ready(result)) = running.status().await {
+            original = Some(result);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let original =
+        original.ok_or_else(|| anyhow::anyhow!("the hung execute_decision never finished"))?;
+    let executed = event_data(&rescue, "executed");
+    let amount_out: u128 = executed
+        .as_ref()
+        .and_then(|data| data["amount_out"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("the rescuing advance should end in `executed`"))?
+        .parse()?;
+    let (usdc_after, wnear_after) = book(&slow).await?;
+    run.step(
+        "advance after stuck_after, then the late original answer arrives: the swap executes once",
+        event_count(&rescue, "probing") == 1
+            && event_count(&rescue, "executed") == 1
+            && event_count(&original, "executed") == 0
+            && event_count(&original, "swap_reverted") == 0
+            && event_count(&original, "stuck") == 0
+            && delta(usdc_book, usdc_after) == -1_000_000
+            && delta(wnear_book, wnear_after) == amount_out as i128
+            && stage(&slow).await? == json!("Idle"),
+        None,
+        json!({"amount_in": "1000000", "amount_out": amount_out.to_string(), "executed_events": event_count(&rescue, "executed") + event_count(&original, "executed"),
+               "probing_events": event_count(&rescue, "probing"), "stage": "Idle"}),
+    );
+    run.step(
+        "Ref holds nothing for the vault, the ledger is empty and the wallets equal the books",
+        rhea_holds(&slow).await? == (0, 0)
+            && rhea_ledger(&slow).await? == (0, 0)
+            && wallet_of(&slow, &slow.usdc, &slow.vault_id).await? == usdc_after
+            && wallet_of(&slow, &slow.wnear, &slow.vault_id).await? == wnear_after
+            && books(&slow).await? != slow_before,
+        None,
+        json!({"in_ref": "0", "ledger": "0"}),
+    );
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before: the recovered swap returned the USDC; the donation sits at Ref and in no book",
+    );
+    run.finish(&env, before, ledger(&env).await?)
+}

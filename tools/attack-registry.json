@@ -118,7 +118,10 @@
     {
       "name": "advance-race",
       "expected": "Satu pengiriman ulang saja (kunci `Probing`); saldo Rhea cocok dengan `rhea_bal`",
-      "codes": []
+      "codes": [
+        "NOT_STUCK"
+      ],
+      "test_binary": "attacks_batch3"
     }
   ]
 }
