@@ -49,6 +49,47 @@ pub struct Cycle {
     /// Unix seconds. The quote is judged at this time, so the same file always gives the same
     /// answer, and a later TCB recall does not rewrite an old proof.
     pub collateral_fetched_at: u64,
+    /// What the worker archived of the NEAR AI reply behind `ai_ref`; absent when there was no
+    /// chat or no archive key.
+    #[serde(default)]
+    pub ai_signature: Option<AiArchive>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AiArchive {
+    Archived(Box<AiSignature>),
+    /// NEAR AI answered 404: it no longer had the signature or the report.
+    Missing {
+        missing: String,
+    },
+}
+
+/// `/v1/signature/<chat_id>` and the signer's entry in `/v1/attestation/report`, the report
+/// asked with the reply hash as its nonce.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiSignature {
+    pub model: String,
+    /// `<model>:<request_hash>:<response_hash>`, what the model's TEE signed.
+    pub text: String,
+    /// 65 bytes, hex with `0x`: r, s and the recovery byte.
+    pub signature: String,
+    pub signing_address: String,
+    pub signing_algo: String,
+    pub report: ModelReport,
+    pub collateral: QuoteCollateralV3,
+    pub collateral_fetched_at: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelReport {
+    pub model_name: String,
+    pub signing_address: String,
+    pub request_nonce: String,
+    /// Hex, unlike OutLayer's base64.
+    pub intel_quote: String,
 }
 
 /// The reply of `/attestations/by-tx/<tx>`. Unknown fields pass on purpose: the Task Hash

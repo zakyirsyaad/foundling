@@ -1,6 +1,7 @@
 #!/bin/sh
 # Stand-in for tools/fetch_proof.py. FAKE_FETCH: ok (default) | down (exit 2) | hang | garbage.
 echo "fetch $*" >> "${FAKE_LOG:-/dev/null}"
+[ -n "$FAKE_ENV_LOG" ] && echo "fetch key=${NEARAI_ARCHIVE_KEY:-none}" >> "$FAKE_ENV_LOG"
 out=""; prev=""
 for a in "$@"; do [ "$prev" = "--out" ] && out="$a"; prev="$a"; done
 case "${FAKE_FETCH:-ok}" in

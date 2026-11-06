@@ -37,8 +37,20 @@ export function nextAttempt(now: Date, attemptsSoFar: number): Date {
 /** `stderr` is kept only as a short tail, for the reason in `last_error`. */
 export interface ToolRun { code: number | null; stdout: string; timedOut: boolean; stderr?: string }
 
-/** Never throws. The tool runs in its own process group so a timeout also kills whatever it started. */
-export function runTool(cmd: string, args: string[], timeoutMs: number): Promise<ToolRun> {
+/** The NEAR AI key the worker archives signatures with. Only fetch_proof.py is handed it. */
+export const ARCHIVE_KEY_ENV = "NEARAI_ARCHIVE_KEY";
+
+/** The worker's env without the archive key, plus `extra`. */
+function toolEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  const { [ARCHIVE_KEY_ENV]: _held, ...rest } = process.env;
+  return { ...rest, ...extra };
+}
+
+/**
+ * Never throws. The tool runs in its own process group so a timeout also kills whatever it started. A tool gets
+ * the worker's env without the archive key, plus `env`.
+ */
+export function runTool(cmd: string, args: string[], timeoutMs: number, env: Record<string, string> = {}): Promise<ToolRun> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -50,7 +62,7 @@ export function runTool(cmd: string, args: string[], timeoutMs: number): Promise
       clearTimeout(timer);
       resolve(stderr ? { code, stdout, timedOut, stderr } : { code, stdout, timedOut });
     };
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], detached: true, env: toolEnv(env) });
     child.stdout.on("data", (chunk: Buffer) => {
       if (stdout.length < MAX_STDOUT) stdout += chunk.toString("utf8");
     });

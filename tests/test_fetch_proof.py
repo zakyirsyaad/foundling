@@ -1,7 +1,11 @@
 """fetch_proof.py's RPC choice and opening, with no network."""
 
 import importlib.util
+import json
+import re
 import unittest
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -77,6 +81,128 @@ class OpeningFromViews(unittest.TestCase):
                 mock.patch.object(fetch, "tx_status", return_value=status):
             with self.assertRaises(fetch.SourceError):
                 fetch.opening_of("testnet", "v.testnet", "TXR", "keeper.testnet")
+
+
+
+CHAT = "96c4d660c8c24433aafa9eac77b20286"
+RESP = "865729cb2e02965750d82714848f2498a44062623b3f957d1cdaaf239127b030"
+SIGNER = "0x3b753b4406613c5e70ae640508632b600424fa0c"
+KEY = "sk-test-archive-key"
+
+
+def decision(chat_id=CHAT, m=0):
+    ai = {"chat_id": chat_id, "resp_sig_hash": RESP if chat_id else ""}
+    if m is not None and chat_id:
+        ai["m"] = m
+    return json.dumps({"ai_ref": ai, "nonce": 1})
+
+
+def nearai_world(calls, signature_status=200, report_status=200):
+    """A fake NEAR AI: records each call and answers like the real endpoints."""
+
+    def reply(url, body=None, headers=None):
+        calls.append((url, dict(headers or {})))
+        parsed = urllib.parse.urlparse(url)
+        query = dict(urllib.parse.parse_qsl(parsed.query))
+        if "/signature/" in parsed.path:
+            if signature_status != 200:
+                raise urllib.error.HTTPError(url, signature_status, "x", {}, None)
+            return {"text": f"{query['model']}:{'ab' * 32}:{RESP}", "signature": "0x" + "11" * 65,
+                    "signing_address": SIGNER, "signing_algo": "ecdsa", "signature_kind": "provider_tee"}
+        if parsed.path.endswith("/attestation/report"):
+            if report_status != 200:
+                raise urllib.error.HTTPError(url, report_status, "x", {}, None)
+            entry = {"model_name": query["model"], "signing_address": query["signing_address"],
+                     "request_nonce": query["nonce"], "intel_quote": "0400", "nvidia_payload": "{}", "event_log": []}
+            other = dict(entry, signing_address="0x" + "22" * 20)
+            return {"gateway_attestation": {}, "model_attestations": [other, entry]}
+        raise AssertionError(url)
+
+    return reply
+
+
+class AdvisorSignature(unittest.TestCase):
+    def archive(self, text, key=KEY, **world):
+        calls = []
+        with mock.patch.object(fetch, "read_json", side_effect=nearai_world(calls, **world)), \
+                mock.patch.object(fetch, "collateral_of_bytes", return_value={"tcb_info": "c"}) as collateral:
+            result = fetch.ai_signature_of("/bin/fv", text, key)
+        return result, calls, collateral
+
+    def test_a_silent_advisor_needs_no_archive_and_makes_no_call(self):
+        result, calls, _ = self.archive(decision(chat_id=""))
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+
+    def test_without_an_archive_key_nothing_is_fetched(self):
+        result, calls, _ = self.archive(decision(), key=None)
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+
+    def test_the_signature_is_fetched_for_the_model_that_answered(self):
+        _, calls, _ = self.archive(decision(m=1))
+        url, headers = calls[0]
+        self.assertIn(f"/v1/signature/{CHAT}?", url)
+        self.assertEqual(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query)),
+                         {"model": fetch.MODELS[1], "signing_algo": "ecdsa"})
+        self.assertEqual(headers["authorization"], f"Bearer {KEY}")
+
+    def test_the_attestation_is_asked_with_the_reply_hash_as_its_nonce(self):
+        _, calls, _ = self.archive(decision())
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(calls[1][0]).query))
+        self.assertEqual(query, {"model": fetch.MODELS[0], "signing_algo": "ecdsa", "signing_address": SIGNER, "nonce": RESP})
+
+    def test_the_archive_keeps_the_signature_and_the_signer_report(self):
+        result, _, collateral = self.archive(decision())
+        self.assertEqual(result["model"], fetch.MODELS[0])
+        self.assertEqual(result["text"], f"{fetch.MODELS[0]}:{'ab' * 32}:{RESP}")
+        self.assertEqual(result["signing_address"], SIGNER)
+        self.assertEqual(result["report"], {"model_name": fetch.MODELS[0], "signing_address": SIGNER,
+                                            "request_nonce": RESP, "intel_quote": "0400"})
+        self.assertEqual(result["collateral"], {"tcb_info": "c"})
+        collateral.assert_called_once_with("/bin/fv", bytes.fromhex("0400"))
+        self.assertIsInstance(result["collateral_fetched_at"], int)
+
+    def test_the_key_stays_out_of_the_archive(self):
+        result, _, _ = self.archive(decision())
+        self.assertNotIn(KEY, json.dumps(result))
+
+    def test_a_signature_nearai_no_longer_has_is_recorded_as_missing(self):
+        result, calls, _ = self.archive(decision(), signature_status=404)
+        self.assertEqual(result, {"missing": "signature: HTTP 404"})
+        self.assertEqual(len(calls), 1)
+
+    def test_a_refused_key_is_a_source_error(self):
+        with self.assertRaises(fetch.SourceError):
+            self.archive(decision(), signature_status=401)
+
+    def test_nearai_down_is_a_source_error(self):
+        with self.assertRaises(fetch.SourceError):
+            self.archive(decision(), report_status=502)
+
+    def test_a_decision_without_a_known_model_index_is_a_source_error(self):
+        for m in (None, 2, -1, "0"):
+            with self.subTest(m=m), self.assertRaises(fetch.SourceError):
+                self.archive(decision(m=m))
+
+    def test_the_models_match_the_strategy(self):
+        source = (ROOT / "strategy" / "src" / "advisor.rs").read_text()
+        line = next(l for l in source.splitlines() if "pub const MODELS" in l)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', line)), fetch.MODELS)
+
+    def test_the_cycle_carries_the_archive_from_the_environment(self):
+        cycle = {"tx": "T", "decision": decision()}
+        with mock.patch.object(fetch, "ai_signature_of", return_value={"missing": "x"}) as archive, \
+                mock.patch.dict(fetch.os.environ, {fetch.ARCHIVE_KEY_ENV: KEY}):
+            fetch.add_ai_signature(cycle, "/bin/fv")
+        archive.assert_called_once_with("/bin/fv", cycle["decision"], KEY)
+        self.assertEqual(cycle["ai_signature"], {"missing": "x"})
+
+    def test_a_cycle_without_an_archive_is_left_as_it_was(self):
+        cycle = {"tx": "T", "decision": decision(chat_id="")}
+        with mock.patch.object(fetch, "ai_signature_of", return_value=None):
+            fetch.add_ai_signature(cycle, "/bin/fv")
+        self.assertNotIn("ai_signature", cycle)
 
 
 if __name__ == "__main__":

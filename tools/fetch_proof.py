@@ -12,16 +12,24 @@ from the `revealed` and `revealed_salt` views, unless `--reveal-tx` asks for the
 The trigger transactions come from the keeper's history. The collateral binary is
 `foundling-verify` built with `--features fetch`. Exit code 0 means the file was written,
 2 means a source could not be read.
+
+When the cycle's decision names a NEAR AI chat (`ai_ref.chat_id`) and NEARAI_ARCHIVE_KEY is set, the
+model's signature for that reply and the signer's attestation report are fetched and kept in the
+cycle as `ai_signature`. Both endpoints need a key, and the key sealed in the vault never leaves it,
+so this second key (same NEAR AI account) is how a reader without one can still check the reply. The
+key goes only into the request header and is never written to the file.
 """
 
 import argparse
 import base64
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 CHAINS = {
@@ -41,6 +49,12 @@ TIMEOUT_SECONDS = 20
 TOOL_FAILED = 2
 EVENT_PREFIX = "EVENT_JSON:"
 EMPTY_ARGS = base64.b64encode(b"{}").decode()
+NEARAI = "https://cloud-api.near.ai/v1"
+ARCHIVE_KEY_ENV = "NEARAI_ARCHIVE_KEY"
+# The strategy's `advisor::MODELS`, in order: `ai_ref.m` indexes it. A test keeps the two the same.
+MODELS = ("z-ai/glm-5.3-flash", "Qwen/Qwen3.8-27B")
+NOT_FOUND = 404
+REPORT_FIELDS = ("model_name", "signing_address", "request_nonce", "intel_quote")
 
 
 class SourceError(Exception):
@@ -56,8 +70,8 @@ def use_rpcs(urls):
     ACTIVE_RPCS = list(urls) if urls else None
 
 
-def read_json(url, body=None):
-    headers = {"content-type": "application/json", "user-agent": "foundling-verify"}
+def read_json(url, body=None, headers=None):
+    headers = {"content-type": "application/json", "user-agent": "foundling-verify", **(headers or {})}
     request = urllib.request.Request(url, data=body, headers=headers)
     with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
         return json.load(response)
@@ -116,13 +130,69 @@ def input_data_of(status, vault, outlayer):
 
 
 def collateral_of(binary, tdx_quote):
+    return collateral_of_bytes(binary, base64.b64decode(tdx_quote))
+
+
+def collateral_of_bytes(binary, raw_quote):
     with tempfile.NamedTemporaryFile(suffix=".quote") as quote:
-        quote.write(base64.b64decode(tdx_quote))
+        quote.write(raw_quote)
         quote.flush()
         done = subprocess.run([binary, "collateral", quote.name], capture_output=True, text=True, check=False)
     if done.returncode != 0:
         raise SourceError(f"collateral: {done.stderr.strip()}")
     return json.loads(done.stdout)
+
+
+def nearai_get(path, query, key):
+    """One NEAR AI call. A 404 is None (the record is gone); any other failure is a SourceError."""
+    url = f"{NEARAI}{path}?{urllib.parse.urlencode(query)}"
+    try:
+        return read_json(url, headers={"authorization": f"Bearer {key}"})
+    except urllib.error.HTTPError as error:
+        if error.code == NOT_FOUND:
+            return None
+        raise SourceError(f"NEAR AI {path.split('/')[1]}: HTTP {error.code}") from None
+
+
+def ai_signature_of(binary, decision_text, key):
+    """The archive for one decision, None when there is nothing to archive or no key to do it with."""
+    ai = json.loads(decision_text).get("ai_ref") or {}
+    chat_id = ai.get("chat_id")
+    if not chat_id or not key:
+        return None
+    index = ai.get("m")
+    if type(index) is not int or not 0 <= index < len(MODELS):
+        raise SourceError(f"chat {chat_id} names no model the advisor asks (m={index!r})")
+    model = MODELS[index]
+    signature = nearai_get(f"/signature/{chat_id}", {"model": model, "signing_algo": "ecdsa"}, key)
+    if signature is None:
+        return {"missing": f"signature: HTTP {NOT_FOUND}"}
+    signer = signature["signing_address"]
+    # The reply hash as the nonce: the report then shows it was made after this reply existed.
+    query = {"model": model, "signing_algo": "ecdsa", "signing_address": signer, "nonce": ai["resp_sig_hash"]}
+    report = nearai_get("/attestation/report", query, key)
+    if report is None:
+        return {"missing": f"attestation report: HTTP {NOT_FOUND}"}
+    entries = [e for e in report.get("model_attestations", []) if e.get("signing_address", "").lower() == signer.lower()]
+    if len(entries) != 1:
+        raise SourceError(f"the attestation report has {len(entries)} entries for signer {signer}")
+    entry = {field: entries[0][field] for field in REPORT_FIELDS}
+    return {
+        "model": model,
+        "text": signature["text"],
+        "signature": signature["signature"],
+        "signing_address": signer,
+        "signing_algo": signature["signing_algo"],
+        "report": entry,
+        "collateral": collateral_of_bytes(binary, bytes.fromhex(entry["intel_quote"])),
+        "collateral_fetched_at": int(time.time()),
+    }
+
+
+def add_ai_signature(cycle, binary):
+    archive = ai_signature_of(binary, cycle["decision"], os.environ.get(ARCHIVE_KEY_ENV))
+    if archive is not None:
+        cycle["ai_signature"] = archive
 
 
 def cycle_of(chain, vault, outlayer, keeper, binary, tx_hash):
@@ -134,7 +204,7 @@ def cycle_of(chain, vault, outlayer, keeper, binary, tx_hash):
         attestation = read_json(f"{CHAINS[chain]['api']}/attestations/by-tx/{tx_hash}")
     except urllib.error.HTTPError as error:
         raise SourceError(f"attestation of {tx_hash}: {error.code}") from error
-    return {
+    cycle = {
         "tx": tx_hash,
         "input_data": input_data_of(status, vault, outlayer),
         "decision": decisions[0],
@@ -142,6 +212,8 @@ def cycle_of(chain, vault, outlayer, keeper, binary, tx_hash):
         "collateral": collateral_of(binary, attestation["tdx_quote"]),
         "collateral_fetched_at": int(time.time()),
     }
+    add_ai_signature(cycle, binary)
+    return cycle
 
 
 def opening_of(chain, vault, tx_hash, signer):
