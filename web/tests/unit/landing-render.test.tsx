@@ -28,6 +28,14 @@ test("Home uses claim text for passed claims and downgrade text otherwise", () =
   expect(screen.getByText("Cross-chain deposits through NEAR Intents are in testing.")).toBeInTheDocument();
   expect(container.querySelector("#how-it-works")).toHaveTextContent("A NEAR AI advisor is planned and not yet checked.");
 });
+test("the hero states the keyless vault only once that claim passes", () => {
+  const { unmount } = render(<Home claims={claims} keysLine="x" />);
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("A vault born without keys.");
+  unmount();
+  const unchecked = claims.map((c) => (c.id === "born-without-keys" ? { ...c, status: "skip" as const } : c));
+  render(<Home claims={unchecked} keysLine="x" />);
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("A vault meant to be born without keys.");
+});
 test("Home uses the partner name once a claim passes", () => {
   const passed = claims.map((c) => ({ ...c, status: "pass" as const }));
   const { container } = render(<Home claims={passed} keysLine="x" />);

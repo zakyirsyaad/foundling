@@ -1,0 +1,181 @@
+[
+  {
+    "id": "born-without-keys",
+    "claim": "The vault account has no access keys. Nobody can sign for it.",
+    "tracks": [
+      "security"
+    ],
+    "code_refs": [
+      "contracts/vault/src/lib.rs"
+    ],
+    "test_refs": [],
+    "evidence": [],
+    "checks": [
+      {
+        "tier": "1",
+        "cmd": "near account list-keys <vault> network-config <network> now",
+        "requires": [
+          "near-cli-rs"
+        ],
+        "network": "live",
+        "seconds": 5,
+        "expect": "no access keys"
+      }
+    ],
+    "status": "skip",
+    "downgrade": "The vault is meant to be born without keys. That check has not run on the final vault yet, and the testnet rehearsal vault still has one key."
+  },
+  {
+    "id": "g1-confidentiality",
+    "claim": "The strategy parameters stay sealed until reveal.",
+    "tracks": [
+      "privacy"
+    ],
+    "code_refs": [
+      "strategy/src/lib.rs",
+      "contracts/vault/src/reveal.rs"
+    ],
+    "test_refs": [
+      "strategy/src/tests.rs",
+      "contracts/vault/src/tests/reveal.rs"
+    ],
+    "evidence": [
+      "proofs/commitment.json"
+    ],
+    "checks": [
+      {
+        "tier": "0a",
+        "cmd": "python3 verify.py",
+        "requires": [
+          "python3"
+        ],
+        "network": "offline",
+        "seconds": 2,
+        "expect": "PASS commitment"
+      }
+    ],
+    "status": "skip",
+    "downgrade": "Sealing is designed. It is checked on this vault once the parameters are revealed and replayed."
+  },
+  {
+    "id": "g2-bounded-loss",
+    "claim": "Each trade stays inside caps the contract enforces.",
+    "tracks": [
+      "security"
+    ],
+    "code_refs": [
+      "contracts/vault/src/limits.rs"
+    ],
+    "test_refs": [
+      "contracts/vault/src/tests/limits.rs"
+    ],
+    "evidence": [
+      "proofs/attack/reproducible/over-cap.json"
+    ],
+    "checks": [
+      {
+        "tier": "0b",
+        "cmd": "make attack-proofs",
+        "requires": [
+          "docker",
+          "cargo-near"
+        ],
+        "network": "sandbox",
+        "seconds": 600,
+        "expect": "over-cap PASS"
+      }
+    ],
+    "status": "pass",
+    "downgrade": "Caps are in the contract; the live check has not run."
+  },
+  {
+    "id": "g3-exit",
+    "claim": "You can redeem while trading is frozen, halted or stuck.",
+    "tracks": [
+      "security"
+    ],
+    "code_refs": [
+      "contracts/vault/src/lib.rs"
+    ],
+    "test_refs": [
+      "contracts/vault/src/tests/recovery.rs",
+      "contracts/vault/src/tests/flows.rs"
+    ],
+    "evidence": [],
+    "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo test --manifest-path contracts/vault/Cargo.toml redeem",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 120,
+        "expect": "redeem_works_while_frozen, redeem_works_while_halted and a_redeem_while_stuck_keeps_its_claim pass"
+      }
+    ],
+    "status": "pass",
+    "downgrade": "Redeem is designed to stay open; the live check has not run."
+  },
+  {
+    "id": "g4-traceability",
+    "claim": "Every cycle links to its transactions and its proof.",
+    "tracks": [
+      "security",
+      "privacy"
+    ],
+    "code_refs": [
+      "indexer/src/proofs/queue.ts",
+      "cli/src/lib.rs",
+      "tools/fetch_proof.py"
+    ],
+    "test_refs": [
+      "cli/tests/check.rs"
+    ],
+    "evidence": [],
+    "checks": [
+      {
+        "tier": "1",
+        "cmd": "git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json",
+        "requires": [
+          "git",
+          "python3",
+          "cargo"
+        ],
+        "network": "live",
+        "seconds": 120,
+        "expect": "fail=0"
+      }
+    ],
+    "status": "pass",
+    "downgrade": "Cycle records are planned for this vault."
+  },
+  {
+    "id": "near-intents",
+    "claim": "NEAR Intents (1Click) for deposits from other chains.",
+    "tracks": [
+      "defi"
+    ],
+    "code_refs": [
+      "web/lib/crosschain"
+    ],
+    "test_refs": [],
+    "evidence": [],
+    "checks": [],
+    "status": "skip",
+    "downgrade": "Cross-chain deposits through NEAR Intents are in testing."
+  },
+  {
+    "id": "near-ai-advisor",
+    "claim": "NEAR AI as an advisor that can only lower exposure.",
+    "tracks": [
+      "privacy"
+    ],
+    "code_refs": [],
+    "test_refs": [],
+    "evidence": [],
+    "checks": [],
+    "status": "skip",
+    "downgrade": "A NEAR AI advisor is planned and not yet checked."
+  }
+]

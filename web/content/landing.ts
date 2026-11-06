@@ -1,5 +1,7 @@
 export const HERO = {
   title: "A vault born without keys.",
+  /** Until the born-without-keys claim passes, the headline does not state it as done. */
+  titleUnchecked: "A vault meant to be born without keys.",
   lead: "A USDC vault on NEAR. A sealed strategy trades it, the contract enforces the limits, and you can leave without us.",
 } as const;
 
