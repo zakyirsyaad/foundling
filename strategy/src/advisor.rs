@@ -221,7 +221,7 @@ pub fn read_advice(reply: &[u8], asked: usize) -> Option<Advice> {
     {
         return None;
     }
-    let answer: Answer = serde_json::from_str(choice.message.content.trim()).ok()?;
+    let answer: Answer = serde_json::from_str(unfenced(&choice.message.content)?).ok()?;
     if answer.confidence > MAX_CONFIDENCE {
         return None;
     }
@@ -238,6 +238,20 @@ pub fn read_advice(reply: &[u8], asked: usize) -> Option<Advice> {
             m: u8::try_from(asked).ok(),
         },
     })
+}
+
+/// The answer with one exact Markdown fence (```json or ```) peeled off, if it has one. A
+/// sealed vault cannot follow a model that starts fencing its JSON, so the fence is allowed,
+/// but nothing else around the answer is.
+fn unfenced(content: &str) -> Option<&str> {
+    const FENCE: &str = "```";
+    let content = content.trim();
+    let Some(opened) = content.strip_prefix(FENCE) else {
+        return Some(content);
+    };
+    let opened = opened.strip_prefix("json").unwrap_or(opened);
+    let inner = opened.strip_prefix('\n')?.strip_suffix(FENCE)?;
+    (!inner.contains(FENCE)).then_some(inner)
 }
 
 /// The id goes into the Decision, whose reply to the vault has a hard size limit.

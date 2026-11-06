@@ -225,10 +225,60 @@ fn prose_is_not_an_answer() {
     assert_eq!(answer_of("All clear, nothing to report."), None);
 }
 
+// Lead decision 2026-11-07: a sealed vault cannot adapt if a model starts fencing its
+// answer, so one exact fence is peeled off. What is inside must still be the exact answer.
 #[test]
-fn an_answer_in_a_code_fence_is_not_an_answer() {
+fn an_answer_in_a_json_fence_is_an_answer() {
     assert_eq!(
         answer_of("```json\n{\"risk_flag\":false,\"confidence\":90}\n```"),
+        Some((AI_CLEAR, 90))
+    );
+}
+
+#[test]
+fn an_answer_in_a_bare_fence_is_an_answer() {
+    assert_eq!(
+        answer_of(" ```\n{\"risk_flag\":true,\"confidence\":55}\n```\n"),
+        Some((AI_FLAGGED, 55))
+    );
+}
+
+#[test]
+fn text_around_a_fence_is_not_an_answer() {
+    assert_eq!(
+        answer_of("Here it is:\n```json\n{\"risk_flag\":false,\"confidence\":90}\n```"),
+        None
+    );
+}
+
+#[test]
+fn a_fence_that_is_never_closed_is_not_an_answer() {
+    assert_eq!(
+        answer_of("```json\n{\"risk_flag\":false,\"confidence\":90}"),
+        None
+    );
+}
+
+#[test]
+fn a_fence_for_another_language_is_not_an_answer() {
+    assert_eq!(
+        answer_of("```python\n{\"risk_flag\":false,\"confidence\":90}\n```"),
+        None
+    );
+}
+
+#[test]
+fn a_fenced_answer_with_extra_fields_is_not_an_answer() {
+    assert_eq!(
+        answer_of("```json\n{\"risk_flag\":false,\"confidence\":90,\"why\":\"x\"}\n```"),
+        None
+    );
+}
+
+#[test]
+fn two_fences_are_not_an_answer() {
+    assert_eq!(
+        answer_of("```json\n```json\n{\"risk_flag\":false,\"confidence\":90}\n```\n```"),
         None
     );
 }
@@ -546,9 +596,9 @@ fn chat_bodies(
 
 #[test]
 fn a_bad_answer_from_the_first_model_is_not_asked_again() {
-    let fenced = "```json\n{\"risk_flag\":true,\"confidence\":95}\n```";
+    let prose = "Risk looks high, I would hold off.";
 
-    let (reading, bodies) = chat_bodies(Some(fenced), &[]);
+    let (reading, bodies) = chat_bodies(Some(prose), &[]);
 
     assert_eq!(reading.unwrap().obs.ai_flag, AI_SILENT);
     assert_eq!(bodies.len(), 1);
