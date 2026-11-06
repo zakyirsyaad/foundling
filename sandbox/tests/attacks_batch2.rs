@@ -756,3 +756,124 @@ async fn governor_loosen() -> anyhow::Result<()> {
     );
     run.finish(&env, before, ledger(&env).await?)
 }
+
+/// S4: the keeper stops and OutLayer cannot be reached. Both accounts are deleted from the chain,
+/// so nothing about them is mocked: no cycle can start, a decision left half way expires on its
+/// own, and `redeem` pays pro rata at every stage without either of them (I4). OutLayer is also
+/// paused first (`Mode::Failed`), which must end a cycle with no trade.
+#[tokio::test]
+async fn kill_agent() -> anyhow::Result<()> {
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new("kill-agent", &[]);
+    settle_deposit(&env).await?;
+    let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
+    anyhow::ensure!(bought.started, "setup failed: the buy should trade: {bought:?}");
+    // Registered on wNEAR, so the wNEAR leg of a payout lands in the wallet and is checked there.
+    env.mint(&env.wnear, env.alice.id(), 1).await?;
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let before = ledger(&env).await?;
+    let held = shares_of(&env, &env.alice).await?;
+    let quarter = held / 4;
+    run.context(
+        "setup: alice holds shares of a vault with USDC and wNEAR, and the agent has run",
+        json!({"shares": held.to_string(), "book": before["book"]}),
+    );
+
+    // OutLayer paused: the request fails, the cycle ends, nothing trades.
+    let paused = cycle(&env, json!("Failed")).await?;
+    run.step(
+        "OutLayer paused: a cycle ends without a trade and the vault is Idle again",
+        paused.failed.is_some() && !paused.started && stage(&env).await? == json!("Idle") && ledger(&env).await? == before,
+        None,
+        json!({"cycle_failed": paused.failed, "nonce": paused.nonce}),
+    );
+    wait_seconds(&env, COOLDOWN + 1).await?;
+
+    // A decision is ready and then both go away.
+    let ready_nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
+    let nonce_at_kill: u64 = env.view_vault("last_nonce", json!({})).await?;
+    let ops_at_kill: String = env.view_vault("ops_spent", json!({})).await?;
+    let beneficiary = env.parent.id().clone();
+    let keeper_gone = env.keeper.clone().delete_account(&beneficiary).await?;
+    let outlayer_gone = env.outlayer.as_account().clone().delete_account(&beneficiary).await?;
+    anyhow::ensure!(
+        keeper_gone.is_success() && outlayer_gone.is_success(),
+        "setup failed: deleting the accounts: {} {}",
+        failures(&keeper_gone),
+        failures(&outlayer_gone)
+    );
+    anyhow::ensure!(
+        env.worker.view_account(env.keeper.id()).await.is_err()
+            && env.worker.view_account(env.outlayer.id()).await.is_err(),
+        "setup failed: the accounts should be gone"
+    );
+    run.context(
+        "keeper and OutLayer deleted from the chain, with a decision ready and not executed",
+        json!({"keeper": env.keeper.id(), "outlayer": env.outlayer.id(), "ready_nonce": ready_nonce, "stage": stage(&env).await?}),
+    );
+
+    // Redeem at DecisionReady.
+    let at_ready = redeem(&env, &env.alice, quarter).await?;
+    run.step("redeem while a decision waits and neither agent nor keeper exists", at_ready.exact(), None, at_ready.detail());
+
+    // Nobody else can start a cycle or execute the decision.
+    let mut slipped = Vec::new();
+    for (who, account) in foreign_callers(&env) {
+        let started = env.call_vault(account, "trigger_cycle", json!({})).await?;
+        let executed = env.call_vault(account, "execute_decision", json!({"nonce": ready_nonce})).await?;
+        if started.is_success() || executed.is_success() {
+            slipped.push(who);
+        }
+    }
+    run.step(
+        "every other account tries trigger_cycle and execute_decision",
+        slipped.is_empty()
+            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill
+            && env.view_vault::<String>("ops_spent", json!({})).await? == ops_at_kill
+            && stage(&env).await?.get("DecisionReady").is_some(),
+        None,
+        json!({"succeeded": slipped, "last_nonce": nonce_at_kill, "refused_with": "NOT_KEEPER"}),
+    );
+
+    // The waiting decision clears by itself when anyone asks after its ttl.
+    wait_seconds(&env, 601).await?;
+    let expired = env.call_vault(&env.stranger, "expire_decision", json!({})).await?;
+    run.step(
+        "the unexecuted decision expires and anyone returns the vault to Idle",
+        expired.is_success()
+            && stage(&env).await? == json!("Idle")
+            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill,
+        None,
+        json!({"event": code_of(event_data(&expired, "cycle_failed")), "last_nonce": nonce_at_kill}),
+    );
+    let at_idle = redeem(&env, &env.alice, quarter).await?;
+    run.step("redeem while Idle with no agent and no keeper", at_idle.exact(), None, at_idle.detail());
+
+    // Still no cycle, after the cooldown and the epoch have passed.
+    wait_seconds(&env, EPOCH_LEN + 1).await?;
+    let late = env.call_vault(&env.governor, "trigger_cycle", json!({})).await?;
+    run.step(
+        "a cycle after a full epoch of silence",
+        late.is_failure()
+            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill
+            && stage(&env).await? == json!("Idle"),
+        None,
+        json!({"stage": "Idle", "last_nonce": nonce_at_kill}),
+    );
+
+    // The guardian freezes too, and the exit is still open.
+    freeze(&env).await?;
+    let when_frozen = redeem(&env, &env.alice, quarter).await?;
+    run.step("redeem after freeze, still without agent or keeper", when_frozen.exact(), None, when_frozen.detail());
+
+    let rest = shares_of(&env, &env.alice).await?;
+    let everything = redeem(&env, &env.alice, rest).await?;
+    anyhow::ensure!(book(&env).await? == (0, 0), "alice was the only holder, so the book should be empty");
+    run.step("the rest redeems in full", everything.exact(), None, everything.detail());
+
+    run.note(
+        "S4",
+        "'foundling redeem' after the kill is the redeem call above; the CLI wrapper is not part of the sandbox",
+    );
+    run.finish(&env, before, ledger(&env).await?)
+}
