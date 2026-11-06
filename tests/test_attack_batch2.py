@@ -90,5 +90,36 @@ class BatchMakeTest(unittest.TestCase):
                 self.assertLess(compile_batch2, plan.index("tools/attack.py run-all"))
 
 
+class BatchScriptsTest(unittest.TestCase):
+    def test_each_batch2_attack_has_an_executable_launcher_that_names_itself(self):
+        for name in BATCH2:
+            script = ATTACKS / name
+            self.assertTrue(script.is_file(), name)
+            self.assertTrue(os.access(script, os.X_OK), f"{name} is not executable")
+            text = script.read_text()
+            self.assertTrue(text.startswith("#!/usr/bin/env python3"), name)
+            self.assertIn(f'main("{name}")', text)
+
+    def test_a_launcher_whose_runner_crashes_exits_2_not_1(self):
+        # An uncaught exception exits 1, which the dispatcher would report as FAIL: attack succeeded.
+        for crash in ("raise ImportError('boom')", "def main(name):\n    raise PermissionError('proof')"):
+            with tempfile.TemporaryDirectory() as tmp:
+                for name in BATCH2:
+                    launcher = Path(tmp) / name
+                    launcher.write_text((ATTACKS / name).read_text())
+                    launcher.chmod(0o755)
+                (Path(tmp) / "_sandbox.py").write_text(crash + "\n")
+                for name in BATCH2:
+                    result = subprocess.run([str(Path(tmp) / name)], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, (name, crash, result.stderr))
+                    self.assertIn(name, result.stderr)
+
+    def test_each_batch2_rust_test_is_named_after_its_attack(self):
+        source = (ROOT / "sandbox" / "tests" / "attacks_batch2.rs").read_text()
+        for name in BATCH2:
+            self.assertIn(f"async fn {name.replace('-', '_')}()", source)
+            self.assertIn(f'Run::new("{name}"', source)
+
+
 if __name__ == "__main__":
     unittest.main()
