@@ -237,6 +237,15 @@ pub async fn stage(env: &Foundling) -> anyhow::Result<Value> {
     env.view_vault("stage", json!({})).await
 }
 
+/// The stage's name without its fields, which carry absolute chain times a proof must not hold.
+pub async fn stage_name(env: &Foundling) -> anyhow::Result<String> {
+    Ok(match stage(env).await? {
+        Value::String(name) => name,
+        Value::Object(fields) => fields.keys().next().cloned().unwrap_or_default(),
+        other => other.to_string(),
+    })
+}
+
 pub async fn head_second(env: &Foundling) -> anyhow::Result<u64> {
     Ok(env.worker.view_block().await?.timestamp() / 1_000_000_000)
 }
@@ -323,10 +332,7 @@ impl Redeemed {
 
 pub async fn claimable(env: &Foundling, who: &Account, token: &str) -> anyhow::Result<u128> {
     let amount: String = env
-        .view_vault(
-            "claimable_of",
-            json!({"account": who.id(), "token": token}),
-        )
+        .view_vault("claimable_of", json!({"account": who.id(), "token": token}))
         .await?;
     Ok(amount.parse()?)
 }

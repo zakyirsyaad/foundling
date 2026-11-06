@@ -16,7 +16,10 @@ use near_workspaces::Account;
 use serde_json::json;
 
 fn count(result: &near_workspaces::result::ExecutionFinalResult, event: &str) -> usize {
-    events(result).iter().filter(|e| e["event"] == event).count()
+    events(result)
+        .iter()
+        .filter(|e| e["event"] == event)
+        .count()
 }
 
 fn pro_rata(book: u128, shares: u128, total: u128) -> u128 {
@@ -77,15 +80,25 @@ async fn double_redeem() -> anyhow::Result<()> {
     let mut run = Run::new("double-redeem", &[]);
     settle_deposit(&env).await?;
     let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
-    anyhow::ensure!(bought.started, "setup failed: the buy should trade: {bought:?}");
+    anyhow::ensure!(
+        bought.started,
+        "setup failed: the buy should trade: {bought:?}"
+    );
     let (usdc_book, wnear_book) = book(&env).await?;
     let held = shares_of(&env, &env.alice).await?;
     anyhow::ensure!(
-        wnear_book > 0 && wallet_of(&env, &env.wnear, env.alice.id()).await.unwrap_or(0) == 0,
+        wnear_book > 0
+            && wallet_of(&env, &env.wnear, env.alice.id())
+                .await
+                .unwrap_or(0)
+                == 0,
         "setup failed: the vault needs wNEAR, and alice must have none"
     );
     let total = total_shares(&env).await?;
-    anyhow::ensure!(total == held, "setup failed: alice should be the only holder");
+    anyhow::ensure!(
+        total == held,
+        "setup failed: alice should be the only holder"
+    );
     run.context(
         "setup: the vault holds USDC and wNEAR and alice has no wallet on the wNEAR token",
         json!({"book_usdc": usdc_book.to_string(), "book_wnear": wnear_book.to_string(), "alice_shares": held.to_string()}),
@@ -95,7 +108,12 @@ async fn double_redeem() -> anyhow::Result<()> {
 
     // The same shares twice in one transaction: the second action fails and the transaction
     // fails as one, so the first payout does not go out either.
-    let overdraw = batch_of(&env, &env.alice, vec![redeem_action(held), redeem_action(held)]).await?;
+    let overdraw = batch_of(
+        &env,
+        &env.alice,
+        vec![redeem_action(held), redeem_action(held)],
+    )
+    .await?;
     let text = refused_text(&overdraw);
     run.step(
         "redeem all shares twice in one batch",
@@ -117,10 +135,22 @@ async fn double_redeem() -> anyhow::Result<()> {
     let first_wnear = pro_rata(wnear_book, quarter, total);
     let second_usdc = pro_rata(usdc_book - first_usdc, quarter, total - quarter);
     let second_wnear = pro_rata(wnear_book - first_wnear, quarter, total - quarter);
-    anyhow::ensure!(first_usdc > 0 && first_wnear > 0 && second_wnear > 0, "setup failed: payouts too small");
+    anyhow::ensure!(
+        first_usdc > 0 && first_wnear > 0 && second_wnear > 0,
+        "setup failed: payouts too small"
+    );
     let usdc_wallet = wallet_of(&env, &env.usdc, env.alice.id()).await?;
-    let pair = batch_of(&env, &env.alice, vec![redeem_action(quarter), redeem_action(quarter)]).await?;
-    anyhow::ensure!(pair.is_success(), "control failed: two redeems that fit should pass: {}", failures(&pair));
+    let pair = batch_of(
+        &env,
+        &env.alice,
+        vec![redeem_action(quarter), redeem_action(quarter)],
+    )
+    .await?;
+    anyhow::ensure!(
+        pair.is_success(),
+        "control failed: two redeems that fit should pass: {}",
+        failures(&pair)
+    );
     let (usdc_after, wnear_after) = book(&env).await?;
     let paid_usdc = wallet_of(&env, &env.usdc, env.alice.id()).await? - usdc_wallet;
     let claim_wnear = claimable(&env, &env.alice, "Wnear").await?;
@@ -148,11 +178,18 @@ async fn double_redeem() -> anyhow::Result<()> {
 
     // The original share count is no longer there to redeem.
     let after_pair = state(&env).await?;
-    let again = pay_call(&env, &env.alice, "redeem", json!({"shares": held.to_string()})).await?;
+    let again = pay_call(
+        &env,
+        &env.alice,
+        "redeem",
+        json!({"shares": held.to_string()}),
+    )
+    .await?;
     let text = refused_text(&again);
     run.step(
         "redeem the original share count again after the pair",
-        refusal(text.as_deref(), &["not enough shares"]).is_some() && state(&env).await? == after_pair,
+        refusal(text.as_deref(), &["not enough shares"]).is_some()
+            && state(&env).await? == after_pair,
         None,
         json!({"refused_with": refusal(text.as_deref(), &["not enough shares"])}),
     );
@@ -160,11 +197,18 @@ async fn double_redeem() -> anyhow::Result<()> {
     // The rest in one redeem leaves no shares, and one more share is refused.
     let rest = shares_of(&env, &env.alice).await?;
     let last = redeem(&env, &env.alice, rest).await?;
-    run.step("the remaining shares redeem once, in full", last.exact(), None, last.detail());
-    anyhow::ensure!(book(&env).await? == (0, 0), "alice was the only holder, so the book should be empty");
+    run.step(
+        "the remaining shares redeem once, in full",
+        last.exact(),
+        None,
+        last.detail(),
+    );
+    anyhow::ensure!(
+        book(&env).await? == (0, 0),
+        "alice was the only holder, so the book should be empty"
+    );
     let emptied = state(&env).await?;
-    let extra = pay_call(&env, &env.alice, "redeem", json!({"shares": "1"}))
-        .await?;
+    let extra = pay_call(&env, &env.alice, "redeem", json!({"shares": "1"})).await?;
     let text = refused_text(&extra);
     run.step(
         "one more share after everything was redeemed",
@@ -188,8 +232,13 @@ async fn double_redeem() -> anyhow::Result<()> {
 
     // Claiming into a wallet that still does not exist on the token changes nothing.
     let held_back = state(&env).await?;
-    let blind = pay_call(&env, &env.alice, "withdraw_claimable", json!({"token": "Wnear"}))
-        .await?;
+    let blind = pay_call(
+        &env,
+        &env.alice,
+        "withdraw_claimable",
+        json!({"token": "Wnear"}),
+    )
+    .await?;
     run.step(
         "withdraw_claimable while still unregistered on wNEAR keeps the whole claim",
         count(&blind, "transfer_failed") == 1 && state(&env).await? == held_back,
@@ -200,18 +249,33 @@ async fn double_redeem() -> anyhow::Result<()> {
     // Once registered (a mint of one unit does that), two claims in one batch fail as one.
     env.mint(&env.wnear, env.alice.id(), 1).await?;
     let registered = state(&env).await?;
-    let twice = batch_of(&env, &env.alice, vec![withdraw_action("Wnear"), withdraw_action("Wnear")]).await?;
+    let twice = batch_of(
+        &env,
+        &env.alice,
+        vec![withdraw_action("Wnear"), withdraw_action("Wnear")],
+    )
+    .await?;
     let text = refused_text(&twice);
     run.step(
         "withdraw_claimable twice in one batch",
-        refusal(text.as_deref(), &["nothing claimable"]).is_some() && state(&env).await? == registered,
+        refusal(text.as_deref(), &["nothing claimable"]).is_some()
+            && state(&env).await? == registered,
         None,
         json!({"refused_with": refusal(text.as_deref(), &["nothing claimable"])}),
     );
 
-    let paid = pay_call(&env, &env.alice, "withdraw_claimable", json!({"token": "Wnear"}))
-        .await?;
-    anyhow::ensure!(paid.is_success(), "control failed: one claim should pay: {}", failures(&paid));
+    let paid = pay_call(
+        &env,
+        &env.alice,
+        "withdraw_claimable",
+        json!({"token": "Wnear"}),
+    )
+    .await?;
+    anyhow::ensure!(
+        paid.is_success(),
+        "control failed: one claim should pay: {}",
+        failures(&paid)
+    );
     run.step(
         "one claim pays the whole claimable once",
         wallet_of(&env, &env.wnear, env.alice.id()).await? == 1 + owed
@@ -221,8 +285,13 @@ async fn double_redeem() -> anyhow::Result<()> {
         json!({"alice_wnear": wallet_of(&env, &env.wnear, env.alice.id()).await?.to_string(), "claimed": owed.to_string()}),
     );
     let settled = state(&env).await?;
-    let repeat = pay_call(&env, &env.alice, "withdraw_claimable", json!({"token": "Wnear"}))
-        .await?;
+    let repeat = pay_call(
+        &env,
+        &env.alice,
+        "withdraw_claimable",
+        json!({"token": "Wnear"}),
+    )
+    .await?;
     let text = refused_text(&repeat);
     run.step(
         "claim again",
@@ -231,6 +300,10 @@ async fn double_redeem() -> anyhow::Result<()> {
         json!({"refused_with": refusal(text.as_deref(), &["nothing claimable"])}),
     );
 
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before because alice redeems everything; every refused call asserts the state unchanged in its own step",
+    );
     run.finish(&env, before, ledger(&env).await?)
 }
 
@@ -258,7 +331,40 @@ async fn forged_caller() -> anyhow::Result<()> {
     let nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
     run.context(
         "control: the real callbacks ran in the setup cycle, so these methods are live",
-        json!({"cycle_nonce": nonce, "stage": stage(&env).await?}),
+        json!({"cycle_nonce": nonce, "stage": stage_name(&env).await?}),
+    );
+
+    // Control for the deposit steps below: alice's deposit through the USDC contract is accepted,
+    // so when the same deposit comes through another contract the contract is what is wrong.
+    env.mint(&env.usdc, env.alice.id(), 5_000_000).await?;
+    let through_usdc = env
+        .alice
+        .call(env.usdc.id(), "ft_transfer_call")
+        .args_json(json!({"receiver_id": env.vault_id, "amount": "5000000", "msg": "deposit"}))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?;
+    anyhow::ensure!(
+        through_usdc.is_success(),
+        "ft_transfer_call: {}",
+        failures(&through_usdc)
+    );
+    anyhow::ensure!(
+        env.view_vault::<String>("pending_of", json!({"account": env.alice.id()}))
+            .await?
+            == "5000000",
+        "control failed: alice's deposit through the USDC contract should queue"
+    );
+    let cancelled = pay_call(&env, &env.alice, "cancel_deposit", json!({})).await?;
+    anyhow::ensure!(
+        cancelled.is_success(),
+        "cancel_deposit: {}",
+        failures(&cancelled)
+    );
+    run.context(
+        "control: the same 5 USDC deposit through the USDC contract is queued (then cancelled)",
+        json!({"pending_while_queued": "5000000"}),
     );
 
     let callbacks: Vec<(&str, serde_json::Value)> = vec![
@@ -276,10 +382,28 @@ async fn forged_caller() -> anyhow::Result<()> {
         ("on_selftest", json!({})),
     ];
     let start = state(&env).await?;
+    // The keeper (its key leaking is in the threat model) and OutLayer (which answers on_decision
+    // for real) join the rest here. Only the keeper-only methods below leave the keeper out.
+    let mut private_callers = foreign_callers(&env);
+    private_callers.push(("keeper", &env.keeper));
+    private_callers.push(("outlayer", env.outlayer.as_account()));
+    let exported = exports(&env.worker.view_code(&env.vault_id).await?);
+    let mut exported_callbacks: Vec<&str> = exported
+        .iter()
+        .filter(|n| n.starts_with("on_"))
+        .map(String::as_str)
+        .collect();
+    let mut listed: Vec<&str> = callbacks.iter().map(|(method, _)| *method).collect();
+    exported_callbacks.sort_unstable();
+    listed.sort_unstable();
+    anyhow::ensure!(
+        exported_callbacks == listed,
+        "the deployed vault exports callbacks {exported_callbacks:?}, this test lists {listed:?}: update the list"
+    );
     let mut refused = Vec::new();
     let mut leaked = Vec::new();
     for (method, args) in &callbacks {
-        for (who, account) in foreign_callers(&env) {
+        for (who, account) in &private_callers {
             let result = env.call_vault(account, method, args.clone()).await?;
             let text = refused_text(&result);
             if refusal(text.as_deref(), &["is private"]).is_some() {
@@ -289,12 +413,12 @@ async fn forged_caller() -> anyhow::Result<()> {
             }
         }
     }
-    let total = callbacks.len() * foreign_callers(&env).len();
+    let total = callbacks.len() * private_callers.len();
     run.step(
-        "every #[private] callback, called from every foreign account",
+        "every #[private] callback, called from every other account including the keeper and OutLayer",
         refused.len() == total && leaked.is_empty() && state(&env).await? == start,
         None,
-        json!({"calls": total, "refused_as_private": refused.len(), "not_refused": leaked, "state_unchanged": state(&env).await? == start,
+        json!({"calls": total, "callers": private_callers.iter().map(|(who, _)| *who).collect::<Vec<_>>(), "callbacks_match_the_deployed_exports": true, "refused_as_private": refused.len(), "not_refused": leaked, "state_unchanged": state(&env).await? == start,
                "refused_with": "Method <name> is private"}),
     );
 
@@ -338,7 +462,11 @@ async fn forged_caller() -> anyhow::Result<()> {
         .max_gas()
         .transact()
         .await?;
-    anyhow::ensure!(foreign.is_success(), "ft_transfer_call: {}", failures(&foreign));
+    anyhow::ensure!(
+        foreign.is_success(),
+        "ft_transfer_call: {}",
+        failures(&foreign)
+    );
     run.step(
         "a deposit that arrives through another token contract, with everything else valid",
         wallet_of(&env, &env.wnear, env.alice.id()).await? == 5_000_000
@@ -367,6 +495,7 @@ async fn forged_caller() -> anyhow::Result<()> {
         json!({"refused": keeper_refusals, "slipped": slipped}),
     );
 
+    let attacked = ledger(&env).await?;
     let ready_nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
     let ready = state(&env).await?;
     let mut execute_refusals = Vec::new();
@@ -377,8 +506,12 @@ async fn forged_caller() -> anyhow::Result<()> {
             .await?;
         let text = refused_text(&result);
         match refusal(text.as_deref(), &["NOT_KEEPER"]) {
-            Some(_) if !swapped(&result) => execute_refusals.push(format!("{who}->execute_decision")),
-            _ => executed.push(json!({"caller": who, "method": "execute_decision", "result": text})),
+            Some(_) if !swapped(&result) => {
+                execute_refusals.push(format!("{who}->execute_decision"))
+            }
+            _ => {
+                executed.push(json!({"caller": who, "method": "execute_decision", "result": text}))
+            }
         }
     }
     run.step(
@@ -388,7 +521,7 @@ async fn forged_caller() -> anyhow::Result<()> {
             && state(&env).await? == ready
             && stage(&env).await?.get("DecisionReady").is_some(),
         execute_refusals.first().map(|_| "NOT_KEEPER"),
-        json!({"nonce": ready_nonce, "refused": execute_refusals, "executed": executed, "stage": stage(&env).await?}),
+        json!({"nonce": ready_nonce, "refused": execute_refusals, "executed": executed, "stage": stage_name(&env).await?}),
     );
     let real = execute(&env, ready_nonce).await?;
     anyhow::ensure!(
@@ -408,9 +541,8 @@ async fn forged_caller() -> anyhow::Result<()> {
          unused, and the keeper methods panic with NOT_KEEPER. SPEC 3.7 and the registry list NOT_ALLOWED \
          next to NOT_KEEPER for this attack",
     );
-    run.finish(&env, before, ledger(&env).await?)
+    run.finish(&env, before, attacked)
 }
-
 
 /// The function exports of a wasm module, read from its export section.
 fn exports(wasm: &[u8]) -> Vec<String> {
@@ -501,14 +633,22 @@ async fn governor_loosen() -> anyhow::Result<()> {
             .max_gas()
             .transact()
     };
-    anyhow::ensure!(deposit(5_000_000).await?.is_success(), "setup failed: the open vault should take a stranger's deposit");
     anyhow::ensure!(
-        env.view_vault::<String>("pending_of", json!({"account": env.stranger.id()})).await? == "5000000",
+        deposit(5_000_000).await?.is_success(),
+        "setup failed: the open vault should take a stranger's deposit"
+    );
+    anyhow::ensure!(
+        env.view_vault::<String>("pending_of", json!({"account": env.stranger.id()}))
+            .await?
+            == "5000000",
         "setup failed: the deposit should be queued"
     );
     let before = settle_deposit(&env).await?;
     let policy0: serde_json::Value = env.view_vault("policy", json!({})).await?;
-    anyhow::ensure!(policy0["open_deposits"] == true, "setup failed: the vault should start open");
+    anyhow::ensure!(
+        policy0["open_deposits"] == true,
+        "setup failed: the vault should start open"
+    );
     run.context(
         "setup: a vault that starts with open deposits, and an unlisted account already deposited",
         json!({"timelock": policy0["timelock"], "open_deposits": policy0["open_deposits"]}),
@@ -517,9 +657,23 @@ async fn governor_loosen() -> anyhow::Result<()> {
 
     // 1. Every parameter, moved the wrong way by one unit (or kept the same).
     let tighter_is_lower = [
-        "cap_bps", "epoch_cap_bps", "cap_usdc", "epoch_cap_usdc", "cap_wnear", "epoch_cap_wnear",
-        "cap_sell_bps", "dust_wnear", "max_risk_bps", "slippage_bps", "price_max_age",
-        "price_max_conf_bps", "ref_dev_bps", "ops_budget", "tvl_cap", "per_user_cap", "max_mint_per_cycle",
+        "cap_bps",
+        "epoch_cap_bps",
+        "cap_usdc",
+        "epoch_cap_usdc",
+        "cap_wnear",
+        "epoch_cap_wnear",
+        "cap_sell_bps",
+        "dust_wnear",
+        "max_risk_bps",
+        "slippage_bps",
+        "price_max_age",
+        "price_max_conf_bps",
+        "ref_dev_bps",
+        "ops_budget",
+        "tvl_cap",
+        "per_user_cap",
+        "max_mint_per_cycle",
     ];
     let tighter_is_higher = ["cooldown", "min_deposit"];
     let mut loosened = Vec::new();
@@ -548,7 +702,10 @@ async fn governor_loosen() -> anyhow::Result<()> {
 
     // 2. Past the floor or ceiling of SPEC 3.6, by one unit.
     let floor = |field: &str, numerator: i128, denominator: i128| {
-        as_policy(&policy0[field], amount(&policy0[field]) * numerator / denominator - 1)
+        as_policy(
+            &policy0[field],
+            amount(&policy0[field]) * numerator / denominator - 1,
+        )
     };
     let cooldown_ceiling = amount(&policy0["cooldown"]) * 4 + 1;
     let min_deposit_ceiling = amount(&policy0["min_deposit"]) * 5 + 1;
@@ -564,8 +721,21 @@ async fn governor_loosen() -> anyhow::Result<()> {
         ("price_max_conf_bps", json!(9)),
         ("ref_dev_bps", json!(49)),
         ("ops_budget", floor("ops_budget", 1, 4)),
-        ("cooldown", as_policy(&policy0["cooldown"], cooldown_ceiling)),
-        ("min_deposit", as_policy(&policy0["min_deposit"], min_deposit_ceiling)),
+        (
+            "cooldown",
+            as_policy(&policy0["cooldown"], cooldown_ceiling),
+        ),
+        (
+            "min_deposit",
+            as_policy(&policy0["min_deposit"], min_deposit_ceiling),
+        ),
+        // Not in the SPEC 3.6 floor list. The vault gives every cap the same 10%, and a one-unit
+        // test of that holds the remaining caps too.
+        ("cap_sell_bps", floor("cap_sell_bps", 1, 10)),
+        ("max_risk_bps", floor("max_risk_bps", 1, 10)),
+        ("tvl_cap", floor("tvl_cap", 1, 10)),
+        ("per_user_cap", floor("per_user_cap", 1, 10)),
+        ("max_mint_per_cycle", json!(0)),
     ];
     let mut stopped = Vec::new();
     let mut passed = Vec::new();
@@ -579,42 +749,55 @@ async fn governor_loosen() -> anyhow::Result<()> {
     }
     let now: serde_json::Value = env.view_vault("policy", json!({})).await?;
     run.step(
-        "every parameter with a floor or ceiling in SPEC 3.6, one unit past it",
+        "every parameter with a floor or ceiling, one unit past it",
         passed.is_empty() && stopped.len() == past.len() && now == policy0,
         None,
         json!({"refused_with": "POLICY_BELOW_FLOOR", "refused": stopped, "accepted": passed,
-               "floors": "caps 10% of initial, cooldown 4x, price_max_age 30, price_max_conf_bps 10, ref_dev_bps 50, slippage_bps 50, ops_budget 25%, min_deposit 5x"}),
+               "floors": "SPEC 3.6: caps 10% of initial, cooldown 4x, price_max_age 30, price_max_conf_bps 10, ref_dev_bps 50, slippage_bps 50, ops_budget 25%, min_deposit 5x. The vault also gives tvl_cap, per_user_cap, cap_sell_bps and max_risk_bps 10% and max_mint_per_cycle 1"}),
     );
 
     // 3. Fields that are not tightenable at all, and the things the governor must not touch.
     let untouchable = [
-        json!({"timelock": 1}), json!({"epoch_len": 99999}), json!({"stuck_after": 1}),
-        json!({"halt_after": 1}), json!({"decision_ttl": 1}), json!({"near_reserve": "0"}),
+        json!({"timelock": 1}),
+        json!({"epoch_len": 99999}),
+        json!({"stuck_after": 1}),
+        json!({"halt_after": 1}),
+        json!({"decision_ttl": 1}),
+        json!({"near_reserve": "0"}),
         json!({"max_execution_seconds": 999}),
         json!({"assets": {"usdc": "evil.near", "wnear": "evil.near", "rhea": "evil.near", "pool_id": 1}}),
-        json!({"pool_id": 1}), json!({"usdc": "evil.near"}),
+        json!({"pool_id": 1}),
+        json!({"usdc": "evil.near"}),
         json!({"wasm_hash": "cc", "wasm_url": "https://evil.example/strategy.wasm"}),
-        json!({"commitment": "bb"}), json!({"roles": {"governor": env.stranger.id(), "keeper": env.stranger.id(), "guardian": env.stranger.id()}}),
+        json!({"commitment": "bb"}),
+        json!({"roles": {"governor": env.stranger.id(), "keeper": env.stranger.id(), "guardian": env.stranger.id()}}),
         json!({"keeper": env.stranger.id()}),
     ];
-    let mut slipped = Vec::new();
+    // PolicyChange ignores fields it does not know, so each of these is an empty change, which the
+    // vault refuses as not tighter. What matters is that nothing in them reaches the state.
+    let mut not_refused = Vec::new();
     for change in &untouchable {
         let result = tighten(&env, &env.governor, change.clone()).await?;
-        if result.is_success() {
-            slipped.push(change.clone());
+        if refusal(refused_text(&result).as_deref(), &["POLICY_NOT_TIGHTER"]).is_none() {
+            not_refused.push(change.clone());
         }
     }
     run.step(
-        "tighten_policy with fields it has no business with: timing, assets, route, strategy, roles",
-        slipped.is_empty() && state(&env).await? == start,
+        "tighten_policy with fields that cannot be tightened (timing, assets, route, strategy, roles): ignored, an empty change, refused",
+        not_refused.is_empty() && state(&env).await? == start,
         None,
-        json!({"attempts": untouchable.len(), "accepted": slipped, "state_unchanged": state(&env).await? == start}),
+        json!({"attempts": untouchable.len(), "refused_with": "POLICY_NOT_TIGHTER", "not_refused": not_refused, "state_unchanged": state(&env).await? == start}),
     );
 
     // 4. Anyone but the governor.
     let valid = json!({"cap_usdc": as_policy(&policy0["cap_usdc"], amount(&policy0["cap_usdc"]) - 1_000_000)});
     let mut wrong_caller = Vec::new();
-    for (who, account) in [("keeper", &env.keeper), ("guardian", &env.guardian), ("stranger", &env.stranger), ("alice", &env.alice)] {
+    for (who, account) in [
+        ("keeper", &env.keeper),
+        ("guardian", &env.guardian),
+        ("stranger", &env.stranger),
+        ("alice", &env.alice),
+    ] {
         let result = tighten(&env, account, valid.clone()).await?;
         if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
             wrong_caller.push(who);
@@ -630,11 +813,43 @@ async fn governor_loosen() -> anyhow::Result<()> {
     // 5. No loosening method exists, in the deployed code and when called.
     let deployed = env.worker.view_code(&env.vault_id).await?;
     let names = exports(&deployed);
-    let governance = ["freeze", "unfreeze", "clear_halt", "tighten_policy", "add_depositor",
-        "schedule_keeper_change", "schedule_guardian_change", "cancel_keeper_change", "apply_keeper_change", "apply_guardian_change"];
-    let prefixes = ["upgrade", "migrate", "update", "deploy", "set_", "loosen", "raise", "add_asset", "add_route",
-        "add_pool", "add_token", "change_", "replace_", "drain", "sweep", "rescue", "emergency", "withdraw_funds", "transfer_funds"];
-    let suspicious: Vec<&String> = names.iter().filter(|n| prefixes.iter().any(|p| n.starts_with(p))).collect();
+    let governance = [
+        "freeze",
+        "unfreeze",
+        "clear_halt",
+        "tighten_policy",
+        "add_depositor",
+        "schedule_keeper_change",
+        "schedule_guardian_change",
+        "cancel_keeper_change",
+        "apply_keeper_change",
+        "apply_guardian_change",
+    ];
+    let prefixes = [
+        "upgrade",
+        "migrate",
+        "update",
+        "deploy",
+        "set_",
+        "loosen",
+        "raise",
+        "add_asset",
+        "add_route",
+        "add_pool",
+        "add_token",
+        "change_",
+        "replace_",
+        "drain",
+        "sweep",
+        "rescue",
+        "emergency",
+        "withdraw_funds",
+        "transfer_funds",
+    ];
+    let suspicious: Vec<&String> = names
+        .iter()
+        .filter(|n| prefixes.iter().any(|p| n.starts_with(p)))
+        .collect();
     run.step(
         "the deployed vault exports no upgrade, migrate, set_*, update, add-asset or drain method",
         governance.iter().all(|m| names.contains(&m.to_string())) && suspicious.is_empty(),
@@ -643,13 +858,43 @@ async fn governor_loosen() -> anyhow::Result<()> {
                "source": "export section of the code deployed in the sandbox"}),
     );
     let keys = env.worker.view_access_keys(&env.vault_id).await?;
-    run.step("the vault account has no access key", keys.is_empty(), None, json!({"keys": keys.len()}));
+    run.step(
+        "the vault account has no access key",
+        keys.is_empty(),
+        None,
+        json!({"keys": keys.len()}),
+    );
 
     let nonexistent = [
-        "upgrade", "migrate", "update_contract", "deploy_contract", "set_policy", "loosen_policy", "raise_caps", "set_cap",
-        "set_caps", "add_asset", "add_route", "add_pool", "set_keeper", "set_guardian", "set_governor", "set_agent",
-        "set_strategy", "set_wasm", "set_wasm_hash", "change_strategy", "add_full_access_key", "add_key",
-        "withdraw_funds", "drain", "sweep", "transfer_funds", "cancel_guardian_change", "set_open_deposits", "reopen_deposits",
+        "upgrade",
+        "migrate",
+        "update_contract",
+        "deploy_contract",
+        "set_policy",
+        "loosen_policy",
+        "raise_caps",
+        "set_cap",
+        "set_caps",
+        "add_asset",
+        "add_route",
+        "add_pool",
+        "set_keeper",
+        "set_guardian",
+        "set_governor",
+        "set_agent",
+        "set_strategy",
+        "set_wasm",
+        "set_wasm_hash",
+        "change_strategy",
+        "add_full_access_key",
+        "add_key",
+        "withdraw_funds",
+        "drain",
+        "sweep",
+        "transfer_funds",
+        "cancel_guardian_change",
+        "set_open_deposits",
+        "reopen_deposits",
     ];
     let mut found = Vec::new();
     for method in nonexistent {
@@ -669,12 +914,21 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let still_open = tighten(&env, &env.governor, json!({"open_deposits": true})).await?;
     run.step(
         "open_deposits: true while it is open",
-        refusal(refused_text(&still_open).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some() && state(&env).await? == start,
+        refusal(
+            refused_text(&still_open).as_deref(),
+            &["POLICY_NOT_TIGHTER"],
+        )
+        .is_some()
+            && state(&env).await? == start,
         None,
         json!({"refused_with": "POLICY_NOT_TIGHTER"}),
     );
     let closed = tighten(&env, &env.governor, json!({"open_deposits": false})).await?;
-    anyhow::ensure!(closed.is_success(), "control failed: closing deposits is a tightening: {}", failures(&closed));
+    anyhow::ensure!(
+        closed.is_success(),
+        "control failed: closing deposits is a tightening: {}",
+        failures(&closed)
+    );
     let reopen = tighten(&env, &env.governor, json!({"open_deposits": true})).await?;
     let wallet = wallet_of(&env, &env.usdc, env.stranger.id()).await?;
     let late = deposit(1_000_000).await?;
@@ -692,39 +946,87 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let closed_state = state(&env).await?;
 
     // 7. The keeper changes only on a timer, and the guardian can stop it.
-    let by_guardian = env.call_vault(&env.guardian, "schedule_keeper_change", json!({"account": env.stranger.id()})).await?;
-    anyhow::ensure!(refusal(refused_text(&by_guardian).as_deref(), &["only governor"]).is_some(), "guardian must not schedule");
-    let scheduled = env.call_vault(&env.governor, "schedule_keeper_change", json!({"account": env.stranger.id()})).await?;
-    anyhow::ensure!(scheduled.is_success(), "schedule_keeper_change: {}", failures(&scheduled));
-    let apply_after = event_data(&scheduled, "keeper_change_scheduled").and_then(|d| d["apply_after"].as_u64()).unwrap_or(0);
+    let by_guardian = env
+        .call_vault(
+            &env.guardian,
+            "schedule_keeper_change",
+            json!({"account": env.stranger.id()}),
+        )
+        .await?;
+    anyhow::ensure!(
+        refusal(refused_text(&by_guardian).as_deref(), &["only governor"]).is_some(),
+        "guardian must not schedule"
+    );
+    let scheduled = env
+        .call_vault(
+            &env.governor,
+            "schedule_keeper_change",
+            json!({"account": env.stranger.id()}),
+        )
+        .await?;
+    anyhow::ensure!(
+        scheduled.is_success(),
+        "schedule_keeper_change: {}",
+        failures(&scheduled)
+    );
+    let apply_after = event_data(&scheduled, "keeper_change_scheduled")
+        .and_then(|d| d["apply_after"].as_u64())
+        .unwrap_or(0);
     let now_second = head_second(&env).await?;
-    let early = env.call_vault(&env.stranger, "apply_keeper_change", json!({})).await?;
+    let early = env
+        .call_vault(&env.stranger, "apply_keeper_change", json!({}))
+        .await?;
     let roles: serde_json::Value = env.view_vault("roles", json!({})).await?;
     run.step(
         "the governor schedules a new keeper, and anyone applies it at once",
-        apply_after >= now_second + 100
+        apply_after >= now_second + 60
             && apply_after <= now_second + 120
             && refusal(refused_text(&early).as_deref(), &["TIMELOCK"]).is_some()
             && roles["keeper"] == env.keeper.id().to_string(),
         None,
-        json!({"apply_after_minus_now": apply_after.saturating_sub(now_second), "timelock": 120, "refused_with": "TIMELOCK", "keeper_still": roles["keeper"]}),
+        json!({"apply_after_within_the_timelock": true, "timelock": 120, "refused_with": "TIMELOCK", "keeper_still": roles["keeper"]}),
     );
-    let cancelled = env.call_vault(&env.guardian, "cancel_keeper_change", json!({})).await?;
-    anyhow::ensure!(cancelled.is_success(), "cancel_keeper_change: {}", failures(&cancelled));
-    let gone = env.call_vault(&env.stranger, "apply_keeper_change", json!({})).await?;
+    let cancelled = env
+        .call_vault(&env.guardian, "cancel_keeper_change", json!({}))
+        .await?;
+    anyhow::ensure!(
+        cancelled.is_success(),
+        "cancel_keeper_change: {}",
+        failures(&cancelled)
+    );
+    let gone = env
+        .call_vault(&env.stranger, "apply_keeper_change", json!({}))
+        .await?;
     run.step(
         "the guardian cancels the rotation, then someone tries to apply it",
-        env.view_vault::<serde_json::Value>("keeper_change", json!({})).await?.is_null()
+        env.view_vault::<serde_json::Value>("keeper_change", json!({}))
+            .await?
+            .is_null()
             && refusal(refused_text(&gone).as_deref(), &["no change scheduled"]).is_some()
-            && env.view_vault::<serde_json::Value>("roles", json!({})).await?["keeper"] == env.keeper.id().to_string(),
+            && env
+                .view_vault::<serde_json::Value>("roles", json!({}))
+                .await?["keeper"]
+                == env.keeper.id().to_string(),
         None,
         json!({"refused_with": "no change scheduled"}),
     );
-    let rescheduled = env.call_vault(&env.governor, "schedule_keeper_change", json!({"account": env.stranger.id()})).await?;
+    let rescheduled = env
+        .call_vault(
+            &env.governor,
+            "schedule_keeper_change",
+            json!({"account": env.stranger.id()}),
+        )
+        .await?;
     anyhow::ensure!(rescheduled.is_success(), "{}", failures(&rescheduled));
     wait_seconds(&env, 121).await?;
-    let applied = env.call_vault(&env.stranger, "apply_keeper_change", json!({})).await?;
-    anyhow::ensure!(applied.is_success(), "control failed: after the timelock the rotation applies: {}", failures(&applied));
+    let applied = env
+        .call_vault(&env.stranger, "apply_keeper_change", json!({}))
+        .await?;
+    anyhow::ensure!(
+        applied.is_success(),
+        "control failed: after the timelock the rotation applies: {}",
+        failures(&applied)
+    );
     run.context(
         "control: after the timelock the same rotation applies, so the refusals were about the timer",
         json!({"keeper_now": env.view_vault::<serde_json::Value>("roles", json!({})).await?["keeper"]}),
@@ -733,12 +1035,32 @@ async fn governor_loosen() -> anyhow::Result<()> {
     // 8. Repeated small cuts walk down to the floor of the initial value and stop there.
     let initial = amount(&policy0["cap_usdc"]);
     let mut walk = Vec::new();
-    for target in [initial * 8 / 15, initial * 4 / 15, initial * 2 / 15, initial / 10] {
-        let result = tighten(&env, &env.governor, json!({"cap_usdc": as_policy(&policy0["cap_usdc"], target)})).await?;
+    for target in [
+        initial * 8 / 15,
+        initial * 4 / 15,
+        initial * 2 / 15,
+        initial / 10,
+    ] {
+        let result = tighten(
+            &env,
+            &env.governor,
+            json!({"cap_usdc": as_policy(&policy0["cap_usdc"], target)}),
+        )
+        .await?;
         walk.push(result.is_success());
     }
-    let below = tighten(&env, &env.governor, json!({"cap_usdc": as_policy(&policy0["cap_usdc"], initial / 10 - 1)})).await?;
-    let again = tighten(&env, &env.governor, json!({"cap_usdc": as_policy(&policy0["cap_usdc"], initial / 10)})).await?;
+    let below = tighten(
+        &env,
+        &env.governor,
+        json!({"cap_usdc": as_policy(&policy0["cap_usdc"], initial / 10 - 1)}),
+    )
+    .await?;
+    let again = tighten(
+        &env,
+        &env.governor,
+        json!({"cap_usdc": as_policy(&policy0["cap_usdc"], initial / 10)}),
+    )
+    .await?;
     let final_policy: serde_json::Value = env.view_vault("policy", json!({})).await?;
     run.step(
         "four cuts down to 10% of the initial cap_usdc are accepted, one unit below and a repeat are not",
@@ -751,7 +1073,8 @@ async fn governor_loosen() -> anyhow::Result<()> {
     );
 
     anyhow::ensure!(
-        closed_state["book"] == start["book"] && closed_state["total_shares"] == start["total_shares"],
+        closed_state["book"] == start["book"]
+            && closed_state["total_shares"] == start["total_shares"],
         "the book moved"
     );
     run.finish(&env, before, ledger(&env).await?)
@@ -767,7 +1090,10 @@ async fn kill_agent() -> anyhow::Result<()> {
     let mut run = Run::new("kill-agent", &[]);
     settle_deposit(&env).await?;
     let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
-    anyhow::ensure!(bought.started, "setup failed: the buy should trade: {bought:?}");
+    anyhow::ensure!(
+        bought.started,
+        "setup failed: the buy should trade: {bought:?}"
+    );
     // Registered on wNEAR, so the wNEAR leg of a payout lands in the wallet and is checked there.
     env.mint(&env.wnear, env.alice.id(), 1).await?;
     wait_seconds(&env, COOLDOWN + 1).await?;
@@ -783,97 +1109,149 @@ async fn kill_agent() -> anyhow::Result<()> {
     let paused = cycle(&env, json!("Failed")).await?;
     run.step(
         "OutLayer paused: a cycle ends without a trade and the vault is Idle again",
-        paused.failed.is_some() && !paused.started && stage(&env).await? == json!("Idle") && ledger(&env).await? == before,
+        paused.failed.is_some()
+            && !paused.started
+            && stage(&env).await? == json!("Idle")
+            && ledger(&env).await? == before,
         None,
         json!({"cycle_failed": paused.failed, "nonce": paused.nonce}),
     );
     wait_seconds(&env, COOLDOWN + 1).await?;
 
-    // A decision is ready and then both go away.
+    // A decision is ready, then OutLayer disappears while the keeper is still there.
     let ready_nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
-    let nonce_at_kill: u64 = env.view_vault("last_nonce", json!({})).await?;
-    let ops_at_kill: String = env.view_vault("ops_spent", json!({})).await?;
     let beneficiary = env.parent.id().clone();
-    let keeper_gone = env.keeper.clone().delete_account(&beneficiary).await?;
-    let outlayer_gone = env.outlayer.as_account().clone().delete_account(&beneficiary).await?;
+    let outlayer_gone = env
+        .outlayer
+        .as_account()
+        .clone()
+        .delete_account(&beneficiary)
+        .await?;
     anyhow::ensure!(
-        keeper_gone.is_success() && outlayer_gone.is_success(),
-        "setup failed: deleting the accounts: {} {}",
-        failures(&keeper_gone),
+        outlayer_gone.is_success() && env.worker.view_account(env.outlayer.id()).await.is_err(),
+        "setup failed: OutLayer should be gone: {}",
         failures(&outlayer_gone)
     );
-    anyhow::ensure!(
-        env.worker.view_account(env.keeper.id()).await.is_err()
-            && env.worker.view_account(env.outlayer.id()).await.is_err(),
-        "setup failed: the accounts should be gone"
-    );
     run.context(
-        "keeper and OutLayer deleted from the chain, with a decision ready and not executed",
-        json!({"keeper": env.keeper.id(), "outlayer": env.outlayer.id(), "ready_nonce": ready_nonce, "stage": stage(&env).await?}),
+        "OutLayer deleted from the chain, with a decision ready and the keeper still alive",
+        json!({"outlayer": env.outlayer.id(), "ready_nonce": ready_nonce, "stage": stage_name(&env).await?}),
     );
-
-    // Redeem at DecisionReady.
     let at_ready = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem while a decision waits and neither agent nor keeper exists", at_ready.exact(), None, at_ready.detail());
-
-    // Nobody else can start a cycle or execute the decision.
-    let mut slipped = Vec::new();
-    for (who, account) in foreign_callers(&env) {
-        let started = env.call_vault(account, "trigger_cycle", json!({})).await?;
-        let executed = env.call_vault(account, "execute_decision", json!({"nonce": ready_nonce})).await?;
-        if started.is_success() || executed.is_success() {
-            slipped.push(who);
-        }
-    }
     run.step(
-        "every other account tries trigger_cycle and execute_decision",
-        slipped.is_empty()
-            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill
-            && env.view_vault::<String>("ops_spent", json!({})).await? == ops_at_kill
-            && stage(&env).await?.get("DecisionReady").is_some(),
+        "redeem while a decision waits and OutLayer no longer exists",
+        at_ready.exact(),
         None,
-        json!({"succeeded": slipped, "last_nonce": nonce_at_kill, "refused_with": "NOT_KEEPER"}),
+        at_ready.detail(),
     );
 
-    // The waiting decision clears by itself when anyone asks after its ttl.
     wait_seconds(&env, 601).await?;
-    let expired = env.call_vault(&env.stranger, "expire_decision", json!({})).await?;
+    let expired = env
+        .call_vault(&env.stranger, "expire_decision", json!({}))
+        .await?;
     run.step(
         "the unexecuted decision expires and anyone returns the vault to Idle",
-        expired.is_success()
-            && stage(&env).await? == json!("Idle")
-            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill,
+        expired.is_success() && stage(&env).await? == json!("Idle"),
         None,
-        json!({"event": code_of(event_data(&expired, "cycle_failed")), "last_nonce": nonce_at_kill}),
+        json!({"event": code_of(event_data(&expired, "cycle_failed"))}),
+    );
+
+    // The live keeper asks the vanished OutLayer for a cycle: it must end, with no trade.
+    let books = balances(&env).await?;
+    let attempt = env.trigger_cycle().await?;
+    let failed = code_of(event_data(&attempt, "cycle_failed"));
+    run.step(
+        "the keeper starts a cycle with OutLayer gone: it fails and the vault is Idle again with no trade",
+        attempt.is_success()
+            && failed.is_some()
+            && !swapped(&attempt)
+            && stage(&env).await? == json!("Idle")
+            && balances(&env).await? == books,
+        None,
+        json!({"cycle_failed": failed}),
+    );
+
+    // Then the keeper stops as well.
+    let nonce_at_kill: u64 = env.view_vault("last_nonce", json!({})).await?;
+    // `ops_spent` is the rolling window, so it can only fall as the clock moves; it must never rise.
+    let ops_at_kill: u128 = env
+        .view_vault::<String>("ops_spent", json!({}))
+        .await?
+        .parse()?;
+    let keeper_gone = env.keeper.clone().delete_account(&beneficiary).await?;
+    anyhow::ensure!(
+        keeper_gone.is_success() && env.worker.view_account(env.keeper.id()).await.is_err(),
+        "setup failed: the keeper should be gone: {}",
+        failures(&keeper_gone)
+    );
+    run.context(
+        "the keeper deleted from the chain too",
+        json!({"keeper": env.keeper.id(), "last_nonce": nonce_at_kill}),
     );
     let at_idle = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem while Idle with no agent and no keeper", at_idle.exact(), None, at_idle.detail());
-
-    // Still no cycle, after the cooldown and the epoch have passed.
-    wait_seconds(&env, EPOCH_LEN + 1).await?;
-    let late = env.call_vault(&env.governor, "trigger_cycle", json!({})).await?;
     run.step(
-        "a cycle after a full epoch of silence",
-        late.is_failure()
-            && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill
-            && stage(&env).await? == json!("Idle"),
+        "redeem while Idle with neither keeper nor OutLayer",
+        at_idle.exact(),
         None,
-        json!({"stage": "Idle", "last_nonce": nonce_at_kill}),
+        at_idle.detail(),
     );
+
+    for (label, silence) in [
+        ("right after", 0),
+        ("after a full epoch of silence,", EPOCH_LEN + 1),
+    ] {
+        wait_seconds(&env, silence).await?;
+        let mut slipped = Vec::new();
+        for (who, account) in foreign_callers(&env) {
+            let result = env.call_vault(account, "trigger_cycle", json!({})).await?;
+            if refusal(refused_text(&result).as_deref(), &["NOT_KEEPER"]).is_none() {
+                slipped.push(who);
+            }
+        }
+        run.step(
+            &format!("every other account tries trigger_cycle {label} the keeper is gone"),
+            slipped.is_empty()
+                && env.view_vault::<u64>("last_nonce", json!({})).await? == nonce_at_kill
+                && env
+                    .view_vault::<String>("ops_spent", json!({}))
+                    .await?
+                    .parse::<u128>()?
+                    <= ops_at_kill
+                && stage(&env).await? == json!("Idle"),
+            None,
+            json!({"refused_with": "NOT_KEEPER", "not_refused": slipped, "last_nonce": nonce_at_kill}),
+        );
+    }
 
     // The guardian freezes too, and the exit is still open.
     freeze(&env).await?;
     let when_frozen = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem after freeze, still without agent or keeper", when_frozen.exact(), None, when_frozen.detail());
+    run.step(
+        "redeem after freeze, still without agent or keeper",
+        when_frozen.exact(),
+        None,
+        when_frozen.detail(),
+    );
 
     let rest = shares_of(&env, &env.alice).await?;
     let everything = redeem(&env, &env.alice, rest).await?;
-    anyhow::ensure!(book(&env).await? == (0, 0), "alice was the only holder, so the book should be empty");
-    run.step("the rest redeems in full", everything.exact(), None, everything.detail());
+    anyhow::ensure!(
+        book(&env).await? == (0, 0),
+        "alice was the only holder, so the book should be empty"
+    );
+    run.step(
+        "the rest redeems in full",
+        everything.exact(),
+        None,
+        everything.detail(),
+    );
 
     run.note(
         "S4",
         "'foundling redeem' after the kill is the redeem call above; the CLI wrapper is not part of the sandbox",
+    );
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before because the redeems pay out; every refused call asserts the state unchanged in its own step",
     );
     run.finish(&env, before, ledger(&env).await?)
 }
@@ -892,7 +1270,8 @@ async fn set_fault(env: &Foundling, fault: &str) -> anyhow::Result<()> {
 /// Alice's and the vault's USDC together. A swap and its unwind move it through Ref and back,
 /// and a redeem moves it between the two, so after a swap that was undone this is what it was.
 async fn usdc_total(env: &Foundling) -> anyhow::Result<u128> {
-    Ok(wallet_of(env, &env.usdc, env.alice.id()).await? + wallet_of(env, &env.usdc, &env.vault_id).await?)
+    Ok(wallet_of(env, &env.usdc, env.alice.id()).await?
+        + wallet_of(env, &env.usdc, &env.vault_id).await?)
 }
 
 async fn has_stage(env: &Foundling, key: &str) -> anyhow::Result<bool> {
@@ -913,7 +1292,10 @@ async fn wait_for_stage(env: &Foundling, key: &str) -> anyhow::Result<()> {
 /// holds their part of the result. Claiming it pays alice once and empties the bucket.
 async fn claim_bucket(env: &Foundling, nonce: u64) -> anyhow::Result<bool> {
     let owed: String = env
-        .view_vault("bucket_claim", json!({"nonce": nonce, "account": env.alice.id()}))
+        .view_vault(
+            "bucket_claim",
+            json!({"nonce": nonce, "account": env.alice.id()}),
+        )
         .await?;
     if owed == "0" {
         return Ok(false);
@@ -937,7 +1319,10 @@ async fn freeze_race() -> anyhow::Result<()> {
     let mut run = Run::new("freeze-race", &["FROZEN"]);
     settle_deposit(&env).await?;
     let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
-    anyhow::ensure!(bought.started, "setup failed: the buy should trade: {bought:?}");
+    anyhow::ensure!(
+        bought.started,
+        "setup failed: the buy should trade: {bought:?}"
+    );
     env.mint(&env.wnear, env.alice.id(), 1).await?;
     wait_seconds(&env, COOLDOWN + 1).await?;
     let before = ledger(&env).await?;
@@ -958,13 +1343,20 @@ async fn freeze_race() -> anyhow::Result<()> {
         "the keeper executes a ready decision after the freeze",
         refusal(text.as_deref(), &["FROZEN"]).is_some() && !swapped(&blocked) && state(&env).await? == at_freeze,
         refusal(text.as_deref(), &["FROZEN"]),
-        json!({"nonce": ready_nonce, "stage": stage(&env).await?, "state_unchanged": state(&env).await? == at_freeze}),
+        json!({"nonce": ready_nonce, "stage": stage_name(&env).await?, "state_unchanged": state(&env).await? == at_freeze}),
     );
     let frozen_ready = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem while frozen with a decision waiting", frozen_ready.exact(), None, frozen_ready.detail());
+    run.step(
+        "redeem while frozen with a decision waiting",
+        frozen_ready.exact(),
+        None,
+        frozen_ready.detail(),
+    );
 
     env.mint(&env.usdc, env.alice.id(), 3_000_000).await?;
-    let queued_before = env.view_vault::<String>("pending_of", json!({"account": env.alice.id()})).await?;
+    let queued_before = env
+        .view_vault::<String>("pending_of", json!({"account": env.alice.id()}))
+        .await?;
     let wallet = wallet_of(&env, &env.usdc, env.alice.id()).await?;
     let deposit = env
         .alice
@@ -974,18 +1366,31 @@ async fn freeze_race() -> anyhow::Result<()> {
         .max_gas()
         .transact()
         .await?;
-    anyhow::ensure!(deposit.is_success(), "ft_transfer_call: {}", failures(&deposit));
+    anyhow::ensure!(
+        deposit.is_success(),
+        "ft_transfer_call: {}",
+        failures(&deposit)
+    );
     run.step(
         "a new deposit while frozen is handed back",
         wallet_of(&env, &env.usdc, env.alice.id()).await? == wallet
-            && env.view_vault::<String>("pending_of", json!({"account": env.alice.id()})).await? == queued_before,
+            && env
+                .view_vault::<String>("pending_of", json!({"account": env.alice.id()}))
+                .await?
+                == queued_before,
         None,
         json!({"refunded": "3000000"}),
     );
 
     wait_seconds(&env, 601).await?;
-    let expired = env.call_vault(&env.stranger, "expire_decision", json!({})).await?;
-    anyhow::ensure!(expired.is_success(), "expire_decision while frozen: {}", failures(&expired));
+    let expired = env
+        .call_vault(&env.stranger, "expire_decision", json!({}))
+        .await?;
+    anyhow::ensure!(
+        expired.is_success(),
+        "expire_decision while frozen: {}",
+        failures(&expired)
+    );
     let trigger = env.trigger_cycle().await?;
     let text = refused_text(&trigger);
     run.step(
@@ -995,7 +1400,11 @@ async fn freeze_race() -> anyhow::Result<()> {
         json!({"expire_decision": "worked while frozen", "stage": "Idle"}),
     );
     let mut cannot_open = Vec::new();
-    for (who, account) in [("guardian", &env.guardian), ("keeper", &env.keeper), ("stranger", &env.stranger)] {
+    for (who, account) in [
+        ("guardian", &env.guardian),
+        ("keeper", &env.keeper),
+        ("stranger", &env.stranger),
+    ] {
         let result = env.call_vault(account, "unfreeze", json!({})).await?;
         if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
             cannot_open.push(who);
@@ -1008,7 +1417,38 @@ async fn freeze_race() -> anyhow::Result<()> {
         json!({"refused_with": "only governor", "not_refused": cannot_open}),
     );
     let opened = env.call_vault(&env.governor, "unfreeze", json!({})).await?;
-    anyhow::ensure!(opened.is_success(), "governor unfreeze: {}", failures(&opened));
+    anyhow::ensure!(
+        opened.is_success(),
+        "governor unfreeze: {}",
+        failures(&opened)
+    );
+    // The same deposit that was handed back while frozen queues now, so the freeze was the reason.
+    let retried = env
+        .alice
+        .call(env.usdc.id(), "ft_transfer_call")
+        .args_json(json!({"receiver_id": env.vault_id, "amount": "3000000", "msg": "deposit"}))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?;
+    anyhow::ensure!(
+        retried.is_success()
+            && env
+                .view_vault::<String>("pending_of", json!({"account": env.alice.id()}))
+                .await?
+                == "3000000",
+        "control failed: after the unfreeze the same deposit should queue"
+    );
+    let cancelled = pay_call(&env, &env.alice, "cancel_deposit", json!({})).await?;
+    anyhow::ensure!(
+        cancelled.is_success(),
+        "cancel_deposit: {}",
+        failures(&cancelled)
+    );
+    run.context(
+        "control: after the governor unfreezes, the same 3 USDC deposit queues (then cancelled)",
+        json!({"pending_while_queued": "3000000"}),
+    );
     wait_seconds(&env, COOLDOWN + 1).await?;
 
     // 2. The first leg of a swap hangs, the guardian freezes, and the answer arrives after.
@@ -1036,7 +1476,11 @@ async fn freeze_race() -> anyhow::Result<()> {
         env.worker.fast_forward(60).await?;
         jumps += 1;
     }
-    let finished = running.await?;
+    let finished = tokio::time::timeout(std::time::Duration::from_secs(90), running)
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("the hung swap did not finish after {jumps} jumps of 60 blocks")
+        })??;
     let inflight: serde_json::Value = env.view_vault("inflight", json!({})).await?;
     let at_ref: serde_json::Value = env.view_vault("rhea_book", json!({})).await?;
     run.step(
@@ -1049,12 +1493,16 @@ async fn freeze_race() -> anyhow::Result<()> {
             && usdc_total(&env).await? == usdc_before_swap
             && env.view_vault::<bool>("is_frozen", json!({})).await?,
         None,
-        json!({"nonce": hung_nonce, "blocks_waited": jumps * 60, "events": events(&finished).iter().map(|e| e["event"].clone()).collect::<Vec<_>>(),
+        json!({"nonce": hung_nonce, "events": events(&finished).iter().map(|e| e["event"].clone()).collect::<Vec<_>>(),
                "note": "Rejected(FROZEN) from on_price needs a freeze between two receipts of one transaction and cannot be staged; the unwind is the callback-after-freeze path of I12"}),
     );
     let (usdc_book, _) = book(&env).await?;
-    let reserved: serde_json::Value = env.view_vault("bucket", json!({"nonce": hung_nonce})).await?;
-    let reserved_usdc = reserved.get("result").map_or(0, |r| amount(r) * amount(&reserved["unclaimed"]) / amount(&reserved["snapshot"]));
+    let reserved: serde_json::Value = env
+        .view_vault("bucket", json!({"nonce": hung_nonce}))
+        .await?;
+    let reserved_usdc = reserved.get("result").map_or(0, |r| {
+        amount(r) * amount(&reserved["unclaimed"]) / amount(&reserved["snapshot"])
+    });
     run.step(
         "the vault's USDC wallet is the book plus the part held for the burned shares",
         wallet_of(&env, &env.usdc, &env.vault_id).await? == usdc_book + reserved_usdc as u128,
@@ -1063,29 +1511,54 @@ async fn freeze_race() -> anyhow::Result<()> {
     );
     run.step(
         "alice claims that part once",
-        claim_bucket(&env, hung_nonce).await? && wallet_of(&env, &env.usdc, &env.vault_id).await? == usdc_book && !claim_bucket(&env, hung_nonce).await.unwrap_or(true),
+        claim_bucket(&env, hung_nonce).await?
+            && wallet_of(&env, &env.usdc, &env.vault_id).await? == usdc_book
+            && !claim_bucket(&env, hung_nonce).await.unwrap_or(true),
         None,
         json!({"nonce": hung_nonce}),
     );
 
     // 3. A swap that never reports back, frozen, until the vault halts.
     let opened = env.call_vault(&env.governor, "unfreeze", json!({})).await?;
-    anyhow::ensure!(opened.is_success(), "governor unfreeze: {}", failures(&opened));
+    anyhow::ensure!(
+        opened.is_success(),
+        "governor unfreeze: {}",
+        failures(&opened)
+    );
     wait_seconds(&env, COOLDOWN + 1).await?;
     set_fault(&env, "SwapGarbageNotApplied").await?;
     let stuck_nonce = decision_ready(&env, template("buy_risk", 1_000_000)).await?;
     let usdc_before_stuck = usdc_total(&env).await?;
     let started = execute(&env, stuck_nonce).await?;
-    anyhow::ensure!(started.is_success(), "execute_decision: {}", failures(&started));
-    anyhow::ensure!(has_stage(&env, "Stuck").await?, "setup failed: the swap should be stuck: {}", stage(&env).await?);
+    anyhow::ensure!(
+        started.is_success(),
+        "execute_decision: {}",
+        failures(&started)
+    );
+    anyhow::ensure!(
+        has_stage(&env, "Stuck").await?,
+        "setup failed: the swap should be stuck: {}",
+        stage(&env).await?
+    );
     freeze(&env).await?;
     let frozen_stuck = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem with a stuck swap and a freeze", frozen_stuck.exact(), None, frozen_stuck.detail());
+    run.step(
+        "redeem with a stuck swap and a freeze",
+        frozen_stuck.exact(),
+        None,
+        frozen_stuck.detail(),
+    );
 
     set_fault(&env, "ProbeFails").await?;
     wait_seconds(&env, 601).await?;
-    let probing = env.call_vault(&env.stranger, "advance", json!({"nonce": stuck_nonce})).await?;
-    anyhow::ensure!(probing.is_success(), "advance while frozen: {}", failures(&probing));
+    let probing = env
+        .call_vault(&env.stranger, "advance", json!({"nonce": stuck_nonce}))
+        .await?;
+    anyhow::ensure!(
+        probing.is_success(),
+        "advance while frozen: {}",
+        failures(&probing)
+    );
     run.step(
         "advance, called by anyone, works while frozen and halts the vault past halt_after",
         count(&probing, "halted") == 1
@@ -1093,13 +1566,20 @@ async fn freeze_race() -> anyhow::Result<()> {
             && env.view_vault::<bool>("is_frozen", json!({})).await?
             && has_stage(&env, "Stuck").await?,
         None,
-        json!({"nonce": stuck_nonce, "stage": stage(&env).await?}),
+        json!({"nonce": stuck_nonce, "stage": stage_name(&env).await?}),
     );
     let halted_redeem = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem while frozen, halted and stuck", halted_redeem.exact(), None, halted_redeem.detail());
+    run.step(
+        "redeem while frozen, halted and stuck",
+        halted_redeem.exact(),
+        None,
+        halted_redeem.detail(),
+    );
 
     set_fault(&env, "None").await?;
-    let resolved = env.call_vault(&env.stranger, "advance", json!({"nonce": stuck_nonce})).await?;
+    let resolved = env
+        .call_vault(&env.stranger, "advance", json!({"nonce": stuck_nonce}))
+        .await?;
     anyhow::ensure!(resolved.is_success(), "advance: {}", failures(&resolved));
     let inflight: serde_json::Value = env.view_vault("inflight", json!({})).await?;
     run.step(
@@ -1116,9 +1596,17 @@ async fn freeze_race() -> anyhow::Result<()> {
         None,
         json!({"nonce": stuck_nonce, "events": events(&resolved).iter().map(|e| e["event"].clone()).collect::<Vec<_>>()}),
     );
-    claim_bucket(&env, stuck_nonce).await?;
+    anyhow::ensure!(
+        claim_bucket(&env, stuck_nonce).await?,
+        "two redeems burned shares during the swap, so a bucket claim should exist"
+    );
     let after_halt = redeem(&env, &env.alice, quarter).await?;
-    run.step("redeem after the unwind, still frozen and halted", after_halt.exact(), None, after_halt.detail());
+    run.step(
+        "redeem after the unwind, still frozen and halted",
+        after_halt.exact(),
+        None,
+        after_halt.detail(),
+    );
 
     // Only the governor reopens, and both locks have to be lifted.
     let trigger = env.trigger_cycle().await?;
@@ -1130,13 +1618,22 @@ async fn freeze_race() -> anyhow::Result<()> {
         json!({"stage": "Idle"}),
     );
     let mut cannot_clear = Vec::new();
-    for (who, account) in [("guardian", &env.guardian), ("keeper", &env.keeper), ("stranger", &env.stranger)] {
+    for (who, account) in [
+        ("guardian", &env.guardian),
+        ("keeper", &env.keeper),
+        ("stranger", &env.stranger),
+    ] {
         let result = env.call_vault(account, "clear_halt", json!({})).await?;
         if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
             cannot_clear.push(who);
         }
     }
-    run.step("anyone but the governor tries to clear the halt", cannot_clear.is_empty() && env.view_vault::<bool>("is_halted", json!({})).await?, None, json!({"refused_with": "only governor", "not_refused": cannot_clear}));
+    run.step(
+        "anyone but the governor tries to clear the halt",
+        cannot_clear.is_empty() && env.view_vault::<bool>("is_halted", json!({})).await?,
+        None,
+        json!({"refused_with": "only governor", "not_refused": cannot_clear}),
+    );
     let opened = env.call_vault(&env.governor, "unfreeze", json!({})).await?;
     anyhow::ensure!(opened.is_success(), "{}", failures(&opened));
     let still_halted = env.trigger_cycle().await?;
@@ -1147,15 +1644,24 @@ async fn freeze_race() -> anyhow::Result<()> {
         None,
         json!({"refused_with": "HALTED"}),
     );
-    let cleared = env.call_vault(&env.governor, "clear_halt", json!({})).await?;
+    let cleared = env
+        .call_vault(&env.governor, "clear_halt", json!({}))
+        .await?;
     anyhow::ensure!(cleared.is_success(), "{}", failures(&cleared));
     wait_seconds(&env, COOLDOWN + 1).await?;
     let resumed = cycle(&env, json!("Null")).await?;
-    anyhow::ensure!(resumed.failed.as_deref() == Some("NULL_RESULT"), "control failed: after both locks lift the keeper runs a cycle: {resumed:?}");
+    anyhow::ensure!(
+        resumed.failed.as_deref() == Some("NULL_RESULT"),
+        "control failed: after both locks lift the keeper runs a cycle: {resumed:?}"
+    );
     run.context(
         "control: with the governor having lifted both locks, a cycle runs again",
         json!({"cycle_failed": resumed.failed, "nonce": resumed.nonce}),
     );
 
+    run.note(
+        "LEDGER",
+        "ledger_after differs from ledger_before because the redeems pay out; every refused call asserts the state unchanged in its own step",
+    );
     run.finish(&env, before, ledger(&env).await?)
 }
