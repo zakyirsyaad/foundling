@@ -2,7 +2,7 @@ use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::{AccountId, Gas, NearToken, PromiseResult};
 
-use crate::cycle::Stage;
+use crate::cycle::{Stage, DECISIONS_KEPT};
 use crate::tests::support::*;
 use crate::Vault;
 
@@ -155,6 +155,81 @@ fn a_refused_answer_is_not_published() {
     );
 
     assert!(!logs_contain(r#""event":"decision""#));
+}
+
+#[test]
+fn an_accepted_decision_stays_readable_byte_for_byte() {
+    let mut vault = triggered_vault();
+    let bytes = decision(1, "buy_risk");
+
+    answer(&mut vault, 1, PromiseResult::Successful(bytes.clone()));
+
+    assert_eq!(
+        vault.published_decision(1),
+        Some(String::from_utf8(bytes).unwrap())
+    );
+}
+
+#[test]
+fn a_hold_stays_readable() {
+    let mut vault = triggered_vault();
+
+    answer(
+        &mut vault,
+        1,
+        PromiseResult::Successful(decision(1, "none")),
+    );
+
+    assert!(vault.published_decision(1).is_some());
+}
+
+#[test]
+fn a_refused_answer_leaves_nothing_to_read() {
+    let mut vault = triggered_vault();
+
+    answer(
+        &mut vault,
+        1,
+        PromiseResult::Successful(decision(9, "none")),
+    );
+
+    assert_eq!(vault.published_decision(1), None);
+    assert_eq!(vault.published_decision(9), None);
+}
+
+#[test]
+fn a_decision_never_read_is_none() {
+    assert_eq!(ready_vault().published_decision(1), None);
+}
+
+#[test]
+fn a_full_ring_drops_the_oldest_decision() {
+    let mut vault = ready_vault();
+    for nonce in 1..=DECISIONS_KEPT + 1 {
+        vault.keep_decision(nonce, nonce.to_string());
+    }
+
+    assert_eq!(vault.published_decision(1), None);
+    assert_eq!(vault.published_decision(2), Some("2".to_string()));
+    assert_eq!(
+        vault.published_decision(DECISIONS_KEPT + 1),
+        Some((DECISIONS_KEPT + 1).to_string())
+    );
+}
+
+#[test]
+fn a_failed_cycle_cannot_keep_an_old_decision_past_the_ring() {
+    let mut vault = ready_vault();
+    vault.keep_decision(1, "old".to_string());
+    // The next write to its slot comes a full ring later, whatever failed in between.
+    vault.keep_decision(1 + 2 * DECISIONS_KEPT, "new".to_string());
+
+    assert_eq!(vault.published_decision(1), None);
+    assert_eq!(vault.published_decision(1 + DECISIONS_KEPT), None);
+    assert_eq!(
+        vault.published_decision(1 + 2 * DECISIONS_KEPT),
+        Some("new".to_string())
+    );
 }
 
 #[test]

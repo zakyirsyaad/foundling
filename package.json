@@ -1,0 +1,14 @@
+{
+  "name": "foundling",
+  "private": true,
+  "workspaces": [
+    "web",
+    "packages/db",
+    "indexer",
+    "api",
+    "deploy"
+  ],
+  "engines": {
+    "node": ">=24"
+  }
+}

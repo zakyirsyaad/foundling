@@ -1,0 +1,157 @@
+{
+  "attack": "replay",
+  "expected_codes": [
+    "NONCE_MISMATCH",
+    "EXPIRED",
+    "FROZEN",
+    "CycleFailed"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "19000000",
+      "wnear": "222222222222222222222222"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "19000000",
+    "wallet_wnear": "222222222222222222222222"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "FROZEN",
+      "note": "Rejected(FROZEN) from on_price and from on_decision cannot be staged: the mocks answer inside one transaction, so a freeze cannot land between two receipts. Covered by the unit tests in contracts/vault/src/tests/swap.rs and flows.rs"
+    }
+  ],
+  "observed_codes": [
+    "NONCE_MISMATCH",
+    "CycleFailed",
+    "EXPIRED",
+    "FROZEN"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "result": "PASS",
+  "steps": [
+    {
+      "detail": {
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a real buy executes, which spends its nonce"
+    },
+    {
+      "detail": {
+        "cycle_nonce": 3,
+        "replayed_nonce": 2,
+        "stage": "Idle"
+      },
+      "held": true,
+      "observed": "NONCE_MISMATCH",
+      "step": "the spent decision, replayed with its old nonce"
+    },
+    {
+      "detail": {
+        "cycle_nonce": 4
+      },
+      "held": true,
+      "observed": "NONCE_MISMATCH",
+      "step": "a decision made for another vault"
+    },
+    {
+      "detail": {
+        "nonce": 2,
+        "refused_with": "NOT_READY"
+      },
+      "held": true,
+      "observed": null,
+      "step": "execute_decision on a nonce that already ran"
+    },
+    {
+      "detail": {
+        "code": "NULL_RESULT",
+        "event": "cycle_failed"
+      },
+      "held": true,
+      "observed": "CycleFailed",
+      "step": "OutLayer answers null"
+    },
+    {
+      "detail": {
+        "called_with": 7,
+        "ready_nonce": 6,
+        "refused_with": "NOT_READY"
+      },
+      "held": true,
+      "observed": null,
+      "step": "execute_decision with the wrong nonce while a decision is ready"
+    },
+    {
+      "detail": {
+        "nonce": 6
+      },
+      "held": true,
+      "observed": "EXPIRED",
+      "step": "execute_decision after the decision expired, then anyone clears it"
+    },
+    {
+      "detail": {
+        "nonce": 7,
+        "seen_as": "panic of execute_decision, not a Rejected event"
+      },
+      "held": true,
+      "observed": "FROZEN",
+      "step": "a decision ready when the guardian freezes"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "c462445074f293532972a31352706fd56a6c8cf897301d13358e3b0903584d57",
+  "verdict": "held"
+}

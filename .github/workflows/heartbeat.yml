@@ -1,0 +1,34 @@
+# The outside alert (WEBSITE §9): the worker heartbeat on the public API, and the keeper's NEAR balance.
+# A failed scheduled run makes GitHub email the repo owner. It skips until the repo variables are set:
+# API_ORIGIN (https://api.<domain>), KEEPER_ACCOUNT, and optionally KEEPER_MIN_NEAR (default 2) and RPC_URL.
+name: Heartbeat
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Worker and keeper
+    if: vars.API_ORIGIN != '' && vars.KEEPER_ACCOUNT != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check
+        env:
+          API_ORIGIN: ${{ vars.API_ORIGIN }}
+          KEEPER_ACCOUNT: ${{ vars.KEEPER_ACCOUNT }}
+          KEEPER_MIN_NEAR: ${{ vars.KEEPER_MIN_NEAR || '2' }}
+          RPC_URL: ${{ vars.RPC_URL || 'https://rpc.mainnet.fastnear.com' }}
+        run: python3 tools/heartbeat_check.py --api "$API_ORIGIN" --keeper "$KEEPER_ACCOUNT" --min-near "$KEEPER_MIN_NEAR" --rpc "$RPC_URL"

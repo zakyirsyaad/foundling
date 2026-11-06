@@ -1,0 +1,58 @@
+# Copies the proof bundles from the public API into the live-proofs branch, so they outlive the VPS.
+# No VPS secret: it reads only the public API (repo variable API_ORIGIN). Manual until the lead turns on
+# a schedule. It pushes to refs/heads/live-proofs only; main is protected and needs a PR anyway.
+name: Live proofs
+
+on:
+  workflow_dispatch:
+    inputs:
+      vault:
+        description: Vault account id to archive
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-proofs
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Archive proofs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      API_ORIGIN: ${{ vars.API_ORIGIN }}
+      VAULT: ${{ inputs.vault }}
+    steps:
+      - name: Needs the API origin
+        run: test -n "$API_ORIGIN" || { echo "::error::set the repo variable API_ORIGIN"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: archive
+      - name: Switch to live-proofs, or start it
+        working-directory: archive
+        run: |
+          if git ls-remote --exit-code --heads origin live-proofs > /dev/null; then
+            git fetch --depth=1 origin live-proofs
+            git switch -C live-proofs FETCH_HEAD
+          else
+            git switch --orphan live-proofs
+          fi
+      - name: Archive
+        working-directory: archive
+        run: python3 ../src/tools/archive_proofs.py --api "$API_ORIGIN" --vault "$VAULT" --out proofs/live
+      - name: Commit and push
+        working-directory: archive
+        run: |
+          git add proofs
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "proofs: archive $VAULT"
+          git push origin HEAD:refs/heads/live-proofs

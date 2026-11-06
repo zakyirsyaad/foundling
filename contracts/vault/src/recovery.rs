@@ -2,11 +2,9 @@
 //! a hop finished without its callback. A swap is never repeated, its `min_amount_out` is
 //! stale by then, and no loss is ever written: what cannot be explained stays `Stuck`.
 
-use std::collections::BTreeMap;
-
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
-use near_sdk::{env, near, require, Gas, NearToken};
+use near_sdk::{env, near, require, Gas, NearToken, PromiseIndex};
 
 use crate::cycle::Stage;
 use crate::events::emit;
@@ -14,11 +12,13 @@ use crate::swap::{return_callback, Inflight, SwapStep};
 use crate::{now_seconds, Book, Token, Vault, VaultExt};
 
 const NO_DEPOSIT: NearToken = NearToken::from_yoctonear(0);
-const GET_DEPOSITS_GAS: Gas = Gas::from_tgas(20);
+const GET_DEPOSIT_GAS: Gas = Gas::from_tgas(10);
 // Carries the withdraw and its callback, like `on_swapped`.
 const ON_PROBE_GAS: Gas = Gas::from_tgas(75);
 const MIN_ADVANCE_GAS: Gas = Gas::from_tgas(110);
-const MAX_DEPOSITS_BYTES: usize = 2 * 1024;
+// One u128 as a JSON string. `get_deposits` would list every token, and anyone can add tokens
+// to the vault's Ref account, so a long reply could keep a stuck swap from ever being read.
+const MAX_DEPOSIT_BYTES: usize = 64;
 
 struct StuckSwap {
     nonce: u64,
@@ -70,13 +70,10 @@ impl Vault {
             &format!(r#"{{"nonce":{nonce},"attempt":{attempt}}}"#),
         );
 
-        let read = env::promise_create(
-            self.assets.rhea.clone(),
-            "get_deposits",
-            json!({ "account_id": self.vault_id }).to_string(),
-            NO_DEPOSIT,
-            GET_DEPOSITS_GAS,
-        );
+        let read = env::promise_and(&[
+            self.read_deposit(Token::Usdc),
+            self.read_deposit(Token::Wnear),
+        ]);
         return_callback(
             read,
             "on_probe",
@@ -186,20 +183,33 @@ impl Vault {
         })
     }
 
+    fn read_deposit(&self, token: Token) -> PromiseIndex {
+        env::promise_create(
+            self.assets.rhea.clone(),
+            "get_deposit",
+            json!({ "account_id": self.vault_id, "token_id": self.token_account(token) })
+                .to_string(),
+            NO_DEPOSIT,
+            GET_DEPOSIT_GAS,
+        )
+    }
+
     fn read_deposits(&self, inflight: &Inflight) -> Option<Held> {
-        if env::promise_results_count() != 1 {
+        if env::promise_results_count() != 2 {
             return None;
         }
-        let bytes = env::promise_result_checked(0, MAX_DEPOSITS_BYTES).ok()?;
-        let deposits: BTreeMap<String, U128> = serde_json::from_slice(&bytes).ok()?;
-        let held = |token: Token| {
-            deposits
-                .get(self.token_account(token).as_str())
-                .map(|amount| amount.0)
+        let amount = |index: u64| {
+            let bytes = env::promise_result_checked(index, MAX_DEPOSIT_BYTES).ok()?;
+            serde_json::from_slice::<U128>(&bytes).ok()
+        };
+        let (usdc, wnear) = (amount(0)?.0, amount(1)?.0);
+        let held = |token: Token| match token {
+            Token::Usdc => usdc,
+            Token::Wnear => wnear,
         };
         Some(Held {
-            token_in: held(inflight.token_in)?,
-            token_out: held(inflight.token_out)?,
+            token_in: held(inflight.token_in),
+            token_out: held(inflight.token_out),
         })
     }
 

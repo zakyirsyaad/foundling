@@ -46,6 +46,9 @@ pub struct Policy {
     pub min_deposit: U128,
     pub max_mint_per_cycle: u32,
     pub timelock: u64,
+    /// Open lets any registered account deposit; closed keeps the allowlist. Absent means closed.
+    #[serde(default)]
+    pub open_deposits: bool,
 }
 
 /// Only what may tighten after `init`. Fixed parameters have no field here.
@@ -71,6 +74,7 @@ pub struct PolicyChange {
     pub per_user_cap: Option<U128>,
     pub min_deposit: Option<U128>,
     pub max_mint_per_cycle: Option<u32>,
+    pub open_deposits: Option<bool>,
 }
 
 impl Policy {
@@ -155,8 +159,18 @@ impl Policy {
                 change.max_mint_per_cycle,
                 MIN_MINT_PER_CYCLE,
             )?,
+            open_deposits: closed(self.open_deposits, change.open_deposits)?,
             ..self.clone()
         })
+    }
+}
+
+/// Closing is the only direction: a closed vault never reopens.
+fn closed(current: bool, requested: Option<bool>) -> Result<bool, &'static str> {
+    match requested {
+        None => Ok(current),
+        Some(false) if current => Ok(false),
+        Some(_) => Err(NOT_TIGHTER),
     }
 }
 

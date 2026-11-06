@@ -1,0 +1,108 @@
+{
+  "attack": "bad-route",
+  "expected_codes": [
+    "MALFORMED"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "19000000",
+      "wnear": "222222222222222222222222"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "19000000",
+    "wallet_wnear": "222222222222222222222222",
+    "window_usdc": "1000000",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "MALFORMED"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "result": "PASS",
+  "steps": [
+    {
+      "detail": {
+        "accounts_that_ran_a_receipt": [
+          "keeper.test.near",
+          "oracle.test.near",
+          "rhea.test.near",
+          "usdc.test.near",
+          "vault.owner.test.near",
+          "wnear.test.near"
+        ],
+        "attacker_balances": [
+          "0",
+          "0"
+        ],
+        "nonce": 2,
+        "outside_the_registered_set": [],
+        "traded_over_the_registered_route": true
+      },
+      "held": true,
+      "observed": null,
+      "step": "a decision that names a receiver, a pool and a route of the attacker's choosing"
+    },
+    {
+      "detail": {
+        "envelope_control": "same envelope as the trading step above",
+        "nonce": 3
+      },
+      "held": true,
+      "observed": "MALFORMED",
+      "step": "an action that is not buy or sell"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "c462445074f293532972a31352706fd56a6c8cf897301d13358e3b0903584d57",
+  "verdict": "held"
+}

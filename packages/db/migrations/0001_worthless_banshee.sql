@@ -1,0 +1,1 @@
+ALTER TABLE "proofs" ALTER COLUMN "bundle" SET DATA TYPE text;

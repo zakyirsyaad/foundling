@@ -4,6 +4,7 @@ use near_sdk::test_utils::get_created_receipts;
 use near_sdk::{AccountId, NearToken, PromiseResult};
 
 use crate::cycle::Stage;
+use crate::math::mul_div;
 use crate::swap::SwapStep;
 use crate::tests::support::*;
 use crate::{Token, Vault};
@@ -697,4 +698,96 @@ fn claims_and_book_never_exceed_the_result() {
         .parse()
         .unwrap();
     assert!(paid <= reserved);
+}
+
+/// Alice and Bob hold shares, and a swap at `nonce` has begun with nothing else in flight.
+fn holders_mid_swap(nonce: u64) -> Vault {
+    let mut vault = ready_vault();
+    deposit(&mut vault, alice(), 40 * USDC_UNIT);
+    deposit(&mut vault, bob(), 40 * USDC_UNIT);
+    vault.mint_pending();
+    vault.begin_swap_for_tests(nonce);
+    vault
+}
+
+fn redeem_part(vault: &mut Vault, who: AccountId, shares: u128) {
+    set_caller_with_yocto(who);
+    vault.redeem(U128(shares));
+}
+
+/// Alice redeemed a quarter during swap 1, which settled, and swap 2 has begun.
+/// Returns what her claim on swap 1 is worth.
+fn claim_left_from_swap_one(vault: &mut Vault) -> u128 {
+    let quarter = vault.shares_of(alice()).0 / 4;
+    redeem_part(vault, alice(), quarter);
+    vault.settle_swap(1, Token::Wnear, 16 * WNEAR_UNIT / 10, false);
+    let bucket = vault.bucket(1).unwrap();
+    vault.begin_swap_for_tests(2);
+    mul_div(bucket.result.0, quarter, bucket.snapshot.0)
+}
+
+#[test]
+fn an_older_claim_folds_into_claimable_when_its_holder_redeems_in_the_next_swap() {
+    let mut vault = holders_mid_swap(1);
+    let owed = claim_left_from_swap_one(&mut vault);
+    let quarter = vault.shares_of(alice()).0 / 3;
+
+    redeem_part(&mut vault, alice(), quarter);
+
+    assert_eq!(vault.bucket_claim(1, alice()), U128(0));
+    assert_eq!(vault.claimable_of(alice(), Token::Wnear), U128(owed));
+    assert_eq!(vault.bucket_claim(2, alice()), U128(quarter));
+}
+
+#[test]
+fn a_folded_claim_takes_its_bucket_with_it() {
+    let mut vault = holders_mid_swap(1);
+    claim_left_from_swap_one(&mut vault);
+    let quarter = vault.shares_of(alice()).0 / 3;
+
+    redeem_part(&mut vault, alice(), quarter);
+
+    assert_eq!(vault.bucket(1), None);
+}
+
+#[test]
+#[should_panic(expected = "nothing to claim")]
+fn a_folded_claim_cannot_be_claimed_again() {
+    let mut vault = holders_mid_swap(1);
+    claim_left_from_swap_one(&mut vault);
+    let quarter = vault.shares_of(alice()).0 / 3;
+    redeem_part(&mut vault, alice(), quarter);
+
+    set_caller_with_yocto(alice());
+    vault.claim_bucket(1);
+}
+
+#[test]
+fn a_bucket_stays_while_a_holder_has_not_claimed() {
+    let mut vault = holders_mid_swap(1);
+    let quarter = vault.shares_of(alice()).0 / 4;
+    redeem_part(&mut vault, alice(), quarter);
+    redeem_part(&mut vault, bob(), quarter);
+    vault.settle_swap(1, Token::Wnear, 16 * WNEAR_UNIT / 10, false);
+
+    set_caller_with_yocto(alice());
+    vault.claim_bucket(1);
+
+    assert!(vault.bucket(1).is_some());
+}
+
+#[test]
+fn a_bucket_goes_once_every_holder_has_claimed() {
+    let mut vault = holders_mid_swap(1);
+    let quarter = vault.shares_of(alice()).0 / 4;
+    redeem_part(&mut vault, alice(), quarter);
+    redeem_part(&mut vault, bob(), quarter);
+    vault.settle_swap(1, Token::Wnear, 16 * WNEAR_UNIT / 10, false);
+    set_caller_with_yocto(alice());
+    vault.claim_bucket(1);
+
+    set_caller_with_yocto(bob());
+    vault.claim_bucket(1);
+
+    assert_eq!(vault.bucket(1), None);
 }

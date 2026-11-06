@@ -1,0 +1,35 @@
+{
+  "usdc": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "usdcE": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+  "wnear": "wrap.near",
+  "oneClick": {
+    "baseUrl": "https://1click.chaindefuser.com",
+    "quotePublicKey": "ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc",
+    "chains": [
+      {
+        "id": "base",
+        "label": "Base",
+        "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "marginMs": 120000,
+        "deadlineMs": 1200000,
+        "enabled": false
+      },
+      {
+        "id": "arb",
+        "label": "Arbitrum",
+        "originAsset": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+        "marginMs": 120000,
+        "deadlineMs": 1200000,
+        "enabled": false
+      },
+      {
+        "id": "eth",
+        "label": "Ethereum",
+        "originAsset": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+        "marginMs": 300000,
+        "deadlineMs": 2400000,
+        "enabled": false
+      }
+    ]
+  }
+}

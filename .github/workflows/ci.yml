@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [vault, mock-ref, mock-oracle]
+        crate: [vault, mock-ref, mock-oracle, mock-outlayer, mock-token]
     defaults:
       run:
         working-directory: contracts/${{ matrix.crate }}
@@ -129,6 +129,52 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  offline-verifier:
+    name: Offline verifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test
+        run: python3 -m unittest tests.test_verify_offline tests.test_recheck_obs tests.test_fetch_proof tests.test_heartbeat_check tests.test_archive_proofs
+      - name: Run the tier 0a checks
+        run: python3 verify.py
+
+  recheck-obs:
+    name: Recheck obs (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Past prices cannot change, so 1 is a real mismatch. 2 only means a source is down.
+      - name: Recheck recorded readings against the archive and Kraken
+        run: |
+          status=0
+          python3 tools/recheck_obs.py tools/fixtures/m10-obs.json || status=$?
+          test "$status" -ne 1
+
+  attack-lab:
+    name: Attack Lab scaffold
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test
+        run: python3 -m unittest tests.test_attack_lab
+      - name: Test the sandbox attack runner and the make targets
+        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make
+
+  keeper:
+    name: Keeper bot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test
+        run: >-
+          python3 -m unittest tests.test_keeper_rpc tests.test_keeper_near
+          tests.test_keeper_bot tests.test_keeper_soak tests.test_keeper_cli
+
   vault-wasm:
     name: Vault WASM
     runs-on: ubuntu-24.04
@@ -169,6 +215,199 @@ jobs:
           path: contracts/vault/target/near/foundling_vault.wasm
           retention-days: 14
 
+  vault-reproducible:
+    name: Vault reproducible (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    steps:
+      # The build records the commit, so it has to be the pushed one and not the merge ref.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Build the vault in the pinned image
+        working-directory: contracts/vault
+        run: cargo near build reproducible-wasm < /dev/null
+      - name: Audit the host imports
+        run: python3 tools/wasm_imports.py contracts/vault/target/near/foundling_vault.wasm tools/allowlist.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: foundling-vault-reproducible-${{ matrix.os }}
+          path: contracts/vault/target/near/foundling_vault.wasm
+          retention-days: 14
+
+  vault-reproducible-compare:
+    name: Vault reproducible hash
+    needs: vault-reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: foundling-vault-reproducible-*
+      - name: Compare the two builds
+        run: |
+          sha256sum foundling-vault-reproducible-*/foundling_vault.wasm | tee hashes.txt
+          test "$(cut -d' ' -f1 hashes.txt | sort -u | wc -l)" -eq 1
+          echo "Vault reproducible WASM: \`$(head -n1 hashes.txt | cut -d' ' -f1)\`" >> "$GITHUB_STEP_SUMMARY"
+
+  sandbox:
+    name: Sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/*/target
+            sandbox/target
+          key: sandbox-${{ hashFiles('rust-toolchain.toml', 'contracts/*/Cargo.lock', 'sandbox/Cargo.lock') }}
+          restore-keys: sandbox-
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup component add clippy rustfmt
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Format
+        working-directory: sandbox
+        run: cargo fmt --check
+      - name: Lint
+        working-directory: sandbox
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build the contracts and run the sandbox tests
+        run: make sandbox
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Lint
+        run: npm run -w web lint
+      - name: Typecheck
+        run: npm run -w web typecheck
+      - name: Unit tests with coverage
+        run: npm run -w web test:coverage
+      - name: Call table and events match the contract
+        run: npm run -w web check:contract
+      - name: Exit paths do not import the history API
+        run: npm run -w web depcruise
+      - name: Production bundle has no mock wallet
+        env:
+          FOUNDLING_BUNDLE_CHECK: "1"
+          NEXT_PUBLIC_NETWORK: mainnet
+          NEXT_PUBLIC_VAULT_ID: foundling-vault.near
+          NEXT_PUBLIC_RPC_URLS: https://rpc.mainnet.fastnear.com
+        run: |
+          npm run -w web build
+          # Strings that survive minification; the marker comment does not.
+          if grep -rq --exclude='*.map' -e "foundling.mock.account" -e "localhost:3199/__tx" web/.next/static web/.next/server; then
+            echo "::error::the mock wallet reached the production build"
+            exit 1
+          fi
+      - name: Install the browser
+        run: npx -w web playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run -w web e2e
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: foundling_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:ci-only@localhost:5432/foundling_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: |
+          npm run -w @foundling/db typecheck
+          npm run -w @foundling/indexer typecheck
+          npm run -w @foundling/api typecheck
+          npx -w @foundling/deploy tsc --noEmit -p .
+      - name: Tests with coverage
+        run: |
+          npm run -w @foundling/db test
+          npm run -w @foundling/indexer test:coverage
+          npm run -w @foundling/api test:coverage
+          npm run -w @foundling/deploy test
+
+  backend-image:
+    name: Backend image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Proves the images build; a deployed worker image is built from the vault's own commit.
+      VERIFIER_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compose file
+        run: docker compose -f deploy/compose.yml --env-file deploy/.env.example config --quiet
+      - name: API image
+        run: docker build -f deploy/Dockerfile.api -t foundling-api:ci .
+      - name: Worker image
+        run: docker build -f deploy/Dockerfile.worker --build-arg "VERIFIER_COMMIT=$VERIFIER_COMMIT" -t foundling-worker:ci .
+      - name: Images start and refuse an empty env
+        run: |
+          api=$(docker run --rm foundling-api:ci 2>&1 || true)
+          echo "$api" | grep -q DATABASE_URL_READER
+          worker=$(docker run --rm foundling-worker:ci 2>&1 || true)
+          echo "$worker" | grep -q ACTIVE_VAULT_ID
+          docker run --rm --entrypoint python3 foundling-worker:ci /app/tools/fetch_proof.py --help > /dev/null
+          docker run --rm --entrypoint sh foundling-worker:ci -c 'test -x /usr/local/bin/foundling-verify && test "$(id -u)" != 0'
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-24.04
@@ -182,12 +421,14 @@ jobs:
           tool: cargo-audit@0.22.2
       - name: Audit every lockfile
         run: |
-          for crate in strategy cli contracts/vault contracts/mock-ref contracts/mock-oracle; do
+          for crate in strategy cli contracts/vault contracts/mock-ref contracts/mock-oracle \
+            contracts/mock-outlayer contracts/mock-token sandbox; do
             cargo audit --file "$crate/Cargo.lock"
           done
       - name: Keep the ignored advisories out of every WASM
         run: |
-          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle; do
+          for crate in contracts/vault contracts/mock-ref contracts/mock-oracle \
+            contracts/mock-outlayer contracts/mock-token; do
             for package in crypto-bigint zstd zstd-safe; do
               if cargo tree --locked --manifest-path "$crate/Cargo.toml" \
                 --target wasm32-unknown-unknown -e normal -i "$package" 2>/dev/null | grep -q "$package"; then
@@ -216,3 +457,58 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP" gitleaks
       - name: Scan the whole history
         run: '"$RUNNER_TEMP/gitleaks" git . --no-banner --redact'
+
+  attack-lab-run:
+    name: Attack Lab (run-all)
+    # becomes required (remove continue-on-error) after T7-T9
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/*/target
+            sandbox/target
+          key: attack-lab-${{ hashFiles('rust-toolchain.toml', 'contracts/*/Cargo.lock', 'sandbox/Cargo.lock') }}
+          restore-keys: attack-lab-
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Install cargo-near
+        env:
+          ARCHIVE: cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          SHA256: 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" --strip-components=1 -C "$HOME/.cargo/bin"
+      - name: Build the WASM the sandbox attacks deploy
+        run: make wasm
+      - name: Run every core attack
+        run: |
+          status=0
+          python3 tools/attack.py run-all | tee "$RUNNER_TEMP/attacks.txt" || status=$?
+          {
+            echo '### Attack Lab (run-all)'
+            echo "exit status: $status"
+            echo '```'
+            cat "$RUNNER_TEMP/attacks.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::run-all exited $status; this job does not fail the workflow yet"
+          fi
+          exit "$status"
+
+  workflow:
+    name: Workflow shape
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check that no job can turn a failure green
+        run: python3 -m unittest tests.test_ci_workflow

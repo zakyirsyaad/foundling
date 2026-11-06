@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "foundling-strategy"
 path = "src/main.rs"
 
+[[bin]]
+name = "sp1a-probe"
+path = "src/bin/sp1a_probe.rs"
+
 [features]
 # Takes `obs` from the secret instead of the public sources, for testnet rehearsals.
 rehearsal = []
