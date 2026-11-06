@@ -458,13 +458,27 @@ fn a_silent_advisor_holds_a_buy() {
 
     let verdict = decide(&params(), &input(), &silent);
 
-    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.regime, Regime::RiskOn);
     assert_eq!(verdict.action, Action::None);
 }
 
+// Lead decision 2026-11-07: a headline that breaks the advisor's answer must not also
+// withhold a stop-loss. A sell only lowers exposure, and the two price sources still have
+// to agree for it.
 #[test]
-fn a_silent_advisor_holds_a_sell() {
+fn a_silent_advisor_cannot_stop_a_sell() {
     let mut silent = obs(390_000_000, 390_000_000);
+    silent.ai_flag = AI_SILENT;
+
+    let verdict = decide(&params(), &input(), &silent);
+
+    assert_eq!(verdict.regime, Regime::RiskOff);
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_silent_advisor_still_needs_the_sources_to_agree_for_a_sell() {
+    let mut silent = obs(390_000_000, 300_000_000);
     silent.ai_flag = AI_SILENT;
 
     let verdict = decide(&params(), &input(), &silent);

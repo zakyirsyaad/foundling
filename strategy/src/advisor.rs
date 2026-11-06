@@ -1,6 +1,7 @@
 //! The NEAR AI tripwire. It reads public headlines and answers with one flag that can only
 //! brake: a raised flag blocks a buy, and it cannot start or size anything. Whatever goes
-//! wrong here leaves the advisor silent, and a silent advisor ends in a hold.
+//! wrong here leaves the advisor silent, and a silent advisor blocks a buy the way a raised
+//! flag does. Neither can stop a sell.
 
 use serde::Deserialize;
 use serde_json::json;

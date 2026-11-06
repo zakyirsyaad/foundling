@@ -21,7 +21,7 @@ export const PARTY_GROUPS: readonly { group: string; rows: readonly { party: str
     rows: [
       { party: "OutLayer operator", could: "Withhold a decision, or run the enclave with its full-access key.", bounded: "No decision means no trade. Caps hold whatever the decision is." },
       { party: "Intel TDX, NVIDIA and the Phala host", could: "Break the enclave and read the sealed parameters.", bounded: "Caps still hold. Sealing is lost, not funds." },
-      { party: "NEAR AI Cloud", could: "Answer badly or not at all.", bounded: "Its advice can only lower exposure. A missing answer means no decision." },
+      { party: "NEAR AI Cloud", could: "Answer badly or not at all.", bounded: "Its advice can only lower exposure. A missing answer blocks a buy, never a sell." },
     ],
   },
   {

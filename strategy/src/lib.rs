@@ -22,7 +22,8 @@ const REHEARSAL_CHAIN: &str = "testnet";
 
 pub const AI_CLEAR: u8 = 0;
 pub const AI_FLAGGED: u8 = 1;
-/// The advisor gave no valid answer, which ends in a hold whatever the prices say.
+/// The advisor gave no valid answer. Like a raised flag it blocks a buy, and like one it
+/// cannot stop a sell: an answer that a headline can break must not hold a stop-loss.
 pub const AI_SILENT: u8 = 2;
 
 pub mod advisor;
@@ -261,7 +262,8 @@ pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
 
 /// Thresholds read `pb` only: the pool price can be pushed by anyone with capital.
 fn regime_of(params: &Params, now: u64, obs: &Obs) -> Regime {
-    if obs.ai_flag > AI_FLAGGED || !sources_agree(obs, now, params.source_dev_bps) {
+    // A flag past `AI_SILENT` can only come from a bug, so it holds everything.
+    if obs.ai_flag > AI_SILENT || !sources_agree(obs, now, params.source_dev_bps) {
         return Regime::Undetermined;
     }
     if obs.pb >= params.risk_on_above {
