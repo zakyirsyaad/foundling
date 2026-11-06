@@ -244,7 +244,7 @@ Satu daftar kanonik dipakai kontrak, CLI, Attack Lab, dan `verify`. Event mengik
 | `Rejected{nonce, kode}` | `FROZEN`, `HALTED`, `PRICE_UNAVAILABLE` (feed `null`; keeper boleh mencoba lagi sebelum keputusan kedaluwarsa), `PRICE_STALE` (hanya bila `publish_time` melampaui `price_max_age`), `PRICE_WIDE`, `PRICE_DEVIATION`, `OVER_CAP`, `OVER_EPOCH_CAP`, `OVER_ABS_CAP`, `OVER_BOOK`, `EXPOSURE_LIMIT`, `BAD_DECISION` |
 | `SwapStep{nonce, langkah, jumlah}`, `Executed{nonce, amount_in, amount_out}`, `SwapReverted{nonce, amount}`, `Stuck{nonce, langkah}`, `Probing{nonce, attempt}` | - |
 | `Selftest{passed, kode}` | `SELFTEST_RESULTS`, `SELFTEST_POOL`, `SELFTEST_FEE`, `SELFTEST_DECIMALS`, atau kode harga dari `Rejected` |
-| Penolakan akses atau state (panic pada method) | `NOT_KEEPER`, `NOT_ALLOWED`, `NOT_IDLE`, `COOLDOWN`, `LOW_GAS`, `NOT_STUCK`, `TOO_EARLY`, `BAD_SALT`, `BAD_REVEAL`, `ALREADY_REVEALED` |
+| Penolakan akses atau state (panic pada method) | `NOT_KEEPER`, `NOT_IDLE`, `COOLDOWN`, `LOW_GAS`, `NOT_STUCK`, `TOO_EARLY`, `BAD_SALT`, `BAD_REVEAL`, `ALREADY_REVEALED` |
 
 Himpunan kode yang diharapkan pada soak: `Hold(NO_DECISION)`, `Rejected(PRICE_UNAVAILABLE)`, dan `Rejected(PRICE_WIDE)`; penolakan lain, `CycleFailed` selain `NULL_RESULT` yang tercatat sebagai kegagalan worker, atau `Stuck` dihitung tak terduga dan membuat soak gagal.
 
@@ -274,7 +274,7 @@ Nama perintah adalah antarmuka yang direncanakan; nama final ditetapkan di M1. T
 | `attack stale-price` | Feed jangkar lebih tua dari `age` (oracle sungguhan mengembalikan `null`), atau mock yang menyuntikkan `publish_time` lama | `Rejected(PRICE_UNAVAILABLE)` (atau `PRICE_STALE` pada mock `publish_time`) |
 | `attack inflated-nav` | Harga jangkar (mock) digelembungkan agar cap bps longgar | `Rejected(OVER_ABS_CAP)` oleh cap absolut (I13) |
 | `attack deflated-sell` | Harga jangkar (mock) dikempiskan agar jual lebih banyak | `Rejected(OVER_ABS_CAP)` oleh `cap_wnear` dan `cap_sell_bps` |
-| `attack forged-caller` | Panggilan ke setiap callback dan ke `ft_on_transfer` dari akun lain; `execute_decision` oleh non-keeper | `NOT_KEEPER` atau `NOT_ALLOWED`; state tidak berubah |
+| `attack forged-caller` | Panggilan ke setiap callback dan ke `ft_on_transfer` dari akun lain; `execute_decision` oleh non-keeper | `NOT_KEEPER` untuk method khusus keeper; callback `#[private]` ditolak SDK (`Method <nama> is private`); `ft_on_transfer` dari kontrak lain mengembalikan seluruh jumlah; state tidak berubah |
 | `attack poisoned-feed` | Dua sumber harga tidak cocok; keluaran LLM tidak valid | `Hold(NO_DECISION)`: tahan posisi, tidak ada trade |
 | `attack governor-loosen` | Governor mencoba menaikkan cap, menambah aset, mengganti strategi, atau menurunkan cap di bawah lantai | Method tidak ada atau ditolak; rotasi keeper hanya terjadwal dan bisa dibatalkan guardian |
 | `attack double-redeem` | Dua redeem dalam satu batch; `ft_transfer` gagal pada token tak terdaftar | Tidak ada pembayaran ganda; saldo menjadi `claimable` |

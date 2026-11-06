@@ -3,6 +3,7 @@
 //! part of it, hence the allow.
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
@@ -288,20 +289,23 @@ pub async fn freeze(env: &Foundling) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// What one `redeem` did, against what the book said it should pay.
+/// What one `redeem` did, against what the book said it should pay. Every delta is signed: a
+/// bug that grows the book, mints shares or shrinks a claim must show up as a wrong number in a
+/// step, which the proof records as a breach, and not as an underflow panic, which reads as a
+/// tool error.
 #[derive(Debug)]
 pub struct Redeemed {
     pub shares: u128,
     pub expected_usdc: u128,
     pub expected_wnear: u128,
     /// The wallet delta plus the `claimable` delta, per token: where the payout went.
-    pub paid_usdc: u128,
-    pub paid_wnear: u128,
-    pub in_wallet_usdc: u128,
-    pub in_wallet_wnear: u128,
-    pub book_usdc_drop: u128,
-    pub book_wnear_drop: u128,
-    pub shares_drop: u128,
+    pub paid_usdc: i128,
+    pub paid_wnear: i128,
+    pub in_wallet_usdc: i128,
+    pub in_wallet_wnear: i128,
+    pub book_usdc_drop: i128,
+    pub book_wnear_drop: i128,
+    pub shares_drop: i128,
     pub failure: Option<String>,
 }
 
@@ -309,11 +313,11 @@ impl Redeemed {
     /// The payout was the pro-rata of the book, paid once, and the shares were burned once.
     pub fn exact(&self) -> bool {
         self.failure.is_none()
-            && self.paid_usdc == self.expected_usdc
-            && self.paid_wnear == self.expected_wnear
-            && self.book_usdc_drop == self.expected_usdc
-            && self.book_wnear_drop == self.expected_wnear
-            && self.shares_drop == self.shares
+            && self.paid_usdc == self.expected_usdc as i128
+            && self.paid_wnear == self.expected_wnear as i128
+            && self.book_usdc_drop == self.expected_usdc as i128
+            && self.book_wnear_drop == self.expected_wnear as i128
+            && self.shares_drop == self.shares as i128
             && (self.expected_usdc > 0 || self.expected_wnear > 0)
     }
 
@@ -328,6 +332,10 @@ impl Redeemed {
             "failure": self.failure,
         })
     }
+}
+
+fn delta(before: u128, after: u128) -> i128 {
+    after as i128 - before as i128
 }
 
 pub async fn claimable(env: &Foundling, who: &Account, token: &str) -> anyhow::Result<u128> {
@@ -358,7 +366,8 @@ pub async fn shares_of(env: &Foundling, who: &Account) -> anyhow::Result<u128> {
 }
 
 /// `who` redeems `shares`. The pro-rata is computed from the book and total shares read first, so
-/// the check does not use the vault's own arithmetic to judge the vault.
+/// the check does not use the vault's own arithmetic to judge the vault. A failed read ends the run
+/// with no proof, which is a tool error; it is never turned into a number.
 pub async fn redeem(env: &Foundling, who: &Account, shares: u128) -> anyhow::Result<Redeemed> {
     let (usdc_before, wnear_before) = book(env).await?;
     let total_before = total_shares(env).await?;
@@ -369,7 +378,7 @@ pub async fn redeem(env: &Foundling, who: &Account, shares: u128) -> anyhow::Res
             / total_before
     };
     let wallet_usdc = wallet_of(env, &env.usdc, who.id()).await?;
-    let wallet_wnear = wallet_of(env, &env.wnear, who.id()).await.unwrap_or(0);
+    let wallet_wnear = wallet_of(env, &env.wnear, who.id()).await?;
     let claim_usdc = claimable(env, who, "Usdc").await?;
     let claim_wnear = claimable(env, who, "Wnear").await?;
 
@@ -382,19 +391,19 @@ pub async fn redeem(env: &Foundling, who: &Account, shares: u128) -> anyhow::Res
         .await?;
 
     let (usdc_after, wnear_after) = book(env).await?;
-    let in_wallet_usdc = wallet_of(env, &env.usdc, who.id()).await? - wallet_usdc;
-    let in_wallet_wnear = wallet_of(env, &env.wnear, who.id()).await.unwrap_or(0) - wallet_wnear;
+    let in_wallet_usdc = delta(wallet_usdc, wallet_of(env, &env.usdc, who.id()).await?);
+    let in_wallet_wnear = delta(wallet_wnear, wallet_of(env, &env.wnear, who.id()).await?);
     Ok(Redeemed {
         shares,
         expected_usdc: pro_rata(usdc_before),
         expected_wnear: pro_rata(wnear_before),
-        paid_usdc: in_wallet_usdc + claimable(env, who, "Usdc").await? - claim_usdc,
-        paid_wnear: in_wallet_wnear + claimable(env, who, "Wnear").await? - claim_wnear,
+        paid_usdc: in_wallet_usdc + delta(claim_usdc, claimable(env, who, "Usdc").await?),
+        paid_wnear: in_wallet_wnear + delta(claim_wnear, claimable(env, who, "Wnear").await?),
         in_wallet_usdc,
         in_wallet_wnear,
-        book_usdc_drop: usdc_before - usdc_after,
-        book_wnear_drop: wnear_before - wnear_after,
-        shares_drop: total_before - total_shares(env).await?,
+        book_usdc_drop: -delta(usdc_before, usdc_after),
+        book_wnear_drop: -delta(wnear_before, wnear_after),
+        shares_drop: -delta(total_before, total_shares(env).await?),
         failure: refused_text(&result),
     })
 }
@@ -405,8 +414,42 @@ pub struct Run {
     expected: &'static [&'static str],
     held: bool,
     steps: Vec<Value>,
-    observed: Vec<String>,
+    /// Behind a RefCell so `refused` can be called inside the arguments of `step`.
+    observed: RefCell<Vec<String>>,
     notes: Vec<Value>,
+    refusals: RefCell<Vec<String>>,
+}
+
+/// The panic codes of SPEC 3.7. A refusal that carries one is recorded as observed whether or not
+/// the step says so, so the registry's code list is checked against everything the run saw.
+const SPEC_PANIC_CODES: &[&str] = &[
+    "NOT_KEEPER",
+    "NOT_ALLOWED",
+    "NOT_IDLE",
+    "COOLDOWN",
+    "LOW_GAS",
+    "NOT_STUCK",
+    "TOO_EARLY",
+    "BAD_SALT",
+    "BAD_REVEAL",
+    "ALREADY_REVEALED",
+    "FROZEN",
+    "HALTED",
+];
+
+/// The message of a panic, or the kind of the error when it is not a panic.
+fn refusal_message(text: &str) -> String {
+    const PANIC: &str = "Smart contract panicked: ";
+    if let Some(start) = text.find(PANIC) {
+        let rest = &text[start + PANIC.len()..];
+        return rest.split('"').next().unwrap_or(rest).to_string();
+    }
+    for kind in ["MethodNotFound", "AccountDoesNotExist"] {
+        if text.contains(kind) {
+            return kind.to_string();
+        }
+    }
+    text.chars().take(80).collect()
 }
 
 impl Run {
@@ -416,17 +459,43 @@ impl Run {
             expected,
             held: true,
             steps: Vec::new(),
-            observed: Vec::new(),
+            observed: RefCell::new(Vec::new()),
             notes: Vec::new(),
+            refusals: RefCell::new(Vec::new()),
         }
+    }
+
+    fn record(&self, code: &str) {
+        let mut seen = self.observed.borrow_mut();
+        if !seen.iter().any(|known| known == code) {
+            seen.push(code.to_string());
+        }
+    }
+
+    /// The text of a refused call, `None` when it went through. Every SPEC 3.7 panic code in it
+    /// joins the observed codes, and any other message is listed in the proof as a refusal text.
+    pub fn refused(&self, result: &ExecutionFinalResult) -> Option<String> {
+        let text = refused_text(result)?;
+        let message = refusal_message(&text);
+        let codes: Vec<&str> = SPEC_PANIC_CODES
+            .iter()
+            .copied()
+            .filter(|code| message.contains(code))
+            .collect();
+        for code in &codes {
+            self.record(code);
+        }
+        let mut refusals = self.refusals.borrow_mut();
+        if codes.is_empty() && !refusals.contains(&message) {
+            refusals.push(message);
+        }
+        Some(text)
     }
 
     pub fn step(&mut self, label: &str, held: bool, observed: Option<&str>, detail: Value) {
         self.held &= held;
         if let Some(code) = observed {
-            if !self.observed.iter().any(|seen| seen == code) {
-                self.observed.push(code.to_string());
-            }
+            self.record(code);
         }
         self.steps
             .push(json!({"step": label, "held": held, "observed": observed, "detail": detail}));
@@ -462,8 +531,8 @@ impl Run {
         std::fs::create_dir_all(&dir)?;
         // A step can be right about its own condition and still have seen the wrong code, so
         // the codes are held to the registry's list on top of the steps.
-        let unexpected: Vec<&String> = self
-            .observed
+        let observed = self.observed.borrow().clone();
+        let unexpected: Vec<&String> = observed
             .iter()
             .filter(|code| !self.expected.contains(&code.as_str()))
             .collect();
@@ -474,7 +543,7 @@ impl Run {
             // web/lib/proof/sample.ts reads this: "PASS" shows as Pass, anything else as Fail.
             "result": if held { "PASS" } else { "FAIL" },
             "expected_codes": self.expected,
-            "observed_codes": self.observed,
+            "observed_codes": observed,
             "unexpected_codes": unexpected,
             "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
             "vault_wasm_sha256": format!("{:x}", Sha256::digest(&wasm)),
@@ -482,6 +551,7 @@ impl Run {
             "ledger_before": before,
             "ledger_after": after,
             "steps": self.steps,
+            "refusal_texts": self.refusals.borrow().clone(),
             "not_exercised": self.notes,
         });
         std::fs::write(

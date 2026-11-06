@@ -87,11 +87,7 @@ async fn double_redeem() -> anyhow::Result<()> {
     let (usdc_book, wnear_book) = book(&env).await?;
     let held = shares_of(&env, &env.alice).await?;
     anyhow::ensure!(
-        wnear_book > 0
-            && wallet_of(&env, &env.wnear, env.alice.id())
-                .await
-                .unwrap_or(0)
-                == 0,
+        wnear_book > 0 && wallet_of(&env, &env.wnear, env.alice.id()).await? == 0,
         "setup failed: the vault needs wNEAR, and alice must have none"
     );
     let total = total_shares(&env).await?;
@@ -114,7 +110,7 @@ async fn double_redeem() -> anyhow::Result<()> {
         vec![redeem_action(held), redeem_action(held)],
     )
     .await?;
-    let text = refused_text(&overdraw);
+    let text = run.refused(&overdraw);
     run.step(
         "redeem all shares twice in one batch",
         refusal(text.as_deref(), &["not enough shares"]).is_some()
@@ -168,7 +164,7 @@ async fn double_redeem() -> anyhow::Result<()> {
         "the wNEAR legs failed on an unregistered wallet and became claimable, exactly",
         count(&pair, "transfer_failed") == 2
             && claim_wnear == first_wnear + second_wnear
-            && wallet_of(&env, &env.wnear, env.alice.id()).await.unwrap_or(0) == 0
+            && wallet_of(&env, &env.wnear, env.alice.id()).await? == 0
             && claimable(&env, &env.alice, "Usdc").await? == 0
             && wallet_of(&env, &env.wnear, &env.vault_id).await? == wnear_after + claim_wnear,
         None,
@@ -185,7 +181,7 @@ async fn double_redeem() -> anyhow::Result<()> {
         json!({"shares": held.to_string()}),
     )
     .await?;
-    let text = refused_text(&again);
+    let text = run.refused(&again);
     run.step(
         "redeem the original share count again after the pair",
         refusal(text.as_deref(), &["not enough shares"]).is_some()
@@ -209,7 +205,7 @@ async fn double_redeem() -> anyhow::Result<()> {
     );
     let emptied = state(&env).await?;
     let extra = pay_call(&env, &env.alice, "redeem", json!({"shares": "1"})).await?;
-    let text = refused_text(&extra);
+    let text = run.refused(&extra);
     run.step(
         "one more share after everything was redeemed",
         refusal(text.as_deref(), &["not enough shares"]).is_some() && state(&env).await? == emptied,
@@ -255,7 +251,7 @@ async fn double_redeem() -> anyhow::Result<()> {
         vec![withdraw_action("Wnear"), withdraw_action("Wnear")],
     )
     .await?;
-    let text = refused_text(&twice);
+    let text = run.refused(&twice);
     run.step(
         "withdraw_claimable twice in one batch",
         refusal(text.as_deref(), &["nothing claimable"]).is_some()
@@ -292,7 +288,7 @@ async fn double_redeem() -> anyhow::Result<()> {
         json!({"token": "Wnear"}),
     )
     .await?;
-    let text = refused_text(&repeat);
+    let text = run.refused(&repeat);
     run.step(
         "claim again",
         refusal(text.as_deref(), &["nothing claimable"]).is_some() && state(&env).await? == settled,
@@ -322,11 +318,12 @@ fn foreign_callers(env: &Foundling) -> Vec<(&'static str, &Account)> {
 /// `#[private]` is enforced by the exported entry point of the WASM, so a unit test cannot see
 /// it (SPEC 3.5). Each callback is called from every foreign account, with arguments a real
 /// callback could carry, and the state must not move. The SDK refuses these with "Method X is
-/// private". The vault emits no NOT_ALLOWED anywhere, so that code is recorded as not exercised.
+/// private"; keeper-only methods read NOT_KEEPER; `ft_on_transfer` from another contract hands the
+/// whole amount back (SPEC 5 and the registry say exactly this).
 #[tokio::test]
 async fn forged_caller() -> anyhow::Result<()> {
     let env = attack_env(testnet_timing()).await?;
-    let mut run = Run::new("forged-caller", &["NOT_KEEPER", "NOT_ALLOWED"]);
+    let mut run = Run::new("forged-caller", &["NOT_KEEPER"]);
     let before = settle_deposit(&env).await?;
     let nonce: u64 = env.view_vault("last_nonce", json!({})).await?;
     run.context(
@@ -405,7 +402,7 @@ async fn forged_caller() -> anyhow::Result<()> {
     for (method, args) in &callbacks {
         for (who, account) in &private_callers {
             let result = env.call_vault(account, method, args.clone()).await?;
-            let text = refused_text(&result);
+            let text = run.refused(&result);
             if refusal(text.as_deref(), &["is private"]).is_some() {
                 refused.push(format!("{who}->{method}"));
             } else {
@@ -427,10 +424,11 @@ async fn forged_caller() -> anyhow::Result<()> {
         .await?;
     run.context(
         "control: a method that does not exist reads differently, so 'is private' is the guard and not a missing method",
-        json!({"text": refused_text(&missing).map(|t| t.contains("MethodNotFound"))}),
+        json!({"text": run.refused(&missing).map(|t| t.contains("MethodNotFound"))}),
     );
     anyhow::ensure!(
-        refused_text(&missing).is_some_and(|t| t.contains("MethodNotFound")),
+        run.refused(&missing)
+            .is_some_and(|t| t.contains("MethodNotFound")),
         "control failed: a missing method should read MethodNotFound"
     );
 
@@ -481,7 +479,7 @@ async fn forged_caller() -> anyhow::Result<()> {
     let mut slipped = Vec::new();
     for (who, account) in foreign_callers(&env) {
         let result = env.call_vault(account, "trigger_cycle", json!({})).await?;
-        let text = refused_text(&result);
+        let text = run.refused(&result);
         match refusal(text.as_deref(), &["NOT_KEEPER"]) {
             Some(_) => keeper_refusals.push(format!("{who}->trigger_cycle")),
             None => slipped.push(json!({"caller": who, "method": "trigger_cycle", "result": text})),
@@ -504,7 +502,7 @@ async fn forged_caller() -> anyhow::Result<()> {
         let result = env
             .call_vault(account, "execute_decision", json!({"nonce": ready_nonce}))
             .await?;
-        let text = refused_text(&result);
+        let text = run.refused(&result);
         match refusal(text.as_deref(), &["NOT_KEEPER"]) {
             Some(_) if !swapped(&result) => {
                 execute_refusals.push(format!("{who}->execute_decision"))
@@ -534,13 +532,6 @@ async fn forged_caller() -> anyhow::Result<()> {
         json!({"nonce": ready_nonce}),
     );
 
-    run.note(
-        "NOT_ALLOWED",
-        "the vault never emits NOT_ALLOWED. A #[private] callback called from outside is refused by the \
-         SDK with 'Method <name> is private', ft_on_transfer from another contract returns the amount \
-         unused, and the keeper methods panic with NOT_KEEPER. SPEC 3.7 and the registry list NOT_ALLOWED \
-         next to NOT_KEEPER for this attack",
-    );
     run.finish(&env, before, attacked)
 }
 
@@ -686,7 +677,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     {
         let value = as_policy(&policy0[field], amount(&policy0[field]) + delta);
         let result = tighten(&env, &env.governor, json!({ field: value })).await?;
-        let text = refused_text(&result);
+        let text = run.refused(&result);
         match refusal(text.as_deref(), &["POLICY_NOT_TIGHTER"]) {
             Some(_) => loosened.push(format!("{field}{delta:+}")),
             None => accepted.push(json!({"field": field, "delta": delta, "result": text})),
@@ -741,7 +732,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let mut passed = Vec::new();
     for (field, value) in &past {
         let result = tighten(&env, &env.governor, json!({ *field: value })).await?;
-        let text = refused_text(&result);
+        let text = run.refused(&result);
         match refusal(text.as_deref(), &["POLICY_BELOW_FLOOR"]) {
             Some(_) => stopped.push(json!({"field": field, "value": value})),
             None => passed.push(json!({"field": field, "value": value, "result": text})),
@@ -778,7 +769,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let mut not_refused = Vec::new();
     for change in &untouchable {
         let result = tighten(&env, &env.governor, change.clone()).await?;
-        if refusal(refused_text(&result).as_deref(), &["POLICY_NOT_TIGHTER"]).is_none() {
+        if refusal(run.refused(&result).as_deref(), &["POLICY_NOT_TIGHTER"]).is_none() {
             not_refused.push(change.clone());
         }
     }
@@ -799,7 +790,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
         ("alice", &env.alice),
     ] {
         let result = tighten(&env, account, valid.clone()).await?;
-        if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
+        if refusal(run.refused(&result).as_deref(), &["only governor"]).is_none() {
             wrong_caller.push(who);
         }
     }
@@ -899,7 +890,10 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let mut found = Vec::new();
     for method in nonexistent {
         let result = env.call_vault(&env.governor, method, json!({})).await?;
-        if !refused_text(&result).is_some_and(|t| t.contains("MethodNotFound")) {
+        if !run
+            .refused(&result)
+            .is_some_and(|t| t.contains("MethodNotFound"))
+        {
             found.push(method);
         }
     }
@@ -914,11 +908,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     let still_open = tighten(&env, &env.governor, json!({"open_deposits": true})).await?;
     run.step(
         "open_deposits: true while it is open",
-        refusal(
-            refused_text(&still_open).as_deref(),
-            &["POLICY_NOT_TIGHTER"],
-        )
-        .is_some()
+        refusal(run.refused(&still_open).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some()
             && state(&env).await? == start,
         None,
         json!({"refused_with": "POLICY_NOT_TIGHTER"}),
@@ -935,7 +925,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     anyhow::ensure!(late.is_success(), "ft_transfer_call: {}", failures(&late));
     run.step(
         "open_deposits: true after the governor closed it, and an unlisted deposit afterwards",
-        refusal(refused_text(&reopen).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some()
+        refusal(run.refused(&reopen).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some()
             && env.view_vault::<serde_json::Value>("policy", json!({})).await?["open_deposits"] == false
             && wallet_of(&env, &env.usdc, env.stranger.id()).await? == wallet
             && env.view_vault::<String>("pending_of", json!({"account": env.stranger.id()})).await? == "0",
@@ -954,7 +944,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
         )
         .await?;
     anyhow::ensure!(
-        refusal(refused_text(&by_guardian).as_deref(), &["only governor"]).is_some(),
+        refusal(run.refused(&by_guardian).as_deref(), &["only governor"]).is_some(),
         "guardian must not schedule"
     );
     let scheduled = env
@@ -971,7 +961,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
     );
     let apply_after = event_data(&scheduled, "keeper_change_scheduled")
         .and_then(|d| d["apply_after"].as_u64())
-        .unwrap_or(0);
+        .ok_or_else(|| anyhow::anyhow!("keeper_change_scheduled carries no apply_after"))?;
     let now_second = head_second(&env).await?;
     let early = env
         .call_vault(&env.stranger, "apply_keeper_change", json!({}))
@@ -981,7 +971,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
         "the governor schedules a new keeper, and anyone applies it at once",
         apply_after >= now_second + 60
             && apply_after <= now_second + 120
-            && refusal(refused_text(&early).as_deref(), &["TIMELOCK"]).is_some()
+            && refusal(run.refused(&early).as_deref(), &["TIMELOCK"]).is_some()
             && roles["keeper"] == env.keeper.id().to_string(),
         None,
         json!({"apply_after_within_the_timelock": true, "timelock": 120, "refused_with": "TIMELOCK", "keeper_still": roles["keeper"]}),
@@ -1002,7 +992,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
         env.view_vault::<serde_json::Value>("keeper_change", json!({}))
             .await?
             .is_null()
-            && refusal(refused_text(&gone).as_deref(), &["no change scheduled"]).is_some()
+            && refusal(run.refused(&gone).as_deref(), &["no change scheduled"]).is_some()
             && env
                 .view_vault::<serde_json::Value>("roles", json!({}))
                 .await?["keeper"]
@@ -1065,11 +1055,55 @@ async fn governor_loosen() -> anyhow::Result<()> {
     run.step(
         "four cuts down to 10% of the initial cap_usdc are accepted, one unit below and a repeat are not",
         walk.iter().all(|ok| *ok)
-            && refusal(refused_text(&below).as_deref(), &["POLICY_BELOW_FLOOR"]).is_some()
-            && refusal(refused_text(&again).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some()
+            && refusal(run.refused(&below).as_deref(), &["POLICY_BELOW_FLOOR"]).is_some()
+            && refusal(run.refused(&again).as_deref(), &["POLICY_NOT_TIGHTER"]).is_some()
             && amount(&final_policy["cap_usdc"]) == initial / 10,
         None,
         json!({"initial": initial.to_string(), "final": final_policy["cap_usdc"], "walk_accepted": walk}),
+    );
+
+    // 9. The floors and ceilings are the line, not one unit short of it: each parameter tightens
+    // exactly to its limit. A field moves on its own, so one policy is enough. cap_usdc was walked
+    // to its floor above.
+    let at = |field: &str, numerator: i128, denominator: i128| {
+        as_policy(
+            &policy0[field],
+            amount(&policy0[field]) * numerator / denominator,
+        )
+    };
+    let limits = [
+        ("cap_bps", at("cap_bps", 1, 10)),
+        ("epoch_cap_bps", at("epoch_cap_bps", 1, 10)),
+        ("epoch_cap_usdc", at("epoch_cap_usdc", 1, 10)),
+        ("cap_wnear", at("cap_wnear", 1, 10)),
+        ("epoch_cap_wnear", at("epoch_cap_wnear", 1, 10)),
+        ("cap_sell_bps", at("cap_sell_bps", 1, 10)),
+        ("max_risk_bps", at("max_risk_bps", 1, 10)),
+        ("tvl_cap", at("tvl_cap", 1, 10)),
+        ("per_user_cap", at("per_user_cap", 1, 10)),
+        ("slippage_bps", json!(50)),
+        ("price_max_age", json!(30)),
+        ("price_max_conf_bps", json!(10)),
+        ("ref_dev_bps", json!(50)),
+        ("ops_budget", at("ops_budget", 1, 4)),
+        ("cooldown", at("cooldown", 4, 1)),
+        ("min_deposit", at("min_deposit", 5, 1)),
+        ("max_mint_per_cycle", json!(1)),
+    ];
+    let mut turned_away = Vec::new();
+    for (field, value) in &limits {
+        let result = tighten(&env, &env.governor, json!({ *field: value })).await?;
+        let now: serde_json::Value = env.view_vault("policy", json!({})).await?;
+        if !result.is_success() || now[*field] != *value {
+            turned_away
+                .push(json!({"field": field, "value": value, "result": run.refused(&result)}));
+        }
+    }
+    run.step(
+        "every parameter tightens exactly to its floor or ceiling",
+        turned_away.is_empty(),
+        None,
+        json!({"checked": limits.len() + 1, "turned_away": turned_away, "cap_usdc": "reached by the walk above"}),
     );
 
     anyhow::ensure!(
@@ -1087,7 +1121,7 @@ async fn governor_loosen() -> anyhow::Result<()> {
 #[tokio::test]
 async fn kill_agent() -> anyhow::Result<()> {
     let env = attack_env(testnet_timing()).await?;
-    let mut run = Run::new("kill-agent", &[]);
+    let mut run = Run::new("kill-agent", &["NOT_KEEPER"]);
     settle_deposit(&env).await?;
     let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
     anyhow::ensure!(
@@ -1203,7 +1237,7 @@ async fn kill_agent() -> anyhow::Result<()> {
         let mut slipped = Vec::new();
         for (who, account) in foreign_callers(&env) {
             let result = env.call_vault(account, "trigger_cycle", json!({})).await?;
-            if refusal(refused_text(&result).as_deref(), &["NOT_KEEPER"]).is_none() {
+            if refusal(run.refused(&result).as_deref(), &["NOT_KEEPER"]).is_none() {
                 slipped.push(who);
             }
         }
@@ -1221,6 +1255,45 @@ async fn kill_agent() -> anyhow::Result<()> {
             json!({"refused_with": "NOT_KEEPER", "not_refused": slipped, "last_nonce": nonce_at_kill}),
         );
     }
+
+    // The role is an account id, and the account that created the id can create it again with a
+    // new key. That is not a defence of the vault; the step records what the revived keeper can do.
+    let books = balances(&env).await?;
+    let revived = env
+        .worker
+        .root_account()?
+        .create_subaccount("keeper")
+        .initial_balance(NearToken::from_near(5))
+        .transact()
+        .await?
+        .into_result()?;
+    anyhow::ensure!(
+        revived.id() == env.keeper.id(),
+        "setup failed: the id should be the deleted keeper's"
+    );
+    let comeback = env.call_vault(&revived, "trigger_cycle", json!({})).await?;
+    let can_trigger = comeback.is_success();
+    run.step(
+        "the keeper id created again by its parent starts a cycle: OutLayer is gone, so it fails and nothing trades",
+        !swapped(&comeback)
+            && stage(&env).await? == json!("Idle")
+            && balances(&env).await? == books
+            && (!can_trigger || code_of(event_data(&comeback, "cycle_failed")).is_some()),
+        None,
+        json!({"id": revived.id(), "triggered": can_trigger, "cycle_failed": code_of(event_data(&comeback, "cycle_failed")),
+               "refused": run.refused(&comeback)}),
+    );
+    run.note(
+        "KEEPER_ID_REUSE",
+        if can_trigger {
+            "FINDING: the vault binds the keeper role to an account id, so whoever controls the id's parent \
+             (or anyone, for a top-level id) can create it again after it is deleted and trigger cycles again. \
+             Cycles can still not trade without OutLayer, and the cap, cooldown and freeze limits still hold. \
+             Choose keeper ids whose parent the lead controls and say so in the threat model"
+        } else {
+            "the keeper id created again by its parent could not trigger a cycle"
+        },
+    );
 
     // The guardian freezes too, and the exit is still open.
     freeze(&env).await?;
@@ -1316,7 +1389,7 @@ async fn freeze_race() -> anyhow::Result<()> {
         ..Default::default()
     })
     .await?;
-    let mut run = Run::new("freeze-race", &["FROZEN"]);
+    let mut run = Run::new("freeze-race", &["FROZEN", "HALTED"]);
     settle_deposit(&env).await?;
     let bought = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
     anyhow::ensure!(
@@ -1338,7 +1411,7 @@ async fn freeze_race() -> anyhow::Result<()> {
     freeze(&env).await?;
     let at_freeze = state(&env).await?;
     let blocked = execute(&env, ready_nonce).await?;
-    let text = refused_text(&blocked);
+    let text = run.refused(&blocked);
     run.step(
         "the keeper executes a ready decision after the freeze",
         refusal(text.as_deref(), &["FROZEN"]).is_some() && !swapped(&blocked) && state(&env).await? == at_freeze,
@@ -1392,7 +1465,7 @@ async fn freeze_race() -> anyhow::Result<()> {
         failures(&expired)
     );
     let trigger = env.trigger_cycle().await?;
-    let text = refused_text(&trigger);
+    let text = run.refused(&trigger);
     run.step(
         "the keeper starts a cycle while frozen",
         refusal(text.as_deref(), &["FROZEN"]).is_some() && stage(&env).await? == json!("Idle"),
@@ -1406,7 +1479,7 @@ async fn freeze_race() -> anyhow::Result<()> {
         ("stranger", &env.stranger),
     ] {
         let result = env.call_vault(account, "unfreeze", json!({})).await?;
-        if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
+        if refusal(run.refused(&result).as_deref(), &["only governor"]).is_none() {
             cannot_open.push(who);
         }
     }
@@ -1513,7 +1586,7 @@ async fn freeze_race() -> anyhow::Result<()> {
         "alice claims that part once",
         claim_bucket(&env, hung_nonce).await?
             && wallet_of(&env, &env.usdc, &env.vault_id).await? == usdc_book
-            && !claim_bucket(&env, hung_nonce).await.unwrap_or(true),
+            && !claim_bucket(&env, hung_nonce).await?,
         None,
         json!({"nonce": hung_nonce}),
     );
@@ -1610,7 +1683,7 @@ async fn freeze_race() -> anyhow::Result<()> {
 
     // Only the governor reopens, and both locks have to be lifted.
     let trigger = env.trigger_cycle().await?;
-    let text = refused_text(&trigger);
+    let text = run.refused(&trigger);
     run.step(
         "the keeper starts a cycle while frozen and halted",
         refusal(text.as_deref(), &["FROZEN"]).is_some(),
@@ -1624,7 +1697,7 @@ async fn freeze_race() -> anyhow::Result<()> {
         ("stranger", &env.stranger),
     ] {
         let result = env.call_vault(account, "clear_halt", json!({})).await?;
-        if refusal(refused_text(&result).as_deref(), &["only governor"]).is_none() {
+        if refusal(run.refused(&result).as_deref(), &["only governor"]).is_none() {
             cannot_clear.push(who);
         }
     }
@@ -1637,7 +1710,7 @@ async fn freeze_race() -> anyhow::Result<()> {
     let opened = env.call_vault(&env.governor, "unfreeze", json!({})).await?;
     anyhow::ensure!(opened.is_success(), "{}", failures(&opened));
     let still_halted = env.trigger_cycle().await?;
-    let text = refused_text(&still_halted);
+    let text = run.refused(&still_halted);
     run.step(
         "unfrozen but still halted, the keeper starts a cycle",
         refusal(text.as_deref(), &["HALTED"]).is_some(),

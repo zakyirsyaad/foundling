@@ -30,20 +30,47 @@ def dry_run(target):
     return result.stdout
 
 
+def registry():
+    return json.loads((ROOT / "tools" / "attack-registry.json").read_text())["attacks"]
+
+
 class BatchRoutingTest(unittest.TestCase):
+    def test_the_registry_names_the_test_binary_of_every_scripted_attack_and_the_binary_has_the_test(self):
+        # A missed entry sends an attack to a binary where --exact matches nothing: no proof, ERROR.
+        for attack in registry():
+            name = attack["name"]
+            if not (ATTACKS / name).is_file():
+                continue
+            binary = attack.get("test_binary")
+            self.assertIsNotNone(binary, f"{name} has a script but no test_binary in the registry")
+            source = (ROOT / "sandbox" / "tests" / f"{binary}.rs").read_text()
+            self.assertIn(f"async fn {name.replace('-', '_')}()", source, name)
+
     def test_batch2_attacks_use_the_batch2_test_binary_and_batch1_keeps_its_own(self):
         for name in BATCH2:
             self.assertEqual(_sandbox.test_binary(name), "attacks_batch2", name)
         for name in BATCH1:
             self.assertEqual(_sandbox.test_binary(name), "attacks_batch1", name)
 
+    def test_an_entry_without_the_field_keeps_the_batch1_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tools").mkdir()
+            (Path(tmp) / "tools" / "attack-registry.json").write_text(
+                json.dumps({"attacks": [{"name": "over-cap", "codes": []}]})
+            )
+            self.assertEqual(_sandbox.test_binary("over-cap", tmp), "attacks_batch1")
+
     def test_the_batches_do_not_overlap_and_both_are_in_the_registry(self):
-        registry = {
-            a["name"] for a in json.loads((ROOT / "tools" / "attack-registry.json").read_text())["attacks"]
-        }
+        names = {a["name"] for a in registry()}
         self.assertFalse(set(BATCH1) & set(BATCH2))
-        self.assertTrue(set(BATCH1 + BATCH2) <= registry)
-        self.assertEqual(set(_sandbox.BATCH2), set(BATCH2))
+        self.assertTrue(set(BATCH1 + BATCH2) <= names)
+
+    def test_not_allowed_is_gone_from_the_spec_reason_codes_and_the_registry(self):
+        # The lead's decision on PR 43: the vault never emits it.
+        section = (ROOT / "docs" / "SPEC.md").read_text().split("### 3.7", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("NOT_ALLOWED", section)
+        for attack in registry():
+            self.assertNotIn("NOT_ALLOWED", json.dumps(attack), attack["name"])
 
     def test_cargo_is_asked_for_the_exact_batch2_test_named_after_the_attack(self):
         for name in BATCH2:
@@ -52,7 +79,7 @@ class BatchRoutingTest(unittest.TestCase):
                 (root / "sandbox").mkdir()
                 (root / "tools").mkdir()
                 (root / "tools" / "attack-registry.json").write_text(
-                    json.dumps({"attacks": [{"name": name, "codes": []}]})
+                    json.dumps({"attacks": [{"name": name, "codes": [], "test_binary": "attacks_batch2"}]})
                 )
                 for directory, file in WASM:
                     crate = root / "contracts" / directory

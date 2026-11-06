@@ -17,8 +17,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TEST_BINARY = "attacks_batch1"
-BATCH2 = ("kill-agent", "governor-loosen", "double-redeem", "forged-caller", "freeze-race")
-BATCH2_TEST_BINARY = "attacks_batch2"
 WASM = [
     ("vault", "foundling_vault"),
     ("mock-oracle", "mock_oracle"),
@@ -28,8 +26,14 @@ WASM = [
 ]
 
 
-def test_binary(name):
-    return BATCH2_TEST_BINARY if name in BATCH2 else TEST_BINARY
+def registry_entry(root, name):
+    attacks = json.loads((Path(root) / "tools" / "attack-registry.json").read_text())["attacks"]
+    return next(a for a in attacks if a["name"] == name)
+
+
+def test_binary(name, root=ROOT):
+    """The cargo test binary that holds the attack, from the registry; batch 1 has no field."""
+    return registry_entry(root, name).get("test_binary", TEST_BINARY)
 
 
 def proof_dir(root):
@@ -48,8 +52,7 @@ def fail(message):
 
 
 def registry_codes(root, name):
-    attacks = json.loads((root / "tools" / "attack-registry.json").read_text())["attacks"]
-    return next(a["codes"] for a in attacks if a["name"] == name)
+    return registry_entry(root, name)["codes"]
 
 
 def run(name, root=ROOT, cargo=("cargo",)):
@@ -67,11 +70,13 @@ def run(name, root=ROOT, cargo=("cargo",)):
     if stale:
         return fail(f"{name}: wasm older than its sources ({', '.join(stale)}); run `make wasm`")
 
+    try:
+        binary = test_binary(name, root)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as err:
+        return fail(f"{name}: cannot read its test binary from the registry: {err!r}")
     proof_path = proof_dir(root) / f"{name}.json"
     proof_path.unlink(missing_ok=True)
-    command = [
-        *cargo, "test", "--locked", "--test", test_binary(name), name.replace("-", "_"), "--", "--exact",
-    ]
+    command = [*cargo, "test", "--locked", "--test", binary, name.replace("-", "_"), "--", "--exact"]
     try:
         # cargo's output goes to stderr so stdout stays the dispatcher's status lines.
         code = subprocess.run(command, cwd=root / "sandbox", stdout=sys.stderr).returncode
