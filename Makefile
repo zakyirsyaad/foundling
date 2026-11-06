@@ -44,6 +44,7 @@ attack-lab-full: wasm
 attack-warm:
 	cd sandbox && cargo test --locked --test attacks_batch1 --no-run
 	cd sandbox && cargo test --locked --test attacks_batch2 --no-run
+	cd sandbox && cargo test --locked --test attacks_batch3 --no-run
 	cd sandbox && cargo test --locked --test setup_policy setup_policy_overrides_reach_the_vault_and_leave_the_rest_alone -- --exact
 
 # Regenerates the committed proofs/attack/reproducible/*.json (the evidence files claims.json points at) from a

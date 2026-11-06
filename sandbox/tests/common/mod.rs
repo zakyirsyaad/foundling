@@ -298,6 +298,41 @@ pub async fn freeze(env: &Foundling) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Tells the mock Ref to misbehave once, as its `Fault` enum names it.
+pub async fn set_fault(env: &Foundling, fault: &str) -> anyhow::Result<()> {
+    let result = env
+        .parent
+        .call(env.rhea.id(), "set_fault")
+        .args_json(json!({ "fault": fault }))
+        .transact()
+        .await?;
+    anyhow::ensure!(result.is_success(), "set_fault: {}", failures(&result));
+    Ok(())
+}
+
+pub async fn has_stage(env: &Foundling, key: &str) -> anyhow::Result<bool> {
+    Ok(stage(env).await?.get(key).is_some())
+}
+
+/// Polls the stage until it is `key`; a run that cannot get there is a tool error, not a verdict.
+pub async fn wait_for_stage(env: &Foundling, key: &str) -> anyhow::Result<()> {
+    for _ in 0..150 {
+        if has_stage(env, key).await? {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    anyhow::bail!("the vault never reached {key}: {}", stage(env).await?)
+}
+
+/// How many times `event` was logged in every receipt of `result`.
+pub fn event_count(result: &ExecutionFinalResult, event: &str) -> usize {
+    events(result)
+        .iter()
+        .filter(|e| e["event"] == event)
+        .count()
+}
+
 /// What one `redeem` did, against what the book said it should pay. Every delta is signed: a
 /// bug that grows the book, mints shares or shrinks a claim must show up as a wrong number in a
 /// step, which the proof records as a breach, and not as an underflow panic, which reads as a
@@ -343,7 +378,8 @@ impl Redeemed {
     }
 }
 
-fn delta(before: u128, after: u128) -> i128 {
+/// `after - before`, signed: a number a step can judge, not an underflow panic.
+pub fn delta(before: u128, after: u128) -> i128 {
     after as i128 - before as i128
 }
 
@@ -576,6 +612,10 @@ impl Run {
         std::fs::create_dir_all(&dir)?;
         // A step can be right about its own condition and still have seen the wrong code, so
         // the codes are held to the registry's list on top of the steps.
+        // Sorted, so a proof does not change with the order a race happened to deliver the refusals in.
+        let mut refusal_texts = self.refusals.borrow().clone();
+        refusal_texts.sort();
+        refusal_texts.dedup();
         let observed = self.observed.borrow().clone();
         let unexpected: Vec<&String> = observed
             .iter()
@@ -596,7 +636,7 @@ impl Run {
             "ledger_before": before,
             "ledger_after": after,
             "steps": self.steps,
-            "refusal_texts": self.refusals.borrow().clone(),
+            "refusal_texts": refusal_texts,
             "findings": self.findings,
             "not_exercised": self.notes,
         });

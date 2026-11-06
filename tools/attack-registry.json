@@ -90,29 +90,38 @@
       "expected": "`Rejected(OVER_ABS_CAP)` oleh cap absolut (I13)",
       "codes": [
         "OVER_ABS_CAP"
-      ]
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "deflated-sell",
       "expected": "`Rejected(OVER_ABS_CAP)` oleh `cap_wnear` dan `cap_sell_bps`",
       "codes": [
         "OVER_ABS_CAP"
-      ]
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "never-flat",
       "expected": "Vault kembali datar (`wnear_book` ≤ `dust_wnear`) dan deposit dicetak",
-      "codes": []
+      "codes": [],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "setup-spam",
       "expected": "Paling banyak satu per target; NEAR vault tidak turun di bawah `near_reserve`",
-      "codes": []
+      "codes": [
+        "NEAR_RESERVE"
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "advance-race",
       "expected": "Satu pengiriman ulang saja (kunci `Probing`); saldo Rhea cocok dengan `rhea_bal`",
-      "codes": []
+      "codes": [
+        "NOT_STUCK"
+      ],
+      "test_binary": "attacks_batch3"
     }
   ]
 }
