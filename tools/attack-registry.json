@@ -90,7 +90,8 @@
       "expected": "`Rejected(OVER_ABS_CAP)` oleh cap absolut (I13)",
       "codes": [
         "OVER_ABS_CAP"
-      ]
+      ],
+      "test_binary": "attacks_batch3"
     },
     {
       "name": "deflated-sell",
