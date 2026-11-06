@@ -241,7 +241,7 @@ Satu daftar kanonik dipakai kontrak, CLI, Attack Lab, dan `verify`. Event mengik
 | `CycleStarted{nonce}`, `Initialized{args_hash}`, `Decision{nonce, decision}`, `SwapStarted{nonce, token_in, amount_in, min_amount_out}`, `Minted`, `Redeemed`, `Claimed`, `Revealed{salt}`, `Frozen`, `Unfrozen`, `Halted`, `KeeperChange{Scheduled, Cancelled, Applied}`, `GuardianChange{Scheduled, Applied}` | - |
 | `CycleFailed{nonce, kode}` | `NULL_RESULT`, `REQUEST_FAILED`, `MALFORMED`, `OVERSIZE`, `COMMITMENT_MISMATCH`, `NONCE_MISMATCH`, `EXPIRED` |
 | `Hold{nonce}` | `NO_DECISION` |
-| `Rejected{nonce, kode}` | `FROZEN`, `HALTED`, `PRICE_UNAVAILABLE` (feed `null`; keeper boleh mencoba lagi sebelum keputusan kedaluwarsa), `PRICE_STALE` (hanya bila `publish_time` melampaui `price_max_age`), `PRICE_WIDE`, `PRICE_DEVIATION`, `ROUTE_NOT_ALLOWED`, `OVER_CAP`, `OVER_EPOCH_CAP`, `OVER_ABS_CAP`, `OVER_BOOK`, `EXPOSURE_LIMIT`, `BAD_DECISION` |
+| `Rejected{nonce, kode}` | `FROZEN`, `HALTED`, `PRICE_UNAVAILABLE` (feed `null`; keeper boleh mencoba lagi sebelum keputusan kedaluwarsa), `PRICE_STALE` (hanya bila `publish_time` melampaui `price_max_age`), `PRICE_WIDE`, `PRICE_DEVIATION`, `OVER_CAP`, `OVER_EPOCH_CAP`, `OVER_ABS_CAP`, `OVER_BOOK`, `EXPOSURE_LIMIT`, `BAD_DECISION` |
 | `SwapStep{nonce, langkah, jumlah}`, `Executed{nonce, amount_in, amount_out}`, `SwapReverted{nonce, amount}`, `Stuck{nonce, langkah}`, `Probing{nonce, attempt}` | - |
 | `Selftest{passed, kode}` | `SELFTEST_RESULTS`, `SELFTEST_POOL`, `SELFTEST_FEE`, `SELFTEST_DECIMALS`, atau kode harga dari `Rejected` |
 | Penolakan akses atau state (panic pada method) | `NOT_KEEPER`, `NOT_ALLOWED`, `NOT_IDLE`, `COOLDOWN`, `LOW_GAS`, `NOT_STUCK`, `TOO_EARLY`, `BAD_SALT`, `BAD_REVEAL`, `ALREADY_REVEALED` |
@@ -270,7 +270,7 @@ Nama perintah adalah antarmuka yang direncanakan; nama final ditetapkan di M1. T
 | `attack over-cap` | `amount_in` melebihi cap per keputusan | `Rejected(OVER_CAP)` |
 | `attack drip` | Banyak keputusan kecil melewati cooldown sampai total jendela bergulir melampaui `epoch_cap`, termasuk tepat di perbatasan dua jendela | `Rejected(OVER_EPOCH_CAP)` pada keputusan yang melewati batas |
 | `attack replay` | Nonce terpakai; keputusan kedaluwarsa; callback setelah freeze; `null` dari OutLayer | `NONCE_MISMATCH`, `EXPIRED`, `FROZEN`, atau `CycleFailed`; tanpa trade |
-| `attack bad-route` | Aset, pool, atau tujuan transfer di luar daftar terdaftar, termasuk alamat sodoran agent | `Rejected(ROUTE_NOT_ALLOWED)`; tujuan keluar tak terdaftar tidak ada jalurnya (I9) |
+| `attack bad-route` | Aset, pool, atau tujuan transfer di luar daftar terdaftar, termasuk alamat sodoran agent | Tidak ada jalur keluar: Decision v1 tidak punya field rute, aset, atau penerima; field sodoran agent diabaikan dan trade hanya lewat pool terdaftar (I9); aksi tak dikenal `CycleFailed(MALFORMED)` |
 | `attack stale-price` | Feed jangkar lebih tua dari `age` (oracle sungguhan mengembalikan `null`), atau mock yang menyuntikkan `publish_time` lama | `Rejected(PRICE_UNAVAILABLE)` (atau `PRICE_STALE` pada mock `publish_time`) |
 | `attack inflated-nav` | Harga jangkar (mock) digelembungkan agar cap bps longgar | `Rejected(OVER_ABS_CAP)` oleh cap absolut (I13) |
 | `attack deflated-sell` | Harga jangkar (mock) dikempiskan agar jual lebih banyak | `Rejected(OVER_ABS_CAP)` oleh `cap_wnear` dan `cap_sell_bps` |
@@ -445,7 +445,7 @@ README memuat tabel ini dengan angka dari parameter yang terpasang, dihitung oto
 | Governor bocor | Partner membekukan; lead menambah kunci baru di akun governor dan menghapus yang lama | Perlombaan kunci; vault baru |
 
 ### 9.3 Kontrak klaim README
-Setiap klaim di README punya tiga hal: bukti (berkas atau tx), perintah yang membuktikannya, dan status. Klaim tanpa ketiganya dihapus. Daftar klaim ditulis di `claims.json` (`id`, `claim`, `tracks`, `code_refs`, `test_refs`, `evidence`, `checks` dengan `tier`, `cmd`, `requires`, `network`, `seconds`, `expect`, lalu `status` dan `downgrade`; skema di `claims.schema.json`, dan `verify.py --json` memancarkan id yang sama) dengan paling banyak 12 klaim utama. `make verify` mencetak PASS, SKIP (dengan alasan), atau FAIL per klaim dan keluar 0 kecuali ada FAIL; `make verify-strict` (SKIP juga gagal) hanya dijalankan di CI. Satu baris palsu di `claims.json` menjadi judul bagi pemeriksa, jadi setiap klaim yang bergantung pada `[T]` punya teks downgrade yang siap dipakai bila spike gagal (Gate A). Contoh baris: "Cap membatasi tiap keputusan | `proofs/attack/over-cap.json` | `make attack-lab` | lulus di sandbox".
+Setiap klaim di README punya tiga hal: bukti (berkas atau tx), perintah yang membuktikannya, dan status. Klaim tanpa ketiganya dihapus. Daftar klaim ditulis di `claims.json` (`id`, `claim`, `tracks`, `code_refs`, `test_refs`, `evidence`, `checks` dengan `tier`, `cmd`, `requires`, `network`, `seconds`, `expect`, lalu `status` dan `downgrade`; skema di `claims.schema.json`, dan `verify.py --json` memancarkan id yang sama) dengan paling banyak 12 klaim utama. `make verify` mencetak PASS, SKIP (dengan alasan), atau FAIL per klaim dan keluar 0 kecuali ada FAIL; `make verify-strict` (SKIP juga gagal) hanya dijalankan di CI. Satu baris palsu di `claims.json` menjadi judul bagi pemeriksa, jadi setiap klaim yang bergantung pada `[T]` punya teks downgrade yang siap dipakai bila spike gagal (Gate A). Contoh baris: "Cap membatasi tiap keputusan | `proofs/attack/reproducible/over-cap.json` | `make attack-proofs` | lulus di sandbox pada build vault yang reproducible".
 
 **Teks peran di README (Inggris).** Tidak memakai kata *independent*, *multisig*, atau *two-person control*:
 
@@ -487,7 +487,7 @@ HACKATHON.md meminta README yang bisa dibaca mesin dan manusia, dengan langkah "
 | --- | --- | --- |
 | 0:00–0:12 | Vault di nearblocks, lalu `verify keys` | 0 access key; hash kode = build CI |
 | 0:12–0:40 | Siklus mainnet: vault membayar komputasi, enclave memutuskan, vault menukar di Rhea | `verify cycle`: baris PASS dan tx hash |
-| 0:40–1:05 | Vault Attack Lab (hash WASM lain, dana ≤5 USDC): `OVER_CAP`, `ROUTE_NOT_ALLOWED`, lalu churn sampai cap | kerugian prediksi (≤ batas) versus terukur |
+| 0:40–1:05 | Vault Attack Lab (hash WASM lain, dana ≤5 USDC): `OVER_CAP`, aksi tak dikenal `CycleFailed(MALFORMED)` dan pemeriksaan receipt I9 (tidak ada receipt di luar akun terdaftar), lalu churn sampai cap | kerugian prediksi (≤ batas) versus terukur |
 | 1:05–1:30 | Hentikan keeper, blokir OutLayer, freeze guardian, redeem tiga langkah | USDC dan wNEAR sampai in-kind |
 | 1:30–2:00 | `reveal`, lalu `verify replay`; dua keputusan rusak ditandai | `N/N reproduced` |
 | 2:00–2:15 | Repo dan baris "pihak yang dipercaya" | Intel, OutLayer, Rhea, Circle |

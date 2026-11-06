@@ -26,9 +26,9 @@
     },
     {
       "name": "bad-route",
-      "expected": "`Rejected(ROUTE_NOT_ALLOWED)`; tujuan keluar tak terdaftar tidak ada jalurnya (I9)",
+      "expected": "Tidak ada jalur keluar: Decision v1 tidak punya field rute, aset, atau penerima; field sodoran agent diabaikan dan trade hanya lewat pool terdaftar (I9); aksi tak dikenal `CycleFailed(MALFORMED)`",
       "codes": [
-        "ROUTE_NOT_ALLOWED"
+        "MALFORMED"
       ]
     },
     {

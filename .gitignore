@@ -14,6 +14,10 @@ target/
 node_modules/
 __pycache__/
 
+# Local Attack Lab runs record the hash of a non-reproducible wasm build. The proofs in
+# proofs/attack/reproducible/ come from a run on the reproducible build and are committed.
+proofs/attack/local/
+
 # Logs
 *.log
 keeper-soak.jsonl*

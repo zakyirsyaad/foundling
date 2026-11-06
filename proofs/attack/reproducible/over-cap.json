@@ -1,0 +1,113 @@
+{
+  "attack": "over-cap",
+  "expected_codes": [
+    "OVER_CAP"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "OVER_CAP"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "result": "PASS",
+  "steps": [
+    {
+      "detail": {
+        "amount_in": "7000000",
+        "cap": "2000000",
+        "ledger_unchanged": true,
+        "nonce": 2
+      },
+      "held": true,
+      "observed": "OVER_CAP",
+      "step": "7 USDC against a cap of 2 USDC"
+    },
+    {
+      "detail": {
+        "amount_in": "2000001",
+        "ledger_unchanged": true,
+        "nonce": 3
+      },
+      "held": true,
+      "observed": "OVER_CAP",
+      "step": "one unit over the cap"
+    },
+    {
+      "detail": {},
+      "held": true,
+      "observed": null,
+      "step": "stage back to Idle after both rejections"
+    },
+    {
+      "detail": {
+        "amount_in": "2000000",
+        "nonce": 4
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: exactly the cap is not rejected, so the line is the cap itself"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "c462445074f293532972a31352706fd56a6c8cf897301d13358e3b0903584d57",
+  "verdict": "held"
+}
