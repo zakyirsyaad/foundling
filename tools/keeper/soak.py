@@ -15,6 +15,7 @@ EXPECTED = {
 @dataclass
 class Summary:
     cycles: int = 0
+    untriggered: int = 0
     skips: int = 0
     call_failures: int = 0
     errors: int = 0
@@ -29,8 +30,20 @@ class Summary:
         return not self.unexpected and not self.malformed and self.cycles >= self.min_cycles
 
 
+def is_stuck(record):
+    return bool(record.get("stuck") or record.get("final_stage") == "Stuck")
+
+
+def is_untriggered(record):
+    """A cycle the bot found already running and took over: it has no transaction of its own, so
+    its outcome cannot be read and is `Unknown`. One it saw go Stuck is still a failure, and so is
+    one where a call of the bot failed: that is the bot's own problem, not someone else's cycle."""
+    return (bool(record.get("resumed")) and not record.get("txs") and not record.get("failed_calls")
+            and not is_stuck(record))
+
+
 def unexpected_reason(record):
-    if record.get("stuck") or record.get("final_stage") == "Stuck":
+    if is_stuck(record):
         return "Stuck"
     key = (record.get("result"), record.get("code"))
     if key in EXPECTED:
@@ -60,6 +73,9 @@ def summarize_log(lines, min_cycles=1):
         elif kind == "error":
             summary.errors += 1
         elif kind == "cycle":
+            if is_untriggered(record):
+                summary.untriggered += 1
+                continue
             summary.cycles += 1
             summary.price_retries += record.get("price_retries", 0)
             code = record.get("code")
@@ -71,15 +87,17 @@ def summarize_log(lines, min_cycles=1):
 
 
 def render(summary):
-    out = [f"Siklus: {summary.cycles}   skip: {summary.skips}   panggilan gagal: {summary.call_failures}"
-           f"   RPC gagal: {summary.errors}   PRICE_UNAVAILABLE diulang: {summary.price_retries}"]
+    out = [f"Cycles: {summary.cycles}   skips: {summary.skips}   failed calls: {summary.call_failures}"
+           f"   RPC errors: {summary.errors}   PRICE_UNAVAILABLE retried: {summary.price_retries}"]
     out += [f"  {name}: {count}" for name, count in sorted(summary.outcomes.items())]
+    if summary.untriggered:
+        out.append(f"Cycles the bot did not trigger (not counted, not judged): {summary.untriggered}")
     if summary.malformed:
-        out.append(f"Baris log rusak: {summary.malformed}")
+        out.append(f"Malformed log lines: {summary.malformed}")
     if summary.cycles < summary.min_cycles:
-        out.append(f"Siklus kurang dari minimum ({summary.cycles} < {summary.min_cycles})")
-    out += [f"Tak terduga: nonce {u['nonce']} {u['reason']}" for u in summary.unexpected]
+        out.append(f"Fewer cycles than the minimum ({summary.cycles} < {summary.min_cycles})")
+    out += [f"Unexpected: nonce {u['nonce']} {u['reason']}" for u in summary.unexpected]
     if summary.call_failures:
-        out.append(f"Peringatan: {summary.call_failures} panggilan gagal (lihat baris call_failed di log)")
-    out.append("Soak: LULUS" if summary.passed else "Soak: GAGAL")
+        out.append(f"Warning: failed calls: {summary.call_failures} (see the call_failed lines in the log)")
+    out.append("Soak: PASS" if summary.passed else "Soak: FAIL")
     return "\n".join(out)

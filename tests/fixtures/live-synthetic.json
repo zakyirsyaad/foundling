@@ -1,0 +1,42 @@
+{
+  "synthetic": true,
+  "note": "Hand-written values shaped like the answers of a NEAR RPC node and of the vault's view methods. No chain was read and no secret is in this file. The vault, chain, params, salt and commitment are those of proofs/commitment.json, so a revealed vault here opens its commitment.",
+  "vault": "vault.owner.near",
+  "network": "testnet",
+  "block": {
+    "height": 5000,
+    "hash": "22222222222222222222222222222222",
+    "timestamp_ns": 1700100000000000000
+  },
+  "code_hash_base58": "J79KMkCr76JGiEA7o9RLaF7oR3fKeV4o8sJUeWhR9PP3",
+  "code_hash_hex": "fe2990ecb80e483b922950bcb88aee14b37a42cf95fee0d9ff1c4ff026d70096",
+  "access_keys": [],
+  "views": {
+    "agent": {
+      "outlayer": "outlayer.test",
+      "wasm_url": "https://example.invalid/strategy.wasm",
+      "wasm_hash": "bb",
+      "secrets_profile": "synthetic",
+      "secrets_owner": "owner.test",
+      "outlayer_deposit": "50",
+      "chain": "testnet",
+      "commitment": "8838dc3c07993aa1f1488bbe99b5c55aafcc86de7445eaf35639f1dd21a4c2f4",
+      "reveal_after": 1700000000,
+      "max_instructions": 1000000,
+      "max_memory_mb": 64,
+      "build_target": "synthetic"
+    },
+    "reveal_after": 1700000000,
+    "revealed": "{\"buy_usdc\":\"1000\",\"prompt\":\"Classify the headlines.\",\"risk_off_below\":\"400000000\",\"risk_on_above\":\"420000000\",\"sell_wnear\":\"2000\",\"source_dev_bps\":\"100\"}",
+    "revealed_salt": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "last_nonce": 7,
+    "stage": "Idle",
+    "published_decision": "{\"action\":\"hold\",\"obs\":{\"synthetic\":true}}",
+    "ops_spent": "100",
+    "policy": {
+      "cooldown": 1800,
+      "epoch_len": 21600,
+      "cap_usdc": "15000000"
+    }
+  }
+}

@@ -184,7 +184,7 @@ class SummaryCommandTest(Workspace):
         good.write_text('{"kind":"cycle","nonce":1,"result":"Hold","code":"NO_DECISION"}\n')
         bad = self.path / "bad.jsonl"
         bad.write_text('{"kind":"cycle","nonce":1,"result":"Rejected","code":"OVER_CAP"}\n')
-        for path, code, word in ((good, 0, "LULUS"), (bad, 1, "GAGAL")):
+        for path, code, word in ((good, 0, "Soak: PASS"), (bad, 1, "Soak: FAIL")):
             out = io.StringIO()
             with mock.patch("sys.stdout", out):
                 self.assertEqual(main(["summary", str(path)], {}, io.StringIO()), code)
