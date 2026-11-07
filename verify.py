@@ -154,9 +154,19 @@ def keys_label(results):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="verify.py", description="Foundling tier 0a offline verifier")
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if "--live" in argv:
+        # Tier 1 reads a vault over the network, so its code lives in verify_live.py and is loaded
+        # only here: the offline path below never imports it and never opens a connection.
+        import verify_live
+        return verify_live.main([arg for arg in argv if arg != "--live"])
+    parser = argparse.ArgumentParser(
+        prog="verify.py", description="Foundling tier 0a offline verifier",
+        epilog="--live (tier 1, read-only RPC; see `python3 verify_live.py -h` for its options) replaces the offline checks.",
+    )
     parser.add_argument("check", nargs="?", choices=CHECK_NAMES, help="run one check (default: all)")
     parser.add_argument("--proofs", default=str(DEFAULT_PROOFS), help="fixture directory")
+    parser.add_argument("--strict", action="store_true", help="a SKIP also fails (exit 1)")
     args = parser.parse_args(argv)
 
     selected = [args.check] if args.check else list(CHECK_NAMES)
@@ -178,7 +188,7 @@ def main(argv=None):
     skipped = sum(r.status == "SKIP" for r in results)
     failed = sum(r.status == "FAIL" for r in results)
     print(f"SUMMARY pass={passed} skip={skipped} fail={failed} mode=offline keys={keys_label(results)}")
-    return EXIT_FAIL if failed else EXIT_OK
+    return EXIT_FAIL if failed or (args.strict and skipped) else EXIT_OK
 
 
 if __name__ == "__main__":
