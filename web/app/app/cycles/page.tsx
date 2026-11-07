@@ -7,8 +7,11 @@ import { getSnapshot } from "@/lib/chain/source";
 import { fallbackCycles, historyPendingText } from "@/lib/cycles/fallback";
 import { filterCycles } from "@/lib/cycles/outcome";
 import { type CycleFilter, createHistoryClient } from "@/lib/history/client";
+import { PAGE_SEO } from "@/content/seo";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Cycles · Foundling" };
+/** The canonical drops ?filter and ?cursor, so every page of the list counts as one URL. */
+export const metadata: Metadata = pageMetadata(PAGE_SEO.cycles);
 export const dynamic = "force-dynamic";
 
 const FILTERS = new Set<CycleFilter>(["all", "executed", "hold", "other"]);

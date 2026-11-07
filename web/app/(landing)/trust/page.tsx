@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 
 import { TrustView } from "@/features/trust/TrustView";
 import { getSnapshot } from "@/lib/chain/source";
+import { PAGE_SEO } from "@/content/seo";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Trust · Foundling" };
+export const metadata: Metadata = pageMetadata(PAGE_SEO.trust);
 export const revalidate = 45;
 
 export default async function TrustPage() {

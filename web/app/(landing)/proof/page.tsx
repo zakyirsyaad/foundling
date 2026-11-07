@@ -6,8 +6,10 @@ import { getSnapshot } from "@/lib/chain/source";
 import { proofFacts, unreadableFacts } from "@/lib/proof/facts";
 import { readLocalProofs } from "@/lib/proof/local";
 import { REPO_ROOT, attackRows } from "@/lib/proof/sample";
+import { PAGE_SEO } from "@/content/seo";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Proof · Foundling" };
+export const metadata: Metadata = pageMetadata(PAGE_SEO.proof);
 export const revalidate = 45;
 
 export default async function ProofPage() {

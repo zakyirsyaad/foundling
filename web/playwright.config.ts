@@ -16,6 +16,7 @@ const testEnv = {
   NEXT_PUBLIC_WNEAR_ID: "wrap.testnet",
   NEXT_PUBLIC_TEST_BUILD: "1",
   NEXT_PUBLIC_SAMPLE: "m12",
+  NEXT_PUBLIC_SITE_URL: `http://localhost:${PORT}`,
   FOUNDLING_CACHE_SECONDS: "0",
 };
 
@@ -29,6 +30,7 @@ const mainnetEnv = {
   NEXT_PUBLIC_ONECLICK_URL: `${MOCK}/1click`,
   NEXT_PUBLIC_ONECLICK_KEY: TEST_ONECLICK_KEY,
   NEXT_PUBLIC_ONECLICK_CHAINS: "base,arb,eth",
+  NEXT_PUBLIC_SITE_URL: `http://localhost:${MAINNET_PORT}`,
   FOUNDLING_CACHE_SECONDS: "0",
   FOUNDLING_DIST_DIR: ".next-mainnet",
 };

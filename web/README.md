@@ -46,10 +46,13 @@ Only public configuration; the site holds no secrets.
 | `NEXT_PUBLIC_API_ORIGIN` | `https://api.<domain>` (optional) | optional |
 | `NEXT_PUBLIC_USDC_ID`, `NEXT_PUBLIC_WNEAR_ID` | not allowed (pinned) | the mock tokens |
 | `NEXT_PUBLIC_SAMPLE` | empty for the final vault | `m12` to show the labelled rehearsal sample |
+| `NEXT_PUBLIC_SITE_URL` | `https://<domain>` (required) | the testnet URL (optional) |
+
+`NEXT_PUBLIC_SITE_URL` feeds canonical links, Open Graph and the sitemap. Only the mainnet production deploy is indexed: testnet, Vercel previews and test builds send `noindex` and a `robots.txt` that blocks every crawler.
 
 USDC, USDC.e, wNEAR, the 1Click URL, the pinned 1Click quote key and the origin chains are in `config/networks/mainnet.json`. Each origin chain stays `enabled: false` until its SP4 test passes; the lead flips it.
 
-A production build refuses to start without the repo-root `claims.json` (SPEC §9.3) and with `TBD` left in `content/terms.json`.
+A production build refuses to start without the repo-root `claims.json` (SPEC §9.3), with `TBD` left in `content/terms.json`, or, on mainnet, without `NEXT_PUBLIC_SITE_URL`.
 
 ## Deploy
 
