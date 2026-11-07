@@ -1010,34 +1010,27 @@ async fn advance_race() -> anyhow::Result<()> {
         + event_count(&masked_original, "swap_reverted");
     let (usdc_post, wnear_post) = book(&masked).await?;
     let (ref_usdc, ref_wnear) = rhea_holds(&masked).await?;
-    let outcome = match (executed_events, reverted_events) {
-        (1, 0) => "executed",
-        (0, 1) => "swap_reverted",
-        _ => "something else",
-    };
     run.step(
-        "a donation of the input token at Ref, as large as the swap, while the answer is in flight: the swap ends one way, the ledger is empty, the wallets equal the books and the USDC book does not rise",
-        outcome != "something else"
+        "SPEC 3.4 item 8: a donation of the input token at Ref, as large as the swap, after the swap landed: the vault unwinds from the donation, the books stay closed and the output stays at Ref",
+        reverted_events == 1
+            && executed_events == 0
             && stage(&masked).await? == json!("Idle")
+            && (usdc_post, wnear_post) == (usdc_pre, wnear_pre)
+            && (ref_usdc, ref_wnear) == (0, amount_out)
             && rhea_ledger(&masked).await? == (0, 0)
             && wallet_of(&masked, &masked.usdc, &masked.vault_id).await? == usdc_post
-            && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post
-            && usdc_post <= usdc_pre,
+            && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post,
         None,
-        json!({"outcome": outcome, "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
+        json!({"swap_reverted_events": reverted_events, "executed_events": executed_events,
+               "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
                "book_after": {"usdc": usdc_post.to_string(), "wnear": wnear_post.to_string()},
-               "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()}}),
+               "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()},
+               "amount_out": amount_out.to_string()}),
     );
-    run.finding(
-        "DONATION_MASKS_A_LANDED_SWAP",
-        &format!(
-            "With the swap landed and its answer in flight, a donation of 1 USDC at Ref (the swap's size) was added to the vault's \
-             account there before advance. advance ended the swap as {outcome}. Book (USDC/wNEAR) {usdc_pre}/{wnear_pre} -> \
-             {usdc_post}/{wnear_post}; Ref holds {ref_usdc}/{ref_wnear} for the vault and the vault's ledger is empty. \
-             Tokens are conserved, the wallets equal the books and the USDC book does not rise. Where the outcome is swap_reverted, \
-             recovery read the donation as the swap's input: the real output stays at Ref and in no book, and the donor's USDC took \
-             its place in the book. That is a loss of the output for a gift of the same value, not a way to raise the share price."
-        ),
+    run.note(
+        "DONATION_AFTER_THE_SWAP",
+        "The vault ends the swap as swap_reverted, as SPEC 3.4 item 8 says: the donor's USDC takes the swap's place, the books \
+         stay closed, and the real output stays at Ref and in no book. Holders lose nothing; the donor's gift is lost with the output.",
     );
     run.note(
         "LEDGER",
