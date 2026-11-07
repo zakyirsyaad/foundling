@@ -7,7 +7,7 @@ import { Status } from "@/components/fm/Status";
 import { splitFirstSentence } from "@/lib/format/text";
 import { type Fact, base58ToHex } from "@/lib/proof/facts";
 import type { SnapshotSource } from "@/lib/proof/local";
-import type { AttackRow } from "@/lib/proof/sample";
+import { type AttackRow, attackBuilds } from "@/lib/proof/sample";
 
 const CANNOT_SHOW = [
   "That the strategy is correct or makes money. Attestation shows which code ran, not that it is good.",
@@ -30,7 +30,7 @@ export function ProofView({ source, facts, attacks, synthetic }: { source: Snaps
       </section>
       <StatStrip source={source} />
       <Facts facts={facts} />
-      <AttackLab attacks={attacks} />
+      <AttackLab attacks={attacks} liveHex={source ? base58ToHex(source.snapshot.account.codeHash) : null} />
       <CannotShow />
       <section className="section">
         <div className="wrap grid gap-6">
@@ -114,7 +114,23 @@ function Facts({ facts }: { facts: Fact[] }) {
   );
 }
 
-function AttackLab({ attacks }: { attacks: AttackRow[] }) {
+/** Which vault build the results ran on, so a Pass is never read as a check of code it did not test. */
+function AttackBuild({ attacks, liveHex }: { attacks: AttackRow[]; liveHex: string | null }) {
+  const { builds, matchesLive } = attackBuilds(attacks, liveHex);
+  if (builds.length === 0) return null;
+  const tail = matchesLive === true ? ", the code this vault reports." : matchesLive === false ? ". That is not the code this vault reports, so these results describe the tested build." : ".";
+  return (
+    <p data-testid="attack-build" className="fm-small">
+      Ran on vault build{builds.length > 1 ? "s" : ""}{" "}
+      {builds.map((b, i) => (
+        <span key={b}>{i > 0 ? ", " : null}<span className="mono break-all">sha256 {b}</span></span>
+      ))}
+      {tail}
+    </p>
+  );
+}
+
+function AttackLab({ attacks, liveHex }: { attacks: AttackRow[]; liveHex: string | null }) {
   return (
     <section aria-labelledby="attack-lab" className="section">
       <div className="wrap stack gap-8">
@@ -139,13 +155,16 @@ function AttackLab({ attacks }: { attacks: AttackRow[] }) {
                 <tr key={a.name}>
                   <td data-label="Attack" className="mono whitespace-nowrap">{a.name}</td>
                   <td data-label="Expected">{a.expected}</td>
-                  <td data-label="Sandbox" className="whitespace-nowrap">{a.result === "Not run yet" ? <span className="text-muted-foreground">{a.result}</span> : <Status group="proof" word={a.result} />}</td>
+                  <td data-label="Sandbox" className="whitespace-nowrap">{a.result === "Pass" || a.result === "Fail" ? <Status group="proof" word={a.result} /> : <span className="text-muted-foreground">{a.result}</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="fm-small">Pass means the contract refused the attack or the exit still worked.</p>
+        <div className="stack gap-1">
+          <p className="fm-small">Pass means the contract refused the attack or the exit still worked. A result shows once its proof is committed from the reproducible build.</p>
+          <AttackBuild attacks={attacks} liveHex={liveHex} />
+        </div>
       </div>
     </section>
   );

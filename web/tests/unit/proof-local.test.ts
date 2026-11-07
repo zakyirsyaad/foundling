@@ -59,7 +59,7 @@ test("base58 decodes with leading zero bytes kept", () => {
 import fs from "node:fs";
 import os from "node:os";
 import { unreadableFacts } from "@/lib/proof/facts";
-import { attackRows, expectedLine } from "@/lib/proof/sample";
+import { attackBuilds, attackRows, expectedLine } from "@/lib/proof/sample";
 
 test("an unreadable vault still lists the four facts, each with a command that reads the chain", () => {
   const facts = unreadableFacts("vault.foundling.testnet", "testnet");
@@ -78,23 +78,47 @@ test("every Attack Lab row reads in English, one line per registry attack", () =
   expect(rows.find((r) => r.name === "drip")!.expected).toBe("Rejected(OVER_EPOCH_CAP) on the decision that crosses the limit");
 });
 
-test("Attack Lab results come from the proofs committed from the reproducible build", () => {
-  const rows = attackRows();
-  const committed = fs.readdirSync(path.join(repoRoot, "proofs", "attack", "reproducible")).filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, ""));
+test("each committed reproducible proof shows its own result and the vault build it ran on", () => {
+  const dir = path.join(repoRoot, "proofs", "attack", "reproducible");
+  const committed = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   expect(committed.length).toBeGreaterThan(0);
-  for (const name of committed) expect(rows.find((r) => r.name === name)?.result, name).toBe("Pass");
-  expect(rows.filter((r) => r.result === "Not run yet").map((r) => r.name).sort()).toEqual(rows.map((r) => r.name).filter((n) => !committed.includes(n)).sort());
+  const rows = attackRows();
+  for (const f of committed) {
+    const proof = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as { result: string; vault_wasm_sha256: string };
+    const row = rows.find((r) => r.name === f.replace(/\.json$/, ""));
+    expect(row?.result, f).toBe(proof.result === "PASS" ? "Pass" : "Fail");
+    expect(row?.build, f).toBe(proof.vault_wasm_sha256);
+  }
+  const names = committed.map((f) => f.replace(/\.json$/, ""));
+  expect(rows.filter((r) => r.result === "No proof committed").map((r) => r.name).sort()).toEqual(rows.map((r) => r.name).filter((n) => !names.includes(n)).sort());
 });
 
-test("a proof that did not pass shows Fail, and an attack without a proof shows Not run yet", () => {
+test("a FAIL proof shows Fail, a missing one says no proof is committed, and one bad file only marks its own row", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "attack-proofs-"));
-  fs.writeFileSync(path.join(dir, "over-cap.json"), JSON.stringify({ attack: "over-cap", result: "PASS" }));
-  fs.writeFileSync(path.join(dir, "drip.json"), JSON.stringify({ attack: "drip", result: "FAIL" }));
-  const rows = attackRows(dir);
-  expect(rows.find((r) => r.name === "over-cap")?.result).toBe("Pass");
-  expect(rows.find((r) => r.name === "drip")?.result).toBe("Fail");
-  expect(rows.find((r) => r.name === "replay")?.result).toBe("Not run yet");
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    fs.writeFileSync(path.join(dir, "over-cap.json"), JSON.stringify({ attack: "over-cap", result: "PASS", vault_wasm_sha256: "ab".repeat(32) }));
+    fs.writeFileSync(path.join(dir, "drip.json"), JSON.stringify({ attack: "drip", result: "FAIL" }));
+    fs.writeFileSync(path.join(dir, "replay.json"), "{\"attack\": \"replay\", \"res");
+    const rows = attackRows(dir);
+    expect(rows).toHaveLength(attackRows().length);
+    expect(rows.find((r) => r.name === "over-cap")).toMatchObject({ result: "Pass", build: "ab".repeat(32) });
+    expect(rows.find((r) => r.name === "drip")).toMatchObject({ result: "Fail", build: null });
+    expect(rows.find((r) => r.name === "replay")).toMatchObject({ result: "Proof unreadable", build: null });
+    expect(rows.find((r) => r.name === "bad-route")).toMatchObject({ result: "No proof committed", build: null });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the tested builds are listed once each, and compared with the code the vault reports", () => {
+  const a = "aa".repeat(32);
+  const b = "bb".repeat(32);
+  const row = (build: string | null) => ({ name: "x", expected: "", result: "Pass" as const, build });
+  expect(attackBuilds([row(a), row(a), row(null)], a)).toEqual({ builds: [a], matchesLive: true });
+  expect(attackBuilds([row(a)], b)).toEqual({ builds: [a], matchesLive: false });
+  expect(attackBuilds([row(a), row(b)], a)).toEqual({ builds: [a, b], matchesLive: false });
+  expect(attackBuilds([row(a)], null)).toEqual({ builds: [a], matchesLive: null });
+  expect(attackBuilds([row(null)], a)).toEqual({ builds: [], matchesLive: null });
 });
 
 test("an attack without an English line shows its codes, and never a blank cell or a crash", () => {

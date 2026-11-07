@@ -10,7 +10,7 @@ import { splitFirstSentence } from "@/lib/format/text";
 import { ProofView } from "@/features/proof/ProofView";
 import { TrustView } from "@/features/trust/TrustView";
 import { loadClaims } from "@/lib/claims";
-import { proofFacts, unreadableFacts } from "@/lib/proof/facts";
+import { base58ToHex, proofFacts, unreadableFacts } from "@/lib/proof/facts";
 import { fixtureSnapshot } from "../fixtures/snapshot";
 
 vi.mock("next-themes", () => ({ useTheme: () => ({ theme: "system", setTheme: vi.fn() }) }));
@@ -54,11 +54,27 @@ test("ProofView lists facts, attacks and the unprovable", async () => {
   const snapshot = await fixtureSnapshot({}, 1);
   const source = { kind: "sample" as const, label: "Testnet rehearsal vault (m12)", snapshot };
   const facts = proofFacts(source, { synthetic: true, commitment: null, accessKeys: 0 }, "testnet");
-  render(<ProofView source={source} facts={facts} attacks={[{ name: "over-cap", expected: "Rejected(OVER_CAP)", result: "Not run yet" }]} synthetic />);
+  render(<ProofView source={source} facts={facts} attacks={[{ name: "over-cap", expected: "Rejected(OVER_CAP)", result: "No proof committed", build: null }]} synthetic />);
+  expect(screen.getByRole("cell", { name: "No proof committed" })).toBeInTheDocument();
   expect(screen.getByTestId("proof-source")).toHaveTextContent("Testnet rehearsal vault (m12)");
   expect(screen.getAllByRole("button", { name: "Copy command" })).toHaveLength(4);
   expect(screen.getByRole("cell", { name: "over-cap" })).toBeInTheDocument();
   expect(screen.getByText(/They test the checker, not this vault/)).toBeInTheDocument();
+});
+test("the Attack Lab names the vault build it ran on, and says when that is not the code the vault reports", async () => {
+  const snapshot = await fixtureSnapshot({}, 1);
+  const source = { kind: "sample" as const, label: "Testnet rehearsal vault (m12)", snapshot };
+  const facts = proofFacts(source, { synthetic: true, commitment: null, accessKeys: 0 }, "testnet");
+  const live = base58ToHex(snapshot.account.codeHash)!;
+  const other = "cd".repeat(32);
+  const pass = (build: string) => [{ name: "over-cap", expected: "Rejected(OVER_CAP)", result: "Pass" as const, build }];
+  const { unmount } = render(<ProofView source={source} facts={facts} attacks={pass(other)} synthetic />);
+  expect(screen.getByTestId("attack-build")).toHaveTextContent(`sha256 ${other}`);
+  expect(screen.getByTestId("attack-build")).toHaveTextContent(/not the code this vault reports/);
+  unmount();
+  render(<ProofView source={source} facts={facts} attacks={pass(live)} synthetic />);
+  expect(screen.getByTestId("attack-build")).toHaveTextContent(/the code this vault reports/);
+  expect(screen.getByTestId("attack-build")).not.toHaveTextContent(/not the code/);
 });
 test("ProofView without a source says the vault is not readable and still offers the four commands", () => {
   render(<ProofView source={null} facts={unreadableFacts("vault.foundling.testnet", "testnet")} attacks={[]} synthetic={false} />);
