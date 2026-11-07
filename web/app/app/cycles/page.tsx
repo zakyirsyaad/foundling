@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { config } from "@/config";
-import { CycleFilterBar, CycleMap, CyclePager, CycleTable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
+import { CycleFilterBar, CycleMap, CyclePager, CycleTable, OlderPageUnreadable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
 import { createRpcClient } from "@/lib/chain/rpc";
 import { getSnapshot } from "@/lib/chain/source";
 import { fallbackCycles, historyPendingText } from "@/lib/cycles/fallback";
@@ -34,6 +34,14 @@ export default async function CyclesPage({ searchParams }: { searchParams: Promi
         </div>
         <CycleTable rows={rows} />
         <CyclePager filter={filter} next={history.cursor} paged={cursor !== undefined} />
+      </div>
+    );
+  }
+  if (cursor) {
+    return (
+      <div className="grid gap-6">
+        <h1 className="text-2xl font-semibold tracking-[-0.02em]">Cycles</h1>
+        <OlderPageUnreadable filter={filter} />
       </div>
     );
   }

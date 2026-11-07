@@ -2,8 +2,9 @@ import Link from "next/link";
 
 import { CopyButton } from "@/components/fm/CopyButton";
 import { truncateMiddle } from "@/components/fm/Hash";
+import { Stat } from "@/components/fm/Stat";
 import { Status } from "@/components/fm/Status";
-import { splitFirstSentence } from "@/features/landing/Home";
+import { splitFirstSentence } from "@/lib/format/text";
 import { type Fact, base58ToHex } from "@/lib/proof/facts";
 import type { SnapshotSource } from "@/lib/proof/local";
 import type { AttackRow } from "@/lib/proof/sample";
@@ -47,14 +48,9 @@ export function ProofView({ source, facts, attacks, synthetic }: { source: Snaps
   );
 }
 
-function Stat({ label, value, meta }: { label: string; value: string; meta: string }) {
-  return (
-    <div className="fm-stat">
-      <span className="fm-label">{label}</span>
-      <span className="fm-stat-value" title={value}>{truncateMiddle(value)}</span>
-      <span className="fm-small [overflow-wrap:anywhere]">{meta}</span>
-    </div>
-  );
+/** A hash cut in the middle, with the full value on hover. */
+function Short({ value }: { value: string }) {
+  return <span title={value}>{truncateMiddle(value)}</span>;
 }
 
 function StatStrip({ source }: { source: SnapshotSource | null }) {
@@ -72,11 +68,11 @@ function StatStrip({ source }: { source: SnapshotSource | null }) {
     <section aria-label="The vault right now" className="border-t py-8">
       <div className="wrap grid gap-3">
         <div className="stat-strip">
-          <Stat label="Access keys" value={s.accessKeys.toString()} meta={s.vaultId} />
-          <Stat label="Vault code hash" value={base58ToHex(s.account.codeHash) ?? s.account.codeHash} meta="sha256 of the deployed code" />
-          <Stat label="Strategy WASM hash" value={s.agent.wasmHash} meta="Pinned in the vault" />
-          <Stat label="Commitment" value={s.agent.commitment} meta="Hash of the sealed parameters" />
-          <Stat label="Parameters" value={s.revealed ? "Revealed" : "Sealed"} meta={s.revealed ? "Anyone can replay the rules" : "Not revealed yet"} />
+          <Stat label="Access keys" value={s.accessKeys.toString()} sub={s.vaultId} />
+          <Stat label="Vault code hash" value={<Short value={base58ToHex(s.account.codeHash) ?? s.account.codeHash} />} sub="sha256 of the deployed code" />
+          <Stat label="Strategy WASM hash" value={<Short value={s.agent.wasmHash} />} sub="Pinned in the vault" />
+          <Stat label="Commitment" value={<Short value={s.agent.commitment} />} sub="Hash of the sealed parameters" />
+          <Stat label="Parameters" value={s.revealed ? "Revealed" : "Sealed"} sub={s.revealed ? "Anyone can replay the rules" : "Not revealed yet"} />
         </div>
         <p data-testid="proof-source" className="fm-small mono">
           {source.kind === "sample" ? source.label : "Live vault"} · <span className="break-all">{s.vaultId}</span> · as of block #{s.blockHeight.toString()}

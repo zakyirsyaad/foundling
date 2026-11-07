@@ -39,7 +39,6 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
   const busy = state.kind === "awaiting-wallet";
   if (!s) return loading ? <LoadingBlock rows={4} label="Reading the vault" /> : <VaultBanner s={null} unreadable />;
   const gate = depositGate(s, p, unreadable);
-  // Shown in the deposit column once a position is read; on its own otherwise, as before.
   const crossChain = slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy, ctx, gasPrice }) : null;
   return (
     <div className="grid gap-6">
@@ -67,16 +66,16 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
             ) : null}
           </Positions>
           <TxStatus state={state} />
-          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-            <div className="grid gap-6">
-              {ctx ? <DepositForm s={s} p={p} gasPrice={gasPrice} reasons={gate.reasons} ctx={ctx} network={config.network} busy={busy} onSubmit={(steps) => run(steps)} /> : null}
-              {crossChain}
-            </div>
-            <div className="grid gap-6">{ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy, gasPrice }) : null}</div>
-          </div>
         </>
       )}
-      {account && p ? null : crossChain}
+      {/* Always rendered, so the cross-chain card keeps one place in the tree and its state while the position re-reads. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <div className="grid gap-6">
+          {account && p && ctx ? <DepositForm s={s} p={p} gasPrice={gasPrice} reasons={gate.reasons} ctx={ctx} network={config.network} busy={busy} onSubmit={(steps) => run(steps)} /> : null}
+          {crossChain}
+        </div>
+        <div className="grid gap-6">{account && p && ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy, gasPrice }) : null}</div>
+      </div>
     </div>
   );
 }

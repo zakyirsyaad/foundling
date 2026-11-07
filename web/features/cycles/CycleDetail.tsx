@@ -1,13 +1,13 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 
+import { Card } from "@/components/fm/Card";
 import { CopyButton } from "@/components/fm/CopyButton";
 import { shellQuote } from "@/lib/format/shell";
 import { Hash } from "@/components/fm/Hash";
 import { Status } from "@/components/fm/Status";
 import type { Network } from "@/config/deployment";
 import type { CycleRow, ProofResult } from "@/lib/history/client";
-import { cycleWord } from "@/lib/cycles/outcome";
+import { type EventMark, cycleWord, eventMark } from "@/lib/cycles/outcome";
 import { proofWord, replayWord } from "@/lib/proof/tally";
 
 /** Shell-safe, like TRIGGER_TX: a `<…>` placeholder would be read as a redirect. */
@@ -18,13 +18,14 @@ function verifyCommand(network: Network, vaultId: string, tx: string | undefined
   return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
 }
 
-/** The design's card: the h2 is the head row and the body follows it directly, so `#id + ol` still finds the list. */
-function Card({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+const MARK_PATH: Record<EventMark, string> = { done: "M20 6 9 17l-5-5", stop: "M18 6 6 18M6 6l12 12", wait: "M5 12h14" };
+
+/** A filled check for a step that went through; an outlined cross or dash for a refusal, failure or pause. */
+function Mark({ mark }: { mark: EventMark }) {
   return (
-    <section aria-labelledby={id} className="fm-card min-w-0">
-      <h2 id={id} className="border-b px-5 py-4 text-lg font-semibold">{title}</h2>
-      {children}
-    </section>
+    <span aria-hidden="true" className={`inline-grid size-5 place-items-center rounded-full ${mark === "done" ? "bg-foreground text-background" : "border border-foreground text-foreground"}`}>
+      <svg className="fm-icon size-3" viewBox="0 0 24 24"><path d={MARK_PATH[mark]} /></svg>
+    </span>
   );
 }
 
@@ -58,10 +59,8 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
           <Card id="timeline" title="Timeline">
             <ol className="grid gap-3 p-5">
               {row.events.map((e, i) => (
-                <li key={`${e.name}-${i}`} className="flex items-center gap-3">
-                  <span aria-hidden="true" className="inline-grid size-5 place-items-center rounded-full bg-foreground text-background">
-                    <svg className="fm-icon size-3" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg>
-                  </span>
+                <li key={`${e.name}-${i}`} data-mark={eventMark(e)} className="flex items-center gap-3">
+                  <Mark mark={eventMark(e)} />
                   <span className="mono text-[13px]">{e.name}{e.code ? ` (${e.code})` : ""}</span>
                 </li>
               ))}

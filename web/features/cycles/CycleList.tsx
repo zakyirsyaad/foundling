@@ -53,6 +53,16 @@ export function CyclePager({ filter, next, paged }: { filter: CycleFilter; next:
   );
 }
 
+/** A later page whose cursor the API refused: say so, and do not fall back to the newest decisions under this URL. */
+export function OlderPageUnreadable({ filter }: { filter: CycleFilter }) {
+  return (
+    <div className="grid gap-3">
+      <p>This page of older cycles could not be read. The link may be out of date, or the history is pending.</p>
+      <CyclePager filter={filter} next={null} paged />
+    </div>
+  );
+}
+
 const LEGEND = [
   { word: "Executed", label: "Executed" },
   { word: "Hold", label: "Hold or Aborted" },

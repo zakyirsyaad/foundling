@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
 
+import { Card } from "@/components/fm/Card";
 import { truncateMiddle } from "@/components/fm/Hash";
 import { LimitMeter } from "@/components/fm/LimitMeter";
 import { LoadingBlock } from "@/components/fm/LoadingBlock";
@@ -34,19 +34,6 @@ function pct(bps: bigint | null): string {
 
 function usdc(v: bigint | null, decimals = USDC): string {
   return v === null ? "—" : `${formatUnits(v, decimals, 2)} USDC`;
-}
-
-/** A bordered card with the design's head row: a title on the left, a note or link on the right. */
-function Card({ id, title, aside, children }: { id: string; title: string; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <section aria-labelledby={id} className="fm-card min-w-0">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
-        <h2 id={id} className="text-lg font-semibold">{title}</h2>
-        {aside ? <div className="text-[13px] text-muted-foreground">{aside}</div> : null}
-      </div>
-      <div className="p-5">{children}</div>
-    </section>
-  );
 }
 
 export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSnapshot | null; nav: HistoryResult<NavPoint[]>; lastCycle?: CycleRow | null }) {
@@ -84,7 +71,7 @@ export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSna
       </section>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Card id="chart-title" title="Share price" aside="USDC per share">
-          {nav.status === "ok" ? <SharePriceChart points={nav.data} usdcDecimals={d} /> : <p className="text-sm text-muted-foreground">History is pending. Live numbers above come straight from the chain.</p>}
+          <div className="p-5">{nav.status === "ok" ? <SharePriceChart points={nav.data} usdcDecimals={d} /> : <p className="text-sm text-muted-foreground">History is pending. Live numbers above come straight from the chain.</p>}</div>
         </Card>
         <Limits s={s} />
       </div>
@@ -101,7 +88,7 @@ function Limits({ s }: { s: VaultSnapshot }) {
   const d = s.assets.usdcDecimals;
   return (
     <Card id="limits-title" title="Limits" aside="Set in the contract">
-      <div className="grid gap-5">
+      <div className="grid gap-5 p-5">
         <LimitMeter label="Epoch window" used={meters.epochWindow.used} cap={meters.epochWindow.cap} decimals={d} />
         <LimitMeter label="Ops budget" used={meters.opsBudget.used} cap={meters.opsBudget.cap} decimals={NEAR_DECIMALS} digits={NEAR_DIGITS} unit="NEAR" />
         <LimitMeter label="TVL against tvl_cap" used={meters.tvl.used} cap={meters.tvl.cap} decimals={d} estimate />
@@ -126,7 +113,7 @@ function LastCycle({ s, row }: { s: VaultSnapshot; row: CycleRow | null }) {
   if (!row) {
     return (
       <Card id="last-cycle-title" title="Last cycle">
-        <p className="text-sm">Last cycle #{s.lastNonce.toString()}. History is pending.</p>
+        <p className="p-5 text-sm">Last cycle #{s.lastNonce.toString()}. History is pending.</p>
       </Card>
     );
   }
@@ -136,7 +123,7 @@ function LastCycle({ s, row }: { s: VaultSnapshot; row: CycleRow | null }) {
   const when = `${row.startedAt.replace("T", " ").slice(0, 16)} UTC`;
   return (
     <Card id="last-cycle-title" title="Last cycle" aside={<Link href={`/app/cycles/${row.nonce}`} className="font-medium text-foreground">View cycle {row.nonce.toString()}</Link>}>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm" data-testid="last-cycle">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 p-5 text-sm" data-testid="last-cycle">
         <span>Last cycle #{row.nonce.toString()}</span>
         <Status group="cycle" word={cycleWord(row.events)} />
         <span className="mono text-[13px] text-muted-foreground">{when}</span>

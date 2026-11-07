@@ -5,7 +5,8 @@ import userEvent from "@testing-library/user-event";
 
 import { Footer } from "@/features/landing/Footer";
 import { Header } from "@/features/landing/Header";
-import { Home, splitFirstSentence } from "@/features/landing/Home";
+import { Home } from "@/features/landing/Home";
+import { splitFirstSentence } from "@/lib/format/text";
 import { ProofView } from "@/features/proof/ProofView";
 import { TrustView } from "@/features/trust/TrustView";
 import { loadClaims } from "@/lib/claims";

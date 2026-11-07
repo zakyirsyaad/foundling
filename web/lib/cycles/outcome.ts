@@ -23,6 +23,17 @@ function closingWord(e: Event): CycleWord | null {
   }
 }
 
+export type EventMark = "done" | "stop" | "wait";
+
+const STOP_EVENTS = new Set(["rejected", "swap_reverted", "cycle_failed", "cycle_aborted", "stuck"]);
+const WAIT_EVENTS = new Set(["hold", "probing"]);
+
+/** The timeline mark for one event: a check only for a step that went through. */
+export function eventMark(e: Event): EventMark {
+  if (STOP_EVENTS.has(e.name)) return "stop";
+  return WAIT_EVENTS.has(e.name) ? "wait" : "done";
+}
+
 export function cycleWord(events: readonly Event[]): CycleWord {
   for (let i = events.length - 1; i >= 0; i--) {
     const word = closingWord(events[i]!);

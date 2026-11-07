@@ -58,7 +58,7 @@ test("base58 decodes with leading zero bytes kept", () => {
 
 import fs from "node:fs";
 import { unreadableFacts } from "@/lib/proof/facts";
-import { attackRows } from "@/lib/proof/sample";
+import { attackRows, expectedLine } from "@/lib/proof/sample";
 
 test("an unreadable vault still lists the four facts, each with a command that reads the chain", () => {
   const facts = unreadableFacts("vault.foundling.testnet", "testnet");
@@ -75,4 +75,11 @@ test("every Attack Lab row reads in English, one line per registry attack", () =
   expect(rows.map((r) => r.name)).toEqual(registry.attacks.map((a) => a.name));
   for (const r of rows) expect(r.expected).not.toMatch(/\b(pada|tanpa|atau|tidak|oleh|tetap|saja|dan|ditolak|kembali)\b/i);
   expect(rows.find((r) => r.name === "drip")!.expected).toBe("Rejected(OVER_EPOCH_CAP) on the decision that crosses the limit");
+});
+
+test("an attack without an English line shows its codes, and never a blank cell or a crash", () => {
+  expect(expectedLine({ name: "over-cap", codes: [] })).toBe("Rejected(OVER_CAP)");
+  expect(expectedLine({ name: "new-attack", codes: ["OVER_CAP", "FROZEN"] })).toBe("OVER_CAP, FROZEN");
+  expect(expectedLine({ name: "new-attack", codes: [] })).toBe("See tools/attack-registry.json");
+  expect(expectedLine({ name: "new-attack" })).toBe("See tools/attack-registry.json");
 });
