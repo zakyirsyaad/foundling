@@ -69,7 +69,7 @@ class SummaryTest(unittest.TestCase):
         summary = summarize_log(lines(cycle(1), {"kind": "error", "reason": "RpcError"}))
         self.assertEqual(summary.errors, 1)
         self.assertTrue(summary.passed)
-        self.assertIn("RPC gagal: 1", render(summary))
+        self.assertIn("RPC errors: 1", render(summary))
 
     def test_a_soak_with_no_cycles_fails_unless_allowed(self):
         self.assertFalse(summarize_log([]).passed)
@@ -91,15 +91,57 @@ class SummaryTest(unittest.TestCase):
         records = [cycle(1), {"kind": "call_failed", "method": "execute_decision", "error": "x"}]
         summary = summarize_log(lines(*records))
         self.assertTrue(summary.passed)
-        self.assertIn("Peringatan: 1 panggilan gagal", render(summary))
-        self.assertNotIn("Peringatan", render(summarize_log(lines(cycle(1)))))
+        self.assertIn("Warning: failed calls: 1", render(summary))
+        self.assertNotIn("Warning", render(summarize_log(lines(cycle(1)))))
 
     def test_render_names_the_verdict_and_each_unexpected_cycle(self):
         text = render(summarize_log(lines(cycle(1), cycle(2, "Rejected", "OVER_CAP"))))
-        self.assertIn("GAGAL", text)
+        self.assertIn("Soak: FAIL", text)
         self.assertIn("nonce 2", text)
         self.assertIn("Rejected(OVER_CAP)", text)
-        self.assertIn("LULUS", render(summarize_log(lines(cycle(1)))))
+        self.assertIn("Soak: PASS", render(summarize_log(lines(cycle(1)))))
+
+
+def untriggered(nonce, **extra):
+    return {**cycle(nonce, "Unknown", None), "resumed": True, "txs": [], **extra}
+
+
+class UntriggeredCyclesTest(unittest.TestCase):
+    def test_a_cycle_the_bot_did_not_trigger_does_not_fail_the_soak(self):
+        summary = summarize_log(lines(cycle(1), untriggered(2)))
+        self.assertTrue(summary.passed, summary.unexpected)
+        self.assertEqual((summary.cycles, summary.untriggered), (1, 1))
+
+    def test_it_is_counted_apart_and_shown(self):
+        text = render(summarize_log(lines(cycle(1), untriggered(2), untriggered(3))))
+        self.assertIn("did not trigger (not counted, not judged): 2", text)
+        self.assertNotIn("did not trigger", render(summarize_log(lines(cycle(1)))))
+
+    def test_it_does_not_count_toward_the_minimum_cycles(self):
+        summary = summarize_log(lines(untriggered(1)), min_cycles=1)
+        self.assertFalse(summary.passed)
+        self.assertEqual(summary.cycles, 0)
+
+    def test_one_that_went_stuck_still_fails(self):
+        for record in (untriggered(1, stuck=True), untriggered(1, final_stage="Stuck")):
+            with self.subTest(record):
+                summary = summarize_log(lines(cycle(2), record))
+                self.assertEqual([u["reason"] for u in summary.unexpected], ["Stuck"])
+                self.assertFalse(summary.passed)
+
+    def test_unknown_with_a_transaction_of_the_bot_still_fails(self):
+        record = {**cycle(1, "Unknown", None), "resumed": False, "txs": [{"method": "trigger_cycle", "hash": "H"}]}
+        self.assertEqual([u["reason"] for u in summarize_log(lines(record)).unexpected], ["Unknown"])
+
+    def test_one_where_a_call_of_the_bot_failed_is_judged(self):
+        summary = summarize_log(lines(cycle(1), untriggered(2, failed_calls=1)))
+        self.assertEqual([u["reason"] for u in summary.unexpected], ["Unknown"])
+        self.assertEqual(summary.untriggered, 0)
+
+    def test_a_taken_over_cycle_with_a_known_result_is_judged_as_usual(self):
+        record = {**cycle(1, "Rejected", "OVER_CAP"), "resumed": True, "txs": [{"method": "advance", "hash": "H"}]}
+        summary = summarize_log(lines(record))
+        self.assertEqual([u["reason"] for u in summary.unexpected], ["Rejected(OVER_CAP)"])
 
 
 class StorageTest(unittest.TestCase):
