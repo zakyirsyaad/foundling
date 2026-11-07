@@ -481,13 +481,28 @@ async fn never_flat() -> anyhow::Result<()> {
         None,
         json!({"new_shares": new_shares.to_string(), "usdc_book_gain": delta(usdc_flat, usdc_after).to_string()}),
     );
-    // The share price must not fall: book / shares after is at least book / shares before.
+    // The mint prices shares off the USDC book alone, so this step holds by construction; the
+    // step after it values the wNEAR dust too.
     run.step(
-        "the mint does not dilute the holder before: the USDC book per share did not fall",
+        "the mint's own yardstick: the USDC book per share did not fall",
         usdc_after * shares_at_flat >= price_before_book * total_after,
         None,
         json!({"book_before": price_before_book.to_string(), "shares_before": shares_at_flat.to_string(),
                "book_after": usdc_after.to_string(), "shares_after": total_after.to_string()}),
+    );
+    // The dust is left out of the mint's price, so it is shared with the new depositor. Value the
+    // book with it at the anchor price: what the holders before lose is at most the dust's worth.
+    let dust_value = |wnear: u128| wnear * NEAR_PRICE / 10u128.pow(26);
+    let claim_before = usdc_flat + dust_value(wnear_flat);
+    let claim_after = (usdc_after + dust_value(wnear_flat)) * shares_at_flat / total_after;
+    let claim_change = delta(claim_before, claim_after);
+    run.step(
+        "valuing the wNEAR dust at the anchor price, the holders before lose at most the dust's worth",
+        claim_change >= -(dust_value(dust) as i128),
+        None,
+        json!({"claim_before": claim_before.to_string(), "claim_after": claim_after.to_string(),
+               "change": claim_change.to_string(), "dust_value_bound": dust_value(dust).to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
     run.step(
         "the new depositor's shares are worth no more than what was deposited",
