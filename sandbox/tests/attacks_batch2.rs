@@ -1239,16 +1239,16 @@ async fn kill_agent() -> anyhow::Result<()> {
         && swap_amount == Some(json!("1000000"))
         && outside.is_empty()
         && wallets_after == wallets_before
-        && vault_usdc_before - vault_usdc_after == 1_000_000
-        && book_usdc_before - book_usdc_after == 1_000_000
+        && delta(vault_usdc_before, vault_usdc_after) == -1_000_000
+        && delta(book_usdc_before, book_usdc_after) == -1_000_000
         && ops <= budget;
     run.step(
         "the keeper id created again by its parent, with OutLayer alive: it runs a cycle and executes the strategy's decision, nothing else",
         revival_held,
         None,
         json!({"nonce": revived_nonce, "swap_amount_in": swap_amount, "decision_amount_in": "1000000",
-               "vault_usdc_wallet_drop": (vault_usdc_before - vault_usdc_after).to_string(),
-               "vault_usdc_book_drop": (book_usdc_before - book_usdc_after).to_string(),
+               "vault_usdc_wallet_drop": (-delta(vault_usdc_before, vault_usdc_after)).to_string(),
+               "vault_usdc_book_drop": (-delta(book_usdc_before, book_usdc_after)).to_string(),
                "accounts_outside_the_registered_set": outside,
                "other_wallets_unchanged": wallets_after == wallets_before, "ops_within_budget": ops <= budget}),
     );
