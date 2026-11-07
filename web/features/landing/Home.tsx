@@ -2,99 +2,130 @@ import Link from "next/link";
 
 import { CopyButton } from "@/components/fm/CopyButton";
 import { Video } from "@/components/fm/Video";
-import { BUILT_ON_FIXED, BUILT_ON_NOTE, CLOSING, GUARANTEE_LIMITS, HERO, HOW_IT_WORKS } from "@/content/landing";
+import { BUILT_ON_FIXED, BUILT_ON_NOTE, CLOSING, GUARANTEES, HEADS, HERO, HOW_IT_WORKS } from "@/content/landing";
 import { MEDIA } from "@/content/media";
 import { NOT_CLAIMED } from "@/content/not-claimed";
 import { type Claim, claimText } from "@/lib/claims";
-import { Section } from "./Section";
+import { Head, Section } from "./Section";
 
-const GUARANTEE_IDS = ["born-without-keys", "g1-confidentiality", "g2-bounded-loss", "g3-exit", "g4-traceability"] as const;
+/** "Returns or alpha." stays one bold line; a longer entry splits into a bold first sentence and the rest. */
+export function splitFirstSentence(line: string): { head: string; rest: string | null } {
+  const i = line.indexOf(". ");
+  return i < 0 ? { head: line, rest: null } : { head: line.slice(0, i + 1), rest: line.slice(i + 2) };
+}
 
 export function Home({ claims, keysLine }: { claims: Claim[]; keysLine: string }) {
   const intents = claimText(claims, "near-intents");
   const advisor = claimText(claims, "near-ai-advisor");
   const keyless = claimText(claims, "born-without-keys");
   return (
-    <main>
-      <section id="hero" className="mx-auto max-w-[1120px] px-4 pt-24 pb-16 max-sm:pt-16">
-        <h1 className="max-w-[14ch] text-[64px] leading-none font-semibold tracking-[-0.04em] max-md:text-[56px]">{keyless.downgraded ? HERO.titleUnchecked : HERO.title}</h1>
-        <p className="mt-6 max-w-[65ch] text-base leading-relaxed text-muted-foreground">{HERO.lead}</p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link href="/app" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Open app</Link>
-          <Link href="/proof" className="rounded-md border border-input px-4 py-2 text-sm font-medium">Read the proof</Link>
-        </div>
-        <div className="mt-12">
-          <Video {...MEDIA.hero} loop />
-          <p data-testid="keys-line" className="mono mt-3 text-[13px] text-muted-foreground">{keysLine}</p>
+    <main className="text-[14px] leading-[1.5]">
+      <section id="hero" aria-labelledby="hero-title" className="hero">
+        <div className="hero__grid" aria-hidden="true" />
+        <div className="wrap hero__in">
+          <h1 id="hero-title" className="display-xl max-w-[760px]">{keyless.downgraded ? HERO.titleUnchecked : HERO.title}</h1>
+          <p className="lead max-w-[600px] text-[18px]">{HERO.lead}</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Link href="/app" className="fm-btn fm-btn--primary fm-btn--lg">Open app</Link>
+            <Link href="/proof" className="fm-btn fm-btn--outline fm-btn--lg">Read the proof</Link>
+          </div>
+          <div className="mt-6 grid w-full max-w-[880px] gap-3">
+            <Video {...MEDIA.hero} loop />
+            <p data-testid="keys-line" className="mono text-[13px] text-muted-foreground">{keysLine}</p>
+          </div>
         </div>
       </section>
 
-      <Section id="built-on" title="Built on">
-        <ul className="flex flex-wrap gap-x-8 gap-y-3 text-base">
-          {BUILT_ON_FIXED.map((name) => (
-            <li key={name} className="font-medium">{name}</li>
-          ))}
-          <li className={intents.downgraded ? "text-muted-foreground" : "font-medium"}>{intents.downgraded ? intents.text : "NEAR Intents"}</li>
-          <li className={advisor.downgraded ? "text-muted-foreground" : "font-medium"}>{advisor.downgraded ? advisor.text : "NEAR AI"}</li>
-        </ul>
-        <p className="mt-4 text-[13px] text-muted-foreground">{BUILT_ON_NOTE}</p>
-      </Section>
+      <section id="built-on" aria-labelledby="built-on-title" className="border-t">
+        <div className="wrap strip">
+          <h2 id="built-on-title" className="label">Built on</h2>
+          <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            {BUILT_ON_FIXED.map((name) => (
+              <li key={name} className="strip__item">{name}</li>
+            ))}
+            <li className={advisor.downgraded ? "strip__item strip__item--pending" : "strip__item"}>{advisor.downgraded ? advisor.text : "NEAR AI"}</li>
+            <li className={intents.downgraded ? "strip__item strip__item--pending" : "strip__item"}>{intents.downgraded ? intents.text : "NEAR Intents"}</li>
+          </ul>
+          <p className="w-full text-center text-[12px] text-muted-foreground">{BUILT_ON_NOTE}</p>
+        </div>
+      </section>
 
-      <Section id="how-it-works" title="How it works">
-        <ol className="grid gap-6 md:grid-cols-4">
+      <Section id="how-it-works" head={HEADS.how}>
+        <ol className="flow">
           {HOW_IT_WORKS.map((step, i) => (
-            <li key={step.id} className="rounded-lg border p-5">
-              <div className="mono text-[12px] text-muted-foreground">0{i + 1}</div>
-              <h3 className="mt-2 text-lg font-semibold tracking-[-0.01em]">{step.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed">
+            <li key={step.id} className="flow__step">
+              <span className="flow__num" aria-hidden="true">{i + 1}</span>
+              <h3 className="h3">{step.title}</h3>
+              <p className="text-muted-foreground">
                 {step.body}
                 {step.id === "decide" ? ` ${advisor.text}` : null}
               </p>
-              <p className="mono mt-3 text-[12px] text-muted-foreground">{step.leaves}</p>
+              <p className="flow__leaves">{step.leaves}</p>
             </li>
           ))}
         </ol>
       </Section>
 
-      <Section id="demo" title="Demo">
+      <Section id="demo" head={HEADS.demo}>
         <Video {...MEDIA.demo} />
       </Section>
 
-      <Section id="guarantees" title="Guarantees">
-        <ul className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {GUARANTEE_IDS.map((id) => {
-            const c = claimText(claims, id);
-            const meta = GUARANTEE_LIMITS[id]!;
+      <Section id="guarantees" head={HEADS.guarantees}>
+        <ul className="gcards">
+          {GUARANTEES.map((g) => {
+            const c = claimText(claims, g.id);
             return (
-              <li key={id} className="rounded-lg border p-5" data-claim={id} data-downgraded={c.downgraded || undefined}>
-                <h3 className="text-lg font-semibold tracking-[-0.01em]">{meta.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed">{c.text}</p>
-                <p className="mt-3 text-[13px] text-muted-foreground">Limit: {meta.limit}</p>
+              <li key={g.id} className={`gcard ${g.wide ? "gcard--wide" : "gcard--third"}`} data-claim={g.id} data-downgraded={c.downgraded || undefined}>
+                <span className="gcard__tag">{g.tag}</span>
+                <h3 className="h3">{g.title}</h3>
+                <p>{c.text}</p>
+                <p className="gcard__foot"><b>Limit</b> {g.limit}</p>
               </li>
             );
           })}
         </ul>
       </Section>
 
-      <Section id="not-claimed" title="What we don't claim" data-copy-exempt="not-claimed">
-        <ul className="grid gap-3 text-sm leading-relaxed">
-          {NOT_CLAIMED.map((line) => (
-            <li key={line} className="border-b pb-3">{line}</li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section id="closing" title={CLOSING.title}>
-        <div className="fm-code">
-          {CLOSING.commands.map((cmd) => (
-            <div key={cmd} className="flex items-center justify-between gap-4">
-              <code>{cmd}</code>
-              <CopyButton text={cmd} label="Copy command" />
-            </div>
-          ))}
+      <section id="not-claimed" aria-labelledby="not-claimed-title" className="section" data-copy-exempt="not-claimed">
+        <div className="wrap split">
+          <Head id="not-claimed" head={HEADS.notClaimed} />
+          <ul className="ruled">
+            {NOT_CLAIMED.map((line) => {
+              const { head, rest } = splitFirstSentence(line);
+              return (
+                <li key={line}>
+                  <span className="ruled__mark" aria-hidden="true">
+                    <svg className="fm-icon size-3" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                  </span>
+                  <div className="grid gap-1">
+                    <p className="font-semibold">{head}</p>
+                    {rest ? <p className="text-muted-foreground">{rest}</p> : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
-        <p className="mt-3 text-[13px] text-muted-foreground">{CLOSING.note}</p>
-      </Section>
+      </section>
+
+      <section id="closing" aria-labelledby="closing-title" className="section">
+        <div className="wrap flex flex-col items-center gap-6 text-center">
+          <h2 id="closing-title" className="display-lg">{CLOSING.title}</h2>
+          <p className="lead">{CLOSING.lead} {CLOSING.note}</p>
+          <div className="fm-code fm-code--row w-full max-w-[640px]">
+            <code>
+              {CLOSING.commands.map((cmd) => (
+                <span key={cmd} className="block"><span className="text-muted-foreground">$</span> {cmd}</span>
+              ))}
+            </code>
+            <CopyButton text={CLOSING.commands.join("\n")} label="Copy commands" icon />
+          </div>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Link href="/app" className="fm-btn fm-btn--primary">Open app</Link>
+            <Link href="/proof" className="fm-btn fm-btn--outline">Read the proof</Link>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
