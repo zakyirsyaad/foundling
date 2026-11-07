@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { CopyButton } from "@/components/fm/CopyButton";
 import { Hash } from "@/components/fm/Hash";
 import { LimitMeter } from "@/components/fm/LimitMeter";
 import { Stat } from "@/components/fm/Stat";
@@ -30,6 +31,28 @@ test("Hash truncates and copies the full value", async () => {
   expect(screen.getByText("3f9a00…c21e")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Copy code hash" }));
   expect(await navigator.clipboard.readText()).toBe("3f9a00000000c21e");
+});
+test("CopyButton keeps the check mark for the full time after a second click", async () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.resolve() } });
+  vi.useFakeTimers();
+  try {
+    render(<CopyButton text="a" label="Copy a" icon />);
+    const button = screen.getByRole("button", { name: "Copy a" });
+    const checked = () => button.querySelector('path[d="M20 6 9 17l-5-5"]') !== null;
+    await act(async () => { fireEvent.click(button); });
+    expect(checked()).toBe(true);
+    act(() => { vi.advanceTimersByTime(1200); });
+    await act(async () => { fireEvent.click(button); });
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(checked()).toBe(true);
+    act(() => { vi.advanceTimersByTime(1200); });
+    expect(checked()).toBe(false);
+  } finally {
+    vi.useRealTimers();
+    if (original) Object.defineProperty(navigator, "clipboard", original);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
 });
 test("Hash leaves short values whole", () => {
   render(<Hash value="alice.near" label="account" />);

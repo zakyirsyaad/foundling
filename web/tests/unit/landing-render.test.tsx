@@ -1,10 +1,11 @@
 import path from "node:path";
 
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { Footer } from "@/features/landing/Footer";
 import { Header } from "@/features/landing/Header";
-import { Home } from "@/features/landing/Home";
+import { Home, splitFirstSentence } from "@/features/landing/Home";
 import { ProofView } from "@/features/proof/ProofView";
 import { TrustView } from "@/features/trust/TrustView";
 import { loadClaims } from "@/lib/claims";
@@ -70,4 +71,20 @@ test("TrustView renders with a snapshot and without one", async () => {
   unmount();
   render(<TrustView snapshot={null} label={null} />);
   expect(screen.getAllByText("Vault not readable right now.")).toHaveLength(2);
+});
+test("a not-claimed entry splits into a bold first sentence and the rest", () => {
+  expect(splitFirstSentence("Returns or alpha.")).toEqual({ head: "Returns or alpha.", rest: null });
+  expect(splitFirstSentence("Protection from MEV. More words here.")).toEqual({ head: "Protection from MEV.", rest: "More words here." });
+});
+test("the closing block copies both commands with one button", async () => {
+  const user = userEvent.setup();
+  render(<Home claims={claims} keysLine="x" />);
+  const buttons = screen.getAllByRole("button", { name: "Copy commands" });
+  expect(buttons).toHaveLength(1);
+  await user.click(buttons[0]!);
+  expect(await navigator.clipboard.readText()).toBe("git clone https://github.com/zakyirsyaad/foundling\ncd foundling && python3 verify.py");
+});
+test("section heads carry the design's lead line", () => {
+  render(<Home claims={claims} keysLine="x" />);
+  expect(screen.getByText("Every step leaves something on chain that you can read.")).toBeInTheDocument();
 });
