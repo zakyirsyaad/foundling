@@ -36,6 +36,7 @@ make attack-lab-full
 - Needs the Rust toolchain pinned in `rust-toolchain.toml`, `cargo-near`, and network access once, to download the `neard` sandbox binary.
 - It builds the five contracts, then runs the 15 core attacks listed in `tools/attack-registry.json` one at a time, each limited to 300 seconds. Allow about 15 minutes after the first build on a laptop.
 - Exit 0 and the last line `PASS=15 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` mean every attack was refused or contained. `FAIL` means one got through; that is the result to report.
+- `freeze-race` is the slowest, about 4 minutes on a quiet laptop. On a busy machine it can pass the 300-second limit and report `ERROR` (a timeout, not a failed attack); run it alone with `python3 tools/attack.py run freeze-race`.
 - The sandbox is a node started on your machine for the run. The accounts it creates, and their keys, exist for that run only. No key is read from or written to this repository.
 - Results are written to the git-ignored `proofs/attack/local/`. The files in `proofs/attack/reproducible/` come from the vault built reproducibly in a pinned image (`make attack-proofs`, needs Docker); an attack without a file there has only the local result.
 - After a first build, `make attack-lab` runs the attacks again without building. If you switch branches first, run `make wasm` again, or every attack reports `ERROR`.
