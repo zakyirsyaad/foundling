@@ -36,8 +36,10 @@ def is_stuck(record):
 
 def is_untriggered(record):
     """A cycle the bot found already running and took over: it has no transaction of its own, so
-    its outcome cannot be read and is `Unknown`. One it saw go Stuck is still a failure."""
-    return bool(record.get("resumed")) and not record.get("txs") and not is_stuck(record)
+    its outcome cannot be read and is `Unknown`. One it saw go Stuck is still a failure, and so is
+    one where a call of the bot failed: that is the bot's own problem, not someone else's cycle."""
+    return (bool(record.get("resumed")) and not record.get("txs") and not record.get("failed_calls")
+            and not is_stuck(record))
 
 
 def unexpected_reason(record):

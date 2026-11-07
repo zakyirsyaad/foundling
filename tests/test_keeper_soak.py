@@ -133,6 +133,11 @@ class UntriggeredCyclesTest(unittest.TestCase):
         record = {**cycle(1, "Unknown", None), "resumed": False, "txs": [{"method": "trigger_cycle", "hash": "H"}]}
         self.assertEqual([u["reason"] for u in summarize_log(lines(record)).unexpected], ["Unknown"])
 
+    def test_one_where_a_call_of_the_bot_failed_is_judged(self):
+        summary = summarize_log(lines(cycle(1), untriggered(2, failed_calls=1)))
+        self.assertEqual([u["reason"] for u in summary.unexpected], ["Unknown"])
+        self.assertEqual(summary.untriggered, 0)
+
     def test_a_taken_over_cycle_with_a_known_result_is_judged_as_usual(self):
         record = {**cycle(1, "Rejected", "OVER_CAP"), "resumed": True, "txs": [{"method": "advance", "hash": "H"}]}
         summary = summarize_log(lines(record))

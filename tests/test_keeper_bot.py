@@ -7,6 +7,7 @@ from pathlib import Path
 from tests.keeper_fakes import GAS_FLOORS as WORLD_FLOORS
 from tests.keeper_fakes import KEEPER, NEAR_ID, USDC_ID, VAULT, ListLog, MemoryStore, World
 from tools.keeper.bot import GAS_FLOORS, Bot, Config, ConfigError, GiveUp, summarize
+from tools.keeper.near_cli import CallResult
 from tools.keeper.rpc import RpcError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -583,7 +584,8 @@ class TriggerSentTest(unittest.TestCase):
 
     def test_a_trigger_that_never_landed_is_dropped_after_the_grace(self):
         world = World()
-        pending = {"before": 0, "started": world.now - 100, "at": int(world.now) - 100, "txs": []}
+        pending = {"before": 0, "started": world.now - 100, "at": int(world.now) - 100,
+                   "until": world.now - 10, "txs": [{"method": "trigger_cycle", "hash": "TX1"}]}
         store = MemoryStore({"vault": VAULT, "last_trigger": 0, "cycle": None, "pending": pending})
         log = ListLog()
         bot = make_bot(world, store=store, log=log)
@@ -593,12 +595,93 @@ class TriggerSentTest(unittest.TestCase):
 
     def test_a_trigger_just_sent_is_waited_for_before_it_is_dropped(self):
         world = World()
-        pending = {"before": 0, "started": world.now, "at": int(world.now), "txs": []}
+        pending = {"before": 0, "started": world.now, "at": int(world.now),
+                   "until": world.now + 90, "txs": [{"method": "trigger_cycle", "hash": "TX1"}]}
         store = MemoryStore({"vault": VAULT, "last_trigger": 0, "cycle": None, "pending": pending})
         bot = make_bot(world, store=store)
         self.assertEqual(bot.tick(), "wait")
         self.assertIsNotNone(bot.state["pending"])
         self.assertEqual(world.methods("trigger_cycle"), [], "it does not trigger again meanwhile")
+
+
+def without_hash(world):
+    """The trigger lands, but near-cli reports it with no transaction hash."""
+    real = world.near.call
+
+    def call(contract, method, args, gas):
+        result = real(contract, method, args, gas)
+        return CallResult(result.ok, None, result.error) if method == "trigger_cycle" else result
+
+    world.near.call = call
+
+
+class PendingAttributionTest(unittest.TestCase):
+    def test_a_trigger_with_no_hash_is_not_carried_over_and_is_marked_as_taken_over(self):
+        world = World(cooldown=3600)
+        without_hash(world)
+        store, log = MemoryStore(), ListLog()
+        bot = make_bot(world, store=store, log=log)
+        bot.tick()
+        self.assertIsNone(store.data["pending"])
+        self.assertEqual(store.data["cycle"]["txs"], [])
+        self.assertTrue(store.data["cycle"]["resumed"], "its outcome cannot be read, as for any taken-over cycle")
+
+    def test_a_cycle_of_someone_else_is_not_taken_for_the_bots_after_a_trigger_with_no_hash(self):
+        world = World(cooldown=10)
+        real = world.near.call
+        world.near.call = lambda *a: CallResult(False, None, "timeout: no answer")  # never reached the chain
+        fail_the_nonce_read_after_a_trigger(world)
+        store, log = MemoryStore(), ListLog()
+        bot = make_bot(world, store=store, log=log)
+        self.assertEqual(bot.tick(), "error")
+        self.assertIsNone(store.data.get("pending"), "no hash, nothing to attribute")
+        world.near.call = real
+        world.apply("trigger_cycle", {}, 300)  # someone else triggers
+        world.trigger_result = "hold"
+        drive(bot, world, 40)
+        cycle = log.of("cycle")[0]
+        self.assertEqual((cycle["nonce"], cycle["resumed"], cycle["txs"]), (1, True, []))
+
+    def test_a_cycle_that_ended_unseen_is_closed_even_when_another_one_is_live(self):
+        world = World(cooldown=10)
+        world.trigger_result = "hold"
+        fail_the_nonce_read_after_a_trigger(world)
+        store, log = MemoryStore(), ListLog()
+        bot = make_bot(world, store=store, log=log)
+        self.assertEqual(bot.tick(), "error")
+        world.sleep(30)  # the bot's cycle 1 ends
+        world.trigger_result = "ready"
+        world.apply("trigger_cycle", {}, 300)  # someone else starts cycle 2
+        bot.tick()
+        first = log.of("cycle")[0]
+        self.assertEqual((first["nonce"], first["result"], first["final_stage"], first["resumed"]),
+                         (1, "Hold", "Unobserved", False))
+        self.assertEqual(first["txs"], [{"method": "trigger_cycle", "hash": "TX1"}])
+        self.assertEqual((store.data["cycle"]["nonce"], store.data["cycle"]["resumed"]), (2, True))
+
+    def test_a_trigger_the_node_shows_late_is_still_the_bots_after_the_nonce_wait_gave_up(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        lagging = [True]
+        real = world.view
+
+        def view(account, method, args=None, block_id=None):
+            if method == "last_nonce" and lagging[0]:
+                return 0
+            return real(account, method, args, block_id)
+
+        world.view = view
+        store, log = MemoryStore(), ListLog()
+        bot = make_bot(world, store=store, log=log, nonce_wait=10)
+        self.assertEqual(bot.tick(), "trigger_failed")
+        self.assertEqual(len(store.data["pending"]["txs"]), 1, "kept: the hash is known")
+        self.assertGreater(store.data["failures"]["streak"], 0)
+        lagging[0] = False
+        drive(bot, world, 20)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["nonce"], cycle["result"], cycle["resumed"]), (1, "Hold", False))
+        self.assertEqual(len(world.methods("trigger_cycle")), 1, "no second trigger")
+        self.assertEqual(store.data["failures"]["streak"], 0, "the trigger landed, so its failed wait is forgiven")
 
 
 if __name__ == "__main__":
