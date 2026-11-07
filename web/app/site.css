@@ -12,20 +12,8 @@
   .h1 { font-size: 32px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: balance; }
   .h3 { font-size: 18px; line-height: 1.4; font-weight: 600; letter-spacing: -0.01em; }
   .lead { font-size: 16px; line-height: 1.6; color: var(--muted-foreground); max-width: 62ch; }
-  .label { font-size: 12px; line-height: 1.4; font-weight: 500; letter-spacing: 0.01em; color: var(--muted-foreground); }
 
   .fm-logo { color: var(--foreground); font-size: 20px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; text-decoration: none; }
-
-  .fm-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border: 1px solid transparent; border-radius: 6px; font-size: 14px; line-height: 1; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; }
-  .fm-btn--primary { background: var(--primary); color: var(--primary-foreground); }
-  .fm-btn--outline { background: var(--background); color: var(--foreground); border-color: var(--input); }
-  .fm-btn--outline:hover { background: var(--accent); }
-  .fm-btn--sm { height: 32px; padding: 0 12px; font-size: 13px; }
-  .fm-btn--lg { height: 44px; padding: 0 20px; font-size: 15px; }
-
-  .fm-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-  .fm-icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); cursor: pointer; flex: none; }
-  .fm-icon-btn:hover { background: var(--accent); color: var(--foreground); }
 
   .site-head { position: sticky; top: 0; z-index: 5; background: var(--background); border-bottom: 1px solid var(--border); }
   .site-head__in { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 64px; }
@@ -51,14 +39,14 @@
   .flow__step { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 24px; border-right: 1px solid var(--border); }
   .flow__step:last-child { border-right: 0; }
   .flow__step:not(:last-child)::after { content: ""; position: absolute; top: 34px; right: -7px; z-index: 1; width: 12px; height: 12px; border-top: 1px solid var(--border); border-right: 1px solid var(--border); background: var(--background); transform: rotate(45deg); }
-  .flow__num { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--input); border-radius: 9999px; font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 12px; font-weight: 500; line-height: 1; }
-  .flow__leaves { margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--border); font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
+  .flow__num { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--input); border-radius: 9999px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; line-height: 1; }
+  .flow__leaves { margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--border); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
 
   .gcards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
   .gcard { display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
   .gcard--wide { grid-column: span 3; }
   .gcard--third { grid-column: span 2; }
-  .gcard__tag { align-self: flex-start; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; font-weight: 500; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+  .gcard__tag { align-self: flex-start; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
   .gcard__foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted-foreground); }
   .gcard__foot b { font-weight: 500; color: var(--foreground); }
 
@@ -68,7 +56,9 @@
   .ruled__mark { display: grid; place-items: center; width: 20px; height: 20px; margin-top: 1px; border: 1px solid var(--input); border-radius: 9999px; color: var(--muted-foreground); }
 
   .fm-code.fm-code--row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; text-align: left; }
-  .fm-code--row code { white-space: pre; }
+  /* The commands scroll inside the code element, so the copy button stays in view on a phone. */
+  .fm-code.fm-code--row { overflow-x: visible; }
+  .fm-code--row code { flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: pre; }
 
   @media (max-width: 900px) {
     .flow { grid-template-columns: minmax(0, 1fr); }

@@ -7,11 +7,20 @@ export interface SectionHead {
   aside?: string;
 }
 
+interface SectionProps {
+  id: string;
+  head: SectionHead;
+  children: ReactNode;
+  /** Head on the left and content on the right, as the design's not-claimed block; otherwise the head sits above. */
+  split?: boolean;
+  "data-copy-exempt"?: string;
+}
+
 /** A landing section: the design's eyebrow, h2, lead and right-hand note, then the content. */
-export function Section({ id, head, children, ...rest }: { id: string; head: SectionHead; children: ReactNode; "data-copy-exempt"?: string }) {
+export function Section({ id, head, children, split = false, ...rest }: SectionProps) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="section" {...rest}>
-      <div className="wrap grid gap-12">
+      <div className={split ? "wrap split" : "wrap grid gap-12"}>
         <Head id={id} head={head} />
         {children}
       </div>
@@ -19,7 +28,7 @@ export function Section({ id, head, children, ...rest }: { id: string; head: Sec
   );
 }
 
-export function Head({ id, head }: { id: string; head: SectionHead }) {
+function Head({ id, head }: { id: string; head: SectionHead }) {
   return (
     <div className="section-head">
       <div className="section-head__text">

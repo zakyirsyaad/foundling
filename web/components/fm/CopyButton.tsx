@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const COPIED_MS = 1500;
 
 /** `icon` draws the design's square icon button; the default stays a small text button. */
 export function CopyButton({ text, label, icon = false }: { text: string; label: string; icon?: boolean }) {
   const [copied, setCopied] = useState(false);
+  // One timer at a time: a second click restarts the "copied" window instead of being cut short by the first.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <button
       type="button"
@@ -16,7 +19,8 @@ export function CopyButton({ text, label, icon = false }: { text: string; label:
         try {
           await navigator.clipboard.writeText(text);
           setCopied(true);
-          setTimeout(() => setCopied(false), COPIED_MS);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), COPIED_MS);
         } catch {
           setCopied(false);
         }

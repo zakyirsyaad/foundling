@@ -170,13 +170,22 @@
   .fm-hash { display: inline-flex; align-items: center; gap: 8px; }
   .fm-copy { font-size: 12px; padding: 2px 8px; border: 1px solid var(--input); border-radius: 6px; background: transparent; color: var(--foreground); cursor: pointer; }
   .fm-copy:hover { background: var(--accent); }
+  .fm-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border: 1px solid transparent; border-radius: 6px; font-size: 14px; line-height: 1; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .fm-btn--primary { background: var(--primary); color: var(--primary-foreground); }
+  .fm-btn--outline { background: var(--background); color: var(--foreground); border-color: var(--input); }
+  .fm-btn--outline:hover { background: var(--accent); }
+  .fm-btn--sm { height: 32px; padding: 0 12px; font-size: 13px; }
+  .fm-btn--lg { height: 44px; padding: 0 20px; font-size: 15px; }
+  .fm-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .fm-icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); cursor: pointer; flex: none; }
+  .fm-icon-btn:hover { background: var(--accent); color: var(--foreground); }
   .fm-meter { display: grid; gap: 6px; }
   .fm-meter-track { height: 6px; border-radius: 9999px; background: var(--muted); overflow: hidden; }
   .fm-meter-fill { height: 100%; background: var(--foreground); }
   .fm-meter-fill[data-near="true"] { background: var(--warning); }
   .fm-video { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border); border-radius: 8px; background: var(--terminal-bg); object-fit: cover; }
   /* The empty slot keeps the design's dark frame with a faint grid, so the page does not jump when the file lands. */
-  .fm-video-empty { display: grid; place-items: center; color: var(--terminal-muted); font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 13px; background-image: linear-gradient(#ffffff0d 1px, transparent 1px), linear-gradient(90deg, #ffffff0d 1px, transparent 1px); background-size: 48px 48px; }
+  .fm-video-empty { display: grid; place-items: center; color: var(--terminal-muted); font-family: var(--font-mono); font-size: 13px; background-image: linear-gradient(#ffffff0d 1px, transparent 1px), linear-gradient(90deg, #ffffff0d 1px, transparent 1px); background-size: 48px 48px; }
   .fm-banner { display: grid; gap: 4px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); font-size: 14px; }
   .fm-banner[data-tone="warning"] { background: var(--warning-bg); border-color: var(--warning); }
   .fm-banner[data-tone="danger"] { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
