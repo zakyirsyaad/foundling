@@ -316,14 +316,69 @@ class StrictTest(unittest.TestCase):
 class OfflinePathTest(unittest.TestCase):
     def test_offline_path_imports_unchanged(self):
         tree = ast.parse((ROOT / "verify.py").read_text(encoding="utf-8"))
-        imported = set()
-        for node in ast.walk(tree):
+        top = set()
+        for node in tree.body:
             if isinstance(node, ast.Import):
-                imported |= {alias.name.split(".")[0] for alias in node.names}
+                top |= {alias.name.split(".")[0] for alias in node.names}
             elif isinstance(node, ast.ImportFrom):
-                imported.add((node.module or "").split(".")[0])
-        self.assertLessEqual(imported, ALLOWED_IMPORTS)
-        self.assertFalse(imported & {"urllib", "socket", "verify_live"})
+                top.add((node.module or "").split(".")[0])
+        self.assertEqual(top, ALLOWED_IMPORTS, "the module level is what it was before --live")
+        inside = {}
+        for function in ast.walk(tree):
+            if isinstance(function, ast.FunctionDef):
+                for node in ast.walk(function):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module]
+                        inside.setdefault(function.name, set()).update(name.split(".")[0] for name in names)
+        self.assertEqual(inside, {"main": {"verify_live"}}, "the only import in a function is verify_live, in main")
+        everything = {name for names in inside.values() for name in names} | top
+        self.assertFalse(everything & {"urllib", "socket"})
+
+
+def run_verify_py(*args, blocked=True):
+    """verify.py run as a script; sockets raise, so a stray connection cannot go out."""
+    code = (
+        "import runpy, socket, sys\n"
+        "def blocked(*a, **k):\n    raise OSError('network blocked in the test')\n"
+        "socket.socket.connect = blocked\nsocket.getaddrinfo = blocked\n"
+        f"sys.argv = ['verify.py', *{list(args)!r}]\n"
+        "try:\n    runpy.run_path(%r, run_name='__main__')\n" % str(ROOT / "verify.py") +
+        "except SystemExit as stop:\n    code = stop.code\n"
+        "else:\n    code = 0\n"
+        "print('LOADED', 'verify_live' in sys.modules, file=sys.stderr)\n"
+        "sys.exit(code)\n"
+    )
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT)
+
+
+class WiringTest(unittest.TestCase):
+    def test_live_flag_hands_the_rest_to_verify_live(self):
+        import verify
+        from unittest import mock
+        with mock.patch("verify_live.main", return_value=0) as live:
+            self.assertEqual(verify.main(["--live", "--vault", "v.test", "--json", "--strict"]), 0)
+        live.assert_called_once_with(["--vault", "v.test", "--json", "--strict"])
+        with mock.patch("verify_live.main", return_value=2):
+            self.assertEqual(verify.main(["--live", "--vault", "v.test"]), 2)
+
+    def test_the_default_run_never_loads_verify_live(self):
+        done = run_verify_py()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("LOADED False", done.stderr)
+        golden = (ROOT / "proofs" / "expected" / "verify-offline.txt").read_text(encoding="utf-8")
+        self.assertEqual(done.stdout, golden)
+
+    def test_live_through_verify_py_is_skip_exit_2_when_the_network_is_down(self):
+        done = run_verify_py("--live", "--vault", VAULT)
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+        self.assertIn("LOADED True", done.stderr)
+        self.assertIn("verify live (tier 1)", done.stdout)
+        self.assertNotIn("FAIL", done.stdout)
+        self.assertIn("NETWORK_", done.stdout)
+
+    def test_live_without_a_vault_is_a_usage_error(self):
+        done = run_verify_py("--live")
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
 
 
 if __name__ == "__main__":

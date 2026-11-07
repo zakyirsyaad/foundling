@@ -16,7 +16,7 @@ PROOFS = ROOT / "proofs"
 GOLDEN = PROOFS / "expected" / "verify-offline.txt"
 RUST_VECTOR = ROOT / "strategy" / "fixtures" / "commitment.json"
 FULL_ACCESS_KEY = {"public_key": "ed25519:AAAA", "access_key": {"nonce": 0, "permission": "FullAccess"}}
-ALLOWED_IMPORTS = {"argparse", "dataclasses", "hashlib", "json", "pathlib", "re", "sys"}
+ALLOWED_IMPORTS = {"argparse", "dataclasses", "hashlib", "json", "pathlib", "re", "sys", "verify_live"}
 
 
 def load(name):
