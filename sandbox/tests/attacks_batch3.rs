@@ -170,7 +170,13 @@ async fn inflated_nav() -> anyhow::Result<()> {
     );
     // Both amounts are under the bps line and over the absolute one, so only the absolute cap can say no.
     let bps_line = nav_at(price) * cap_bps / 10_000;
-    for amount in [one_over, (cap_usdc + bps_line) / 2] {
+    // The vault cannot fund a buy bigger than its USDC book, so the second amount stops there.
+    let second = ((cap_usdc + bps_line) / 2).min(usdc_book);
+    anyhow::ensure!(
+        second > cap_usdc && second < bps_line,
+        "setup failed: the second buy must sit between the absolute cap and the bps line and be fundable: {cap_usdc} {second} {bps_line} {usdc_book}"
+    );
+    for amount in [one_over, second] {
         let outcome = decide(&env, priced("buy_risk", amount, price)).await?;
         run.step(
             &format!("anchor price 100x, buy of {amount}: the absolute cap refuses"),
@@ -475,13 +481,28 @@ async fn never_flat() -> anyhow::Result<()> {
         None,
         json!({"new_shares": new_shares.to_string(), "usdc_book_gain": delta(usdc_flat, usdc_after).to_string()}),
     );
-    // The share price must not fall: book / shares after is at least book / shares before.
+    // The mint prices shares off the USDC book alone, so this step holds by construction; the
+    // step after it values the wNEAR dust too.
     run.step(
-        "the mint does not dilute the holder before: the USDC book per share did not fall",
+        "the mint's own yardstick: the USDC book per share did not fall",
         usdc_after * shares_at_flat >= price_before_book * total_after,
         None,
         json!({"book_before": price_before_book.to_string(), "shares_before": shares_at_flat.to_string(),
                "book_after": usdc_after.to_string(), "shares_after": total_after.to_string()}),
+    );
+    // The dust is left out of the mint's price, so it is shared with the new depositor. Value the
+    // book with it at the anchor price: what the holders before lose is at most the dust's worth.
+    let dust_value = |wnear: u128| wnear * NEAR_PRICE / 10u128.pow(26);
+    let claim_before = usdc_flat + dust_value(wnear_flat);
+    let claim_after = (usdc_after + dust_value(wnear_flat)) * shares_at_flat / total_after;
+    let claim_change = delta(claim_before, claim_after);
+    run.step(
+        "valuing the wNEAR dust at the anchor price, the holders before lose at most the dust's worth",
+        claim_change >= -(dust_value(dust) as i128),
+        None,
+        json!({"claim_before": claim_before.to_string(), "claim_after": claim_after.to_string(),
+               "change": claim_change.to_string(), "dust_value_bound": dust_value(dust).to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
     run.step(
         "the new depositor's shares are worth no more than what was deposited",
@@ -643,6 +664,11 @@ async fn setup_spam() -> anyhow::Result<()> {
         ..Default::default()
     })
     .await?;
+    let tight_policy: Value = tight.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part B: a second vault whose policy leaves room for two token registrations and not for Ref's storage deposit",
+        json!({"near_reserve": tight_policy["near_reserve"], "room": room.to_string()}),
+    );
     let (tight_before, _) = vault_near(&tight).await?;
     let accounts = spam_accounts(&tight, 25).await?;
     let calls = barrage(&tight, &accounts, 4, &TARGETS).await?;
@@ -884,6 +910,11 @@ async fn advance_race() -> anyhow::Result<()> {
     })
     .await?;
     settle_deposit(&slow).await?;
+    let slow_policy: Value = slow.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part B: a second vault with a short stuck_after; the swap's real answer is in flight",
+        json!({"stuck_after": slow_policy["stuck_after"], "halt_after": slow_policy["halt_after"]}),
+    );
     let slow_before = books(&slow).await?;
     let (usdc_book, wnear_book) = book(&slow).await?;
     set_fault(&slow, "SwapHang").await?;
@@ -961,6 +992,11 @@ async fn advance_race() -> anyhow::Result<()> {
     })
     .await?;
     settle_deposit(&masked).await?;
+    let masked_policy: Value = masked.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part C: a third vault with the same stuck_after; a donation will sit at Ref before advance",
+        json!({"stuck_after": masked_policy["stuck_after"], "halt_after": masked_policy["halt_after"]}),
+    );
     let (usdc_pre, wnear_pre) = book(&masked).await?;
     set_fault(&masked, "SwapHang").await?;
     let masked_nonce = decision_ready(&masked, template("buy_risk", 1_000_000)).await?;
@@ -989,34 +1025,27 @@ async fn advance_race() -> anyhow::Result<()> {
         + event_count(&masked_original, "swap_reverted");
     let (usdc_post, wnear_post) = book(&masked).await?;
     let (ref_usdc, ref_wnear) = rhea_holds(&masked).await?;
-    let outcome = match (executed_events, reverted_events) {
-        (1, 0) => "executed",
-        (0, 1) => "swap_reverted",
-        _ => "something else",
-    };
     run.step(
-        "a donation of the input token at Ref, as large as the swap, while the answer is in flight: the swap ends one way, the ledger is empty, the wallets equal the books and the USDC book does not rise",
-        outcome != "something else"
+        "SPEC 3.4 item 8: a donation of the input token at Ref, as large as the swap, after the swap landed: the vault unwinds from the donation, the books stay closed and the output stays at Ref",
+        reverted_events == 1
+            && executed_events == 0
             && stage(&masked).await? == json!("Idle")
+            && (usdc_post, wnear_post) == (usdc_pre, wnear_pre)
+            && (ref_usdc, ref_wnear) == (0, amount_out)
             && rhea_ledger(&masked).await? == (0, 0)
             && wallet_of(&masked, &masked.usdc, &masked.vault_id).await? == usdc_post
-            && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post
-            && usdc_post <= usdc_pre,
+            && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post,
         None,
-        json!({"outcome": outcome, "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
+        json!({"swap_reverted_events": reverted_events, "executed_events": executed_events,
+               "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
                "book_after": {"usdc": usdc_post.to_string(), "wnear": wnear_post.to_string()},
-               "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()}}),
+               "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()},
+               "amount_out": amount_out.to_string()}),
     );
-    run.finding(
-        "DONATION_MASKS_A_LANDED_SWAP",
-        &format!(
-            "With the swap landed and its answer in flight, a donation of 1 USDC at Ref (the swap's size) was added to the vault's \
-             account there before advance. advance ended the swap as {outcome}. Book (USDC/wNEAR) {usdc_pre}/{wnear_pre} -> \
-             {usdc_post}/{wnear_post}; Ref holds {ref_usdc}/{ref_wnear} for the vault and the vault's ledger is empty. \
-             Tokens are conserved, the wallets equal the books and the USDC book does not rise. Where the outcome is swap_reverted, \
-             recovery read the donation as the swap's input: the real output stays at Ref and in no book, and the donor's USDC took \
-             its place in the book. That is a loss of the output for a gift of the same value, not a way to raise the share price."
-        ),
+    run.note(
+        "DONATION_AFTER_THE_SWAP",
+        "The vault ends the swap as swap_reverted, as SPEC 3.4 item 8 says: the donor's USDC takes the swap's place, the books \
+         stay closed, and the real output stays at Ref and in no book. Holders lose nothing; the donor's gift is lost with the output.",
     );
     run.note(
         "LEDGER",

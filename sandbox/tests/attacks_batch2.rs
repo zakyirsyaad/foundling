@@ -1239,16 +1239,16 @@ async fn kill_agent() -> anyhow::Result<()> {
         && swap_amount == Some(json!("1000000"))
         && outside.is_empty()
         && wallets_after == wallets_before
-        && vault_usdc_before - vault_usdc_after == 1_000_000
-        && book_usdc_before - book_usdc_after == 1_000_000
+        && delta(vault_usdc_before, vault_usdc_after) == -1_000_000
+        && delta(book_usdc_before, book_usdc_after) == -1_000_000
         && ops <= budget;
     run.step(
         "the keeper id created again by its parent, with OutLayer alive: it runs a cycle and executes the strategy's decision, nothing else",
         revival_held,
         None,
         json!({"nonce": revived_nonce, "swap_amount_in": swap_amount, "decision_amount_in": "1000000",
-               "vault_usdc_wallet_drop": (vault_usdc_before - vault_usdc_after).to_string(),
-               "vault_usdc_book_drop": (book_usdc_before - book_usdc_after).to_string(),
+               "vault_usdc_wallet_drop": (-delta(vault_usdc_before, vault_usdc_after)).to_string(),
+               "vault_usdc_book_drop": (-delta(book_usdc_before, book_usdc_after)).to_string(),
                "accounts_outside_the_registered_set": outside,
                "other_wallets_unchanged": wallets_after == wallets_before, "ops_within_budget": ops <= budget}),
     );
@@ -1447,36 +1447,11 @@ async fn kill_agent() -> anyhow::Result<()> {
     run.finish(&env, before, ledger(&env).await?)
 }
 
-async fn set_fault(env: &Foundling, fault: &str) -> anyhow::Result<()> {
-    let result = env
-        .parent
-        .call(env.rhea.id(), "set_fault")
-        .args_json(json!({ "fault": fault }))
-        .transact()
-        .await?;
-    anyhow::ensure!(result.is_success(), "set_fault: {}", failures(&result));
-    Ok(())
-}
-
 /// Alice's and the vault's USDC together. A swap and its unwind move it through Ref and back,
 /// and a redeem moves it between the two, so after a swap that was undone this is what it was.
 async fn usdc_total(env: &Foundling) -> anyhow::Result<u128> {
     Ok(wallet_of(env, &env.usdc, env.alice.id()).await?
         + wallet_of(env, &env.usdc, &env.vault_id).await?)
-}
-
-async fn has_stage(env: &Foundling, key: &str) -> anyhow::Result<bool> {
-    Ok(stage(env).await?.get(key).is_some())
-}
-
-async fn wait_for_stage(env: &Foundling, key: &str) -> anyhow::Result<()> {
-    for _ in 0..150 {
-        if has_stage(env, key).await? {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-    anyhow::bail!("the vault never reached {key}: {}", stage(env).await?)
 }
 
 /// Whatever is left of a swap that was undone after redeems burned shares during it: the bucket

@@ -615,7 +615,6 @@ impl Run {
         // Sorted, so a proof does not change with the order a race happened to deliver the refusals in.
         let mut refusal_texts = self.refusals.borrow().clone();
         refusal_texts.sort();
-        refusal_texts.dedup();
         let observed = self.observed.borrow().clone();
         let unexpected: Vec<&String> = observed
             .iter()
