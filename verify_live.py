@@ -216,7 +216,10 @@ def run_live(vault, network, client, expect_code_hash=None):
             add("code_hash", "FAIL", "CODE_HASH_MISMATCH", f"the vault runs {code_hash}, expected {expect_code_hash}")
 
     def view(method, args=None):
-        return attempt(lambda: client.view(vault, method, args))
+        read = attempt(lambda: client.view(vault, method, args))
+        if isinstance(read, Problem) and read.reason == "VIEW_REFUSED":
+            return Problem(read.reason, f"the vault has no usable view {method}: {read.detail}")
+        return read
 
     def value(read):
         return None if isinstance(read, Problem) else read[0]

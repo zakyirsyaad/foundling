@@ -79,7 +79,7 @@ class FakeChain:
         assert params["account_id"] == VAULT
         name = params["method_name"]
         if name in self.refused:
-            return {"error": f"wasm execution failed: MethodNotFound {name}", "logs": [], **self._height()}
+            return {"error": "wasm execution failed with error: MethodResolveError(MethodNotFound)", "logs": [], **self._height()}
         if name == "published_decision":
             args = json.loads(base64.b64decode(params["args_base64"]))
             assert args == {"nonce": self.views["last_nonce"]}, args
@@ -247,6 +247,10 @@ class ClaimTest(unittest.TestCase):
     def test_a_vault_without_a_view_skips_that_claim_instead_of_failing(self):
         decision = by_name(report(FakeChain(refused={"published_decision"})))["decision"]
         self.assertEqual((decision.status, decision.reason), ("SKIP", "VIEW_REFUSED"))
+        self.assertIn("published_decision", decision.detail, "the reader is told which view the vault lacks")
+        revealed = by_name(report(FakeChain(refused={"revealed_salt"})))["commitment"]
+        self.assertEqual((revealed.status, revealed.reason), ("SKIP", "VIEW_REFUSED"))
+        self.assertIn("revealed_salt", revealed.detail)
 
 
 class OutputTest(unittest.TestCase):
