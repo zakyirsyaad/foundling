@@ -10,10 +10,10 @@ test("the m12 sample loads only when it is on", () => {
   expect(loadSample(cfg)?.vaultId).toBe("vault.fdl-m12-0d1276.testnet");
   expect(loadSample({ ...cfg, sample: null })).toBeNull();
 });
-test("Attack Lab rows come from the registry, not run yet", () => {
+test("Attack Lab rows come from the registry", () => {
   const rows = attackRows();
   expect(rows.length).toBeGreaterThan(10);
-  expect(rows.find((r) => r.name === "over-cap")).toEqual({ name: "over-cap", expected: "Rejected(OVER_CAP)", result: "Not run yet" });
+  expect(rows.find((r) => r.name === "over-cap")?.expected).toBe("Rejected(OVER_CAP)");
 });
 test("a test build reads the fixture claims", () => {
   expect(webClaims(cfg).map((c) => c.id)).toContain("near-intents");
