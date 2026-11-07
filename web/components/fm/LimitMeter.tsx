@@ -16,7 +16,10 @@ export function LimitMeter({ label, used, cap, decimals, estimate = false, unit,
   const text = `${formatUnits(used, decimals, digits)} / ${formatUnits(cap, decimals, digits)}${unit ? ` ${unit}` : ""}`;
   return (
     <div className="fm-meter">
-      <div className="fm-label">{name}</div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <span className="text-sm">{name}</span>
+        <span className="mono text-[13px]">{text}</span>
+      </div>
       <div
         role="meter"
         aria-label={name}
@@ -28,9 +31,6 @@ export function LimitMeter({ label, used, cap, decimals, estimate = false, unit,
         className="fm-meter-track"
       >
         <div className="fm-meter-fill" style={{ width: `${pct}%` }} data-near={pct >= 80 ? "true" : undefined} />
-      </div>
-      <div className="mono fm-small">
-        {text}
       </div>
     </div>
   );

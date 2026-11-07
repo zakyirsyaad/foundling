@@ -55,3 +55,24 @@ test("base58 decodes with leading zero bytes kept", () => {
   expect(base58ToHex("1112")).toBe("00000001");
   expect(base58ToHex("0OIl")).toBeNull();
 });
+
+import fs from "node:fs";
+import { unreadableFacts } from "@/lib/proof/facts";
+import { attackRows } from "@/lib/proof/sample";
+
+test("an unreadable vault still lists the four facts, each with a command that reads the chain", () => {
+  const facts = unreadableFacts("vault.foundling.testnet", "testnet");
+  expect(facts.map((f) => f.id)).toEqual(["keys", "code", "strategy", "commitment"]);
+  for (const f of facts) expect(f.value).toBe("Not readable right now");
+  expect(facts.find((f) => f.id === "keys")!.command).toBe("near account list-keys vault.foundling.testnet network-config testnet now");
+  expect(facts.find((f) => f.id === "strategy")!.command).toBe("near contract call-function as-read-only vault.foundling.testnet agent json-args '{}' network-config testnet now");
+  expect(facts.find((f) => f.id === "strategy")!.href).toBeUndefined();
+});
+
+test("every Attack Lab row reads in English, one line per registry attack", () => {
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, "tools", "attack-registry.json"), "utf8")) as { attacks: { name: string }[] };
+  const rows = attackRows();
+  expect(rows.map((r) => r.name)).toEqual(registry.attacks.map((a) => a.name));
+  for (const r of rows) expect(r.expected).not.toMatch(/\b(pada|tanpa|atau|tidak|oleh|tetap|saja|dan|ditolak|kembali)\b/i);
+  expect(rows.find((r) => r.name === "drip")!.expected).toBe("Rejected(OVER_EPOCH_CAP) on the decision that crosses the limit");
+});

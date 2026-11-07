@@ -19,7 +19,7 @@ export function SharePriceChart({ points, usdcDecimals }: { points: NavPoint[]; 
     <div className="h-56" role="img" aria-label="Share price by cycle">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <XAxis dataKey="at" tickLine={false} axisLine={false} fontSize={12} />
+          <XAxis dataKey="at" tickLine={false} axisLine={false} fontSize={12} minTickGap={48} interval="preserveStartEnd" />
           <YAxis domain={["auto", "auto"]} tickLine={false} axisLine={false} fontSize={12} width={56} />
           <Tooltip />
           <Line type="monotone" dataKey="price" stroke="var(--foreground)" strokeWidth={1.5} dot={false} isAnimationActive={false} />

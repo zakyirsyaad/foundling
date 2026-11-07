@@ -9,7 +9,7 @@ import { Home, splitFirstSentence } from "@/features/landing/Home";
 import { ProofView } from "@/features/proof/ProofView";
 import { TrustView } from "@/features/trust/TrustView";
 import { loadClaims } from "@/lib/claims";
-import { proofFacts } from "@/lib/proof/facts";
+import { proofFacts, unreadableFacts } from "@/lib/proof/facts";
 import { fixtureSnapshot } from "../fixtures/snapshot";
 
 vi.mock("next-themes", () => ({ useTheme: () => ({ theme: "system", setTheme: vi.fn() }) }));
@@ -59,9 +59,10 @@ test("ProofView lists facts, attacks and the unprovable", async () => {
   expect(screen.getByRole("cell", { name: "over-cap" })).toBeInTheDocument();
   expect(screen.getByText(/They test the checker, not this vault/)).toBeInTheDocument();
 });
-test("ProofView without a source says the vault is not readable", () => {
-  render(<ProofView source={null} facts={[]} attacks={[]} synthetic={false} />);
+test("ProofView without a source says the vault is not readable and still offers the four commands", () => {
+  render(<ProofView source={null} facts={unreadableFacts("vault.foundling.testnet", "testnet")} attacks={[]} synthetic={false} />);
   expect(screen.getByTestId("proof-unreadable")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Copy command" })).toHaveLength(4);
 });
 test("TrustView renders with a snapshot and without one", async () => {
   const snapshot = await fixtureSnapshot();

@@ -1,3 +1,6 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+
 import { CopyButton } from "@/components/fm/CopyButton";
 import { shellQuote } from "@/lib/format/shell";
 import { Hash } from "@/components/fm/Hash";
@@ -15,70 +18,96 @@ function verifyCommand(network: Network, vaultId: string, tx: string | undefined
   return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
 }
 
+/** The design's card: the h2 is the head row and the body follows it directly, so `#id + ol` still finds the list. */
+function Card({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section aria-labelledby={id} className="fm-card min-w-0">
+      <h2 id={id} className="border-b px-5 py-4 text-lg font-semibold">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 function TallyLine({ name, t }: { name: string; t: ProofResult["verifier"] }) {
   return (
-    <div>
-      <dt className="fm-label">{name}</dt>
+    <>
+      <dt>{name}</dt>
       <dd className="mono">{t ? `pass ${t.pass} · skip ${t.skip} · fail ${t.fail} · ${t.state}` : "Not run yet"}</dd>
-    </div>
+    </>
   );
 }
 
 export function CycleDetail({ row, proof, decision, revealAfter, chainTime, network, vaultId }: { row: CycleRow; proof: ProofResult | null; decision: string | null; revealAfter: bigint; chainTime: bigint; network: Network; vaultId: string }) {
-  const commit = proof?.verifierCommit ?? null;
-  const cmd = verifyCommand(network, vaultId, row.txHashes[0], commit);
   // A proof result, when there is one, wins over the list row: null there means "not run".
   const verifier = proof ? proof.verifier : row.verifier;
   const obs = proof ? proof.obsRecheck : row.obsRecheck;
   const limitEvent = row.events.find((e) => e.name === "rejected" || e.name === "executed");
   return (
-    <article className="grid gap-8">
+    <article className="grid gap-6">
+      <nav aria-label="Breadcrumb" className="fm-small">
+        <Link href="/app/cycles" className="underline underline-offset-4">Cycles</Link> / <span className="mono">{row.nonce.toString()}</span>
+      </nav>
       <header className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold tracking-[-0.02em]">Cycle {row.nonce.toString()}</h1>
         <Status group="cycle" word={cycleWord(row.events)} />
         <Status group="proof" word={proofWord(verifier, obs)} />
+        <span className="mono fm-small ml-auto">{row.startedAt.replace("T", " ").slice(0, 19)} UTC</span>
       </header>
-      <section aria-labelledby="timeline">
-        <h2 id="timeline" className="mb-3 text-lg font-semibold">Timeline</h2>
-        <ol className="grid gap-1">
-          {row.events.map((e, i) => (
-            <li key={`${e.name}-${i}`} className="mono text-[13px]">{e.name}{e.code ? ` (${e.code})` : ""}</li>
-          ))}
-        </ol>
-      </section>
-      <section aria-labelledby="decision">
-        <h2 id="decision" className="mb-3 text-lg font-semibold">Decision</h2>
-        <p className="mono text-[13px] break-all">{decision ?? "No decision to verify"}</p>
-      </section>
-      <section aria-labelledby="limits">
-        <h2 id="limits" className="mb-3 text-lg font-semibold">Limit check</h2>
-        <p>{limitEvent ? (limitEvent.name === "executed" ? "Every limit held; the trade ran." : `Rejected by the contract: ${limitEvent.code ?? "no code"}.`) : "No limit check in this cycle."}</p>
-      </section>
-      <section aria-labelledby="txs">
-        <h2 id="txs" className="mb-3 text-lg font-semibold">Transactions</h2>
-        <ul className="grid gap-1">
-          {row.txHashes.map((h) => (
-            <li key={h}><Hash value={h} label="transaction hash" /></li>
-          ))}
-        </ul>
-      </section>
-      <section aria-labelledby="proof">
-        <h2 id="proof" className="mb-3 text-lg font-semibold">Proof</h2>
-        <dl className="grid gap-2">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <div className="grid gap-6">
+          <Card id="timeline" title="Timeline">
+            <ol className="grid gap-3 p-5">
+              {row.events.map((e, i) => (
+                <li key={`${e.name}-${i}`} className="flex items-center gap-3">
+                  <span aria-hidden="true" className="inline-grid size-5 place-items-center rounded-full bg-foreground text-background">
+                    <svg className="fm-icon size-3" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg>
+                  </span>
+                  <span className="mono text-[13px]">{e.name}{e.code ? ` (${e.code})` : ""}</span>
+                </li>
+              ))}
+            </ol>
+          </Card>
+          <Card id="limits" title="Limit check">
+            <p className="p-5">{limitEvent ? (limitEvent.name === "executed" ? "Every limit held; the trade ran." : `Rejected by the contract: ${limitEvent.code ?? "no code"}.`) : "No limit check in this cycle."}</p>
+          </Card>
+          <Card id="txs" title="Transactions">
+            <ul className="grid gap-2 p-5">
+              {row.txHashes.map((h) => (
+                <li key={h}><Hash value={h} label="transaction hash" /></li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+        <div className="grid gap-6">
+          <ProofCard row={row} proof={proof} verifier={verifier} obs={obs} revealAfter={revealAfter} chainTime={chainTime} network={network} vaultId={vaultId} />
+          <Card id="decision" title="Decision">
+            <p className="mono p-5 text-[13px] break-all">{decision ?? "No decision to verify"}</p>
+          </Card>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ProofCard({ row, proof, verifier, obs, revealAfter, chainTime, network, vaultId }: { row: CycleRow; proof: ProofResult | null; verifier: ProofResult["verifier"]; obs: ProofResult["obsRecheck"]; revealAfter: bigint; chainTime: bigint; network: Network; vaultId: string }) {
+  const commit = proof?.verifierCommit ?? null;
+  const cmd = verifyCommand(network, vaultId, row.txHashes[0], commit);
+  return (
+    <Card id="proof" title="Proof">
+      <div className="grid gap-4 p-5">
+        <dl className="fm-kv">
           <TallyLine name="Verifier" t={verifier} />
           <TallyLine name="obs recheck" t={obs} />
-          <div>
-            <dt className="fm-label">Replay</dt>
-            <dd><Status group="proof" word={replayWord(revealAfter, chainTime, proof?.replay ?? "sealed")} /></dd>
-          </div>
+          <dt>Replay</dt>
+          <dd><Status group="proof" word={replayWord(revealAfter, chainTime, proof?.replay ?? "sealed")} /></dd>
         </dl>
-        <p className="mt-3 text-[13px] text-muted-foreground">Newer verifiers also check the advisor&apos;s archived NEAR AI signature and count a missing one as a skip; the commit in the command decides which checks run. A result shown here is a claim; the command below is the answer.</p>
-        {commit ? null : <p className="mt-1 text-[13px] text-muted-foreground">{`Replace ${COMMIT_PLACEHOLDER} with the commit that built this vault's binary.`}</p>}
-        <div className="fm-code mt-3">
-          <code className="break-all">{cmd}</code>
-          <CopyButton text={cmd} label="Copy command" />
+        <p className="fm-small">Newer verifiers also check the advisor&apos;s archived NEAR AI signature and count a missing one as a skip; the commit in the command decides which checks run. A result shown here is a claim; the command below is the answer.</p>
+        {commit ? null : <p className="fm-small">{`Replace ${COMMIT_PLACEHOLDER} with the commit that built this vault's binary.`}</p>}
+        <div className="fm-code fm-code--row fm-code--wrap">
+          <pre><code>{cmd}</code></pre>
+          <CopyButton text={cmd} label="Copy command" icon />
         </div>
-      </section>
-    </article>
+      </div>
+    </Card>
   );
 }

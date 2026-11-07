@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 
 import { CycleDetail } from "@/features/cycles/CycleDetail";
-import { CycleFilterBar, CycleMap, CycleTable, PartialTable } from "@/features/cycles/CycleList";
+import { CycleFilterBar, CycleMap, CyclePager, CycleTable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
 import type { CycleRow } from "@/lib/history/client";
 
 const done = { pass: 5, skip: 0, fail: 0, state: "done" as const };
@@ -68,4 +68,25 @@ test("the proof note ties the NEAR AI check to the verifier commit", () => {
   expect(screen.queryByText(/not covered yet/)).toBeNull();
   expect(screen.getByText(/Newer verifiers also check the advisor's archived NEAR AI signature/)).toBeInTheDocument();
   expect(screen.getByText(/the commit in the command decides which checks run/)).toBeInTheDocument();
+});
+
+test("the pager links to older cycles with the filter kept, and back to the newest", () => {
+  render(<CyclePager filter="hold" next="eyJuIjo0MH0" paged />);
+  expect(screen.getByRole("link", { name: "Older cycles" })).toHaveAttribute("href", "/app/cycles?filter=hold&cursor=eyJuIjo0MH0");
+  expect(screen.getByRole("link", { name: "Newest cycles" })).toHaveAttribute("href", "/app/cycles?filter=hold");
+});
+test("the first page of a short history has no pager", () => {
+  const { container } = render(<CyclePager filter="all" next={null} paged={false} />);
+  expect(container).toBeEmptyDOMElement();
+});
+test("the last page links back to the newest only", () => {
+  render(<CyclePager filter="all" next={null} paged />);
+  expect(screen.queryByRole("link", { name: "Older cycles" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Newest cycles" })).toHaveAttribute("href", "/app/cycles");
+});
+test("a cursor from the URL is passed on only when it looks like the API's base64url", () => {
+  expect(cycleCursor("eyJuIjo0MH0")).toBe("eyJuIjo0MH0");
+  expect(cycleCursor(undefined)).toBeUndefined();
+  expect(cycleCursor("../etc")).toBeUndefined();
+  expect(cycleCursor("a".repeat(513))).toBeUndefined();
 });
