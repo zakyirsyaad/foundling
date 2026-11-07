@@ -170,7 +170,13 @@ async fn inflated_nav() -> anyhow::Result<()> {
     );
     // Both amounts are under the bps line and over the absolute one, so only the absolute cap can say no.
     let bps_line = nav_at(price) * cap_bps / 10_000;
-    for amount in [one_over, (cap_usdc + bps_line) / 2] {
+    // The vault cannot fund a buy bigger than its USDC book, so the second amount stops there.
+    let second = ((cap_usdc + bps_line) / 2).min(usdc_book);
+    anyhow::ensure!(
+        second > cap_usdc && second < bps_line,
+        "setup failed: the second buy must sit between the absolute cap and the bps line and be fundable: {cap_usdc} {second} {bps_line} {usdc_book}"
+    );
+    for amount in [one_over, second] {
         let outcome = decide(&env, priced("buy_risk", amount, price)).await?;
         run.step(
             &format!("anchor price 100x, buy of {amount}: the absolute cap refuses"),
