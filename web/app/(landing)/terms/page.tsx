@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 
+import { PAGE_SEO } from "@/content/seo";
 import { ONECLICK_TOS_URL, SECTIONS, TERMS_DATE } from "@/content/terms";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Terms · Foundling" };
+export const metadata: Metadata = pageMetadata(PAGE_SEO.terms);
 
 export default function TermsPage() {
   return (

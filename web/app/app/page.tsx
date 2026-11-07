@@ -4,8 +4,10 @@ import { config } from "@/config";
 import { Overview } from "@/features/vault/Overview";
 import { getSnapshot } from "@/lib/chain/source";
 import { createHistoryClient } from "@/lib/history/client";
+import { PAGE_SEO } from "@/content/seo";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Vault · Foundling" };
+export const metadata: Metadata = pageMetadata(PAGE_SEO.app);
 export const dynamic = "force-dynamic";
 
 export default async function AppOverview() {

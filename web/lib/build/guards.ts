@@ -6,6 +6,8 @@ export interface GuardInput {
   vercel: boolean;
   claimsExists: boolean;
   terms: { date: string; oneClickTosUrl: string };
+  network: string | undefined;
+  siteUrl: string | undefined;
 }
 
 export function buildGuardProblems(i: GuardInput): string[] {
@@ -16,5 +18,6 @@ export function buildGuardProblems(i: GuardInput): string[] {
   if (!i.isBuild || i.testBuild || i.bundleCheck) return problems;
   if (!i.claimsExists) problems.push("claims.json is missing at the repo root; a production build cannot state claims without it");
   if (i.terms.date === "TBD" || !i.terms.oneClickTosUrl.startsWith("https://")) problems.push("content/terms.json still has TBD values; fill the terms date and the 1Click terms URL before a production build");
+  if (i.network === "mainnet" && !i.siteUrl?.trim()) problems.push("NEXT_PUBLIC_SITE_URL is missing; the mainnet site needs it for canonical links, Open Graph and the sitemap");
   return problems;
 }

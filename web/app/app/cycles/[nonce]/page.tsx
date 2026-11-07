@@ -7,8 +7,17 @@ import { CycleDetail } from "@/features/cycles/CycleDetail";
 import { createRpcClient } from "@/lib/chain/rpc";
 import { getSnapshot } from "@/lib/chain/source";
 import { createHistoryClient } from "@/lib/history/client";
+import { PAGE_SEO } from "@/content/seo";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "Cycle · Foundling" };
+const NONCE = /^\d{1,20}$/;
+
+/** One page per cycle: titled by number, kept out of search (the cycle list is the indexed page). */
+export async function generateMetadata({ params }: { params: Promise<{ nonce: string }> }): Promise<Metadata> {
+  const raw = (await params).nonce;
+  if (!NONCE.test(raw)) return pageMetadata(PAGE_SEO.cycle);
+  return pageMetadata({ ...PAGE_SEO.cycle, title: `Cycle ${raw}`, path: `/app/cycles/${raw}` });
+}
 export const dynamic = "force-dynamic";
 
 async function decisionOf(nonce: bigint): Promise<string | null> {
@@ -21,7 +30,7 @@ async function decisionOf(nonce: bigint): Promise<string | null> {
 
 export default async function CyclePage({ params }: { params: Promise<{ nonce: string }> }) {
   const raw = (await params).nonce;
-  if (!/^\d{1,20}$/.test(raw)) notFound();
+  if (!NONCE.test(raw)) notFound();
   const nonce = BigInt(raw);
   const api = createHistoryClient(config.apiOrigin);
   const [row, proof, decision, snap] = await Promise.all([api.cycle(nonce), api.proof(nonce), decisionOf(nonce), getSnapshot("app")]);

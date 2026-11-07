@@ -136,7 +136,7 @@ Keluaran: `vault.fdl-m12-0d1276.testnet: 7 cycles rebuilt from events`. Baris `p
 1. Isi `.env`: `ACTIVE_VAULT_ID` dengan vault final, `CHAIN=mainnet`, `OBS_SOURCE=live`, dan `VERIFIER_COMMIT` dengan commit yang membangun `wasm_hash` vault final. Cek nilainya dengan view `agent` milik vault.
 2. **[VPS]** `docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build worker api`
 3. Cek `sync_state` (§4) untuk vault baru. Baris vault lama tetap ada, karena setiap tabel dikunci per `vault_id`.
-4. Di Vercel: `NEXT_PUBLIC_VAULT_ID` dan `NEXT_PUBLIC_API_ORIGIN=https://api.<domain>`.
+4. Di Vercel: `NEXT_PUBLIC_VAULT_ID`, `NEXT_PUBLIC_API_ORIGIN=https://api.<domain>`, dan `NEXT_PUBLIC_SITE_URL=https://<domain>`. Tanpa variabel terakhir, build mainnet berhenti.
 
 Worker harus sudah hidup sebelum siklus pertama vault final, supaya bundel bukti diambil selagi log RPC masih ada.
 

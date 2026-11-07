@@ -32,6 +32,8 @@ export interface DeploymentConfig {
   oneClick: OneClickConfig | null;
   sample: "m12" | null;
   testBuild: boolean;
+  /** The public origin, e.g. https://foundling.xyz: canonical links, Open Graph and the sitemap. */
+  siteUrl: string | null;
   landingCacheSeconds: number;
   appCacheSeconds: number;
 }
@@ -73,6 +75,14 @@ function parseUrls(raw: string | undefined, testBuild: boolean): string[] {
     if (!urlAllowed(u, testBuild)) throw new Error(`RPC URL must be https: ${u}`);
   }
   return urls;
+}
+
+/** Origin only, so a stray path or trailing slash never doubles up in canonical links. */
+function parseSiteUrl(raw: string | undefined, testBuild: boolean): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  if (!urlAllowed(value, testBuild)) throw new Error(`site URL must be https: ${value}`);
+  return new URL(value).origin;
 }
 
 function cacheSeconds(env: Record<string, string | undefined>, testBuild: boolean): { landing: number; app: number } {
@@ -127,6 +137,7 @@ export function loadConfig(env: Record<string, string | undefined>): DeploymentC
     oneClick,
     sample,
     testBuild,
+    siteUrl: parseSiteUrl(env.NEXT_PUBLIC_SITE_URL, testBuild),
     landingCacheSeconds: cache.landing,
     appCacheSeconds: cache.app,
   };
