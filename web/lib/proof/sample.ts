@@ -32,13 +32,16 @@ export function expectedLine(a: { name: string; codes?: readonly string[] }): st
   return ATTACK_EXPECTED[a.name] ?? (a.codes && a.codes.length > 0 ? a.codes.join(", ") : NO_LINE);
 }
 
-/** Attack Lab rows from the registry; a result only when `proofs/attack/<name>.json` exists. */
-export function attackRows(): AttackRow[] {
+/** Written by `make attack-proofs` from a run on the reproducible vault build; claims.json points here too. */
+export const ATTACK_PROOF_DIR = path.join(REPO_ROOT, "proofs", "attack", "reproducible");
+
+/** Attack Lab rows from the registry; a result only when `<dir>/<name>.json` exists. */
+export function attackRows(dir: string = ATTACK_PROOF_DIR): AttackRow[] {
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "tools", "attack-registry.json"), "utf8")) as { attacks: { name: string; codes?: string[] }[] };
     return registry.attacks.map((a) => {
       const expected = expectedLine(a);
-      const file = path.join(REPO_ROOT, "proofs", "attack", `${a.name}.json`);
+      const file = path.join(dir, `${a.name}.json`);
       if (!fs.existsSync(file)) return { name: a.name, expected, result: "Not run yet" as const };
       const r = JSON.parse(fs.readFileSync(file, "utf8")) as { result?: string };
       return { name: a.name, expected, result: r.result === "PASS" ? ("Pass" as const) : ("Fail" as const) };

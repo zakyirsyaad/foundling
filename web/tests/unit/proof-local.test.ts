@@ -57,6 +57,7 @@ test("base58 decodes with leading zero bytes kept", () => {
 });
 
 import fs from "node:fs";
+import os from "node:os";
 import { unreadableFacts } from "@/lib/proof/facts";
 import { attackRows, expectedLine } from "@/lib/proof/sample";
 
@@ -75,6 +76,25 @@ test("every Attack Lab row reads in English, one line per registry attack", () =
   expect(rows.map((r) => r.name)).toEqual(registry.attacks.map((a) => a.name));
   for (const r of rows) expect(r.expected).not.toMatch(/\b(pada|tanpa|atau|tidak|oleh|tetap|saja|dan|ditolak|kembali)\b/i);
   expect(rows.find((r) => r.name === "drip")!.expected).toBe("Rejected(OVER_EPOCH_CAP) on the decision that crosses the limit");
+});
+
+test("Attack Lab results come from the proofs committed from the reproducible build", () => {
+  const rows = attackRows();
+  const committed = fs.readdirSync(path.join(repoRoot, "proofs", "attack", "reproducible")).filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, ""));
+  expect(committed.length).toBeGreaterThan(0);
+  for (const name of committed) expect(rows.find((r) => r.name === name)?.result, name).toBe("Pass");
+  expect(rows.filter((r) => r.result === "Not run yet").map((r) => r.name).sort()).toEqual(rows.map((r) => r.name).filter((n) => !committed.includes(n)).sort());
+});
+
+test("a proof that did not pass shows Fail, and an attack without a proof shows Not run yet", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "attack-proofs-"));
+  fs.writeFileSync(path.join(dir, "over-cap.json"), JSON.stringify({ attack: "over-cap", result: "PASS" }));
+  fs.writeFileSync(path.join(dir, "drip.json"), JSON.stringify({ attack: "drip", result: "FAIL" }));
+  const rows = attackRows(dir);
+  expect(rows.find((r) => r.name === "over-cap")?.result).toBe("Pass");
+  expect(rows.find((r) => r.name === "drip")?.result).toBe("Fail");
+  expect(rows.find((r) => r.name === "replay")?.result).toBe("Not run yet");
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("an attack without an English line shows its codes, and never a blank cell or a crash", () => {
