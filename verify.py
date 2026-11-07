@@ -157,6 +157,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="verify.py", description="Foundling tier 0a offline verifier")
     parser.add_argument("check", nargs="?", choices=CHECK_NAMES, help="run one check (default: all)")
     parser.add_argument("--proofs", default=str(DEFAULT_PROOFS), help="fixture directory")
+    parser.add_argument("--strict", action="store_true", help="a SKIP also fails (exit 1)")
     args = parser.parse_args(argv)
 
     selected = [args.check] if args.check else list(CHECK_NAMES)
@@ -178,7 +179,7 @@ def main(argv=None):
     skipped = sum(r.status == "SKIP" for r in results)
     failed = sum(r.status == "FAIL" for r in results)
     print(f"SUMMARY pass={passed} skip={skipped} fail={failed} mode=offline keys={keys_label(results)}")
-    return EXIT_FAIL if failed else EXIT_OK
+    return EXIT_FAIL if failed or (args.strict and skipped) else EXIT_OK
 
 
 if __name__ == "__main__":
