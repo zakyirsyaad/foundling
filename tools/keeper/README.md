@@ -66,14 +66,14 @@ Baris lain di berkas yang sama, bukan siklus: `"kind":"skip"` (alasan tidak memi
 python3 -m tools.keeper summary keeper-soak.jsonl [--min-cycles 1]
 ```
 
-Keluar dengan kode 0 (LULUS) atau 1 (GAGAL). Yang diharapkan (SPEC §3.7): `Hold(NO_DECISION)`, `Rejected(PRICE_UNAVAILABLE)`, `Rejected(PRICE_WIDE)`, dan `CycleFailed(NULL_RESULT)`. `Executed` diizinkan. GAGAL bila ada:
+Keluar dengan kode 0 (`Soak: PASS`) atau 1 (`Soak: FAIL`); keluarannya berbahasa Inggris, seperti keluaran CLI lain. Yang diharapkan (SPEC §3.7): `Hold(NO_DECISION)`, `Rejected(PRICE_UNAVAILABLE)`, `Rejected(PRICE_WIDE)`, dan `CycleFailed(NULL_RESULT)`. `Executed` diizinkan. `Soak: FAIL` bila ada:
 
 - siklus dengan hasil lain, termasuk `CycleFailed` selain `NULL_RESULT` (juga `EXPIRED`, kecuali siklus itu punya `price_retries` > 0 dan `failed_calls` = 0: feed null yang bertahan melewati `decision_ttl` ditolak `PRICE_UNAVAILABLE` berulang lalu berakhir di `EXPIRED`, dan itu dihitung sebagai `PRICE_UNAVAILABLE` yang diharapkan; panggilan yang gagal sendiri mencabut pengecualian itu), `SwapReverted`, `CycleAborted`, dan `Unknown` (kecuali siklus yang tidak dipicu bot, lihat di bawah);
 - siklus yang pernah `Stuck`, walau akhirnya pulih;
 - baris log rusak;
 - siklus kurang dari `--min-cycles`.
 
-Siklus `resumed: true` tanpa `txs` (bot menemukannya sudah berjalan) tidak dihitung sebagai siklus dan tidak dinilai: jumlahnya dicetak terpisah (`Cycles the bot did not trigger`) dan tidak ikut `--min-cycles`. Yang pernah `Stuck` tetap GAGAL. Jadi trigger manual selama soak tidak menggagalkannya, tetapi siklus itu juga tidak membuktikan apa pun tentang bot.
+Siklus `resumed: true` tanpa `txs` (bot menemukannya sudah berjalan) tidak dihitung sebagai siklus dan tidak dinilai: jumlahnya dicetak terpisah (`Cycles the bot did not trigger`) dan tidak ikut `--min-cycles`. Yang pernah `Stuck` tetap `FAIL`. Jadi trigger manual selama soak tidak menggagalkannya, tetapi siklus itu juga tidak membuktikan apa pun tentang bot.
 
 Baris `error` (RPC gagal) dan `call_failed` ditampilkan jumlahnya, dengan peringatan bila ada panggilan gagal, tetapi tidak menggagalkan soak. Keluarannya mendaftar nonce dan alasan tiap siklus tak terduga.
 
@@ -94,4 +94,4 @@ Tanpa jaringan. Vault dan RPC dipalsukan oleh `tests/keeper_fakes.py` (model kec
 
 - Belum dijalankan terhadap vault testnet atau sandbox Rust; hanya model palsu dan pengecekan bahwa near-cli menerima urutan argumennya.
 - Perilaku near-cli saat panggilan gagal on-chain (kode keluar, ada tidaknya `Transaction ID`) belum diamati. Bot memakai tahap vault, bukan hasil near-cli, sebagai kebenaran.
-- Bahwa `EXPERIMENTAL_tx_status` memuat log callback OutLayer (yield/resume) di pohon receipt transaksi pemicu belum dibuktikan. Bila tidak, hasil siklus tercatat `Unknown` dan soak GAGAL (aman, tetapi tidak informatif).
+- Bahwa `EXPERIMENTAL_tx_status` memuat log callback OutLayer (yield/resume) di pohon receipt transaksi pemicu belum dibuktikan. Bila tidak, hasil siklus tercatat `Unknown` dan soak `FAIL` (aman, tetapi tidak informatif).

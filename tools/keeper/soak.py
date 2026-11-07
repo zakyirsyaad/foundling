@@ -85,17 +85,17 @@ def summarize_log(lines, min_cycles=1):
 
 
 def render(summary):
-    out = [f"Siklus: {summary.cycles}   skip: {summary.skips}   panggilan gagal: {summary.call_failures}"
-           f"   RPC gagal: {summary.errors}   PRICE_UNAVAILABLE diulang: {summary.price_retries}"]
+    out = [f"Cycles: {summary.cycles}   skips: {summary.skips}   failed calls: {summary.call_failures}"
+           f"   RPC errors: {summary.errors}   PRICE_UNAVAILABLE retried: {summary.price_retries}"]
     out += [f"  {name}: {count}" for name, count in sorted(summary.outcomes.items())]
     if summary.untriggered:
         out.append(f"Cycles the bot did not trigger (not counted, not judged): {summary.untriggered}")
     if summary.malformed:
-        out.append(f"Baris log rusak: {summary.malformed}")
+        out.append(f"Malformed log lines: {summary.malformed}")
     if summary.cycles < summary.min_cycles:
-        out.append(f"Siklus kurang dari minimum ({summary.cycles} < {summary.min_cycles})")
-    out += [f"Tak terduga: nonce {u['nonce']} {u['reason']}" for u in summary.unexpected]
+        out.append(f"Fewer cycles than the minimum ({summary.cycles} < {summary.min_cycles})")
+    out += [f"Unexpected: nonce {u['nonce']} {u['reason']}" for u in summary.unexpected]
     if summary.call_failures:
-        out.append(f"Peringatan: {summary.call_failures} panggilan gagal (lihat baris call_failed di log)")
-    out.append("Soak: LULUS" if summary.passed else "Soak: GAGAL")
+        out.append(f"Warning: failed calls: {summary.call_failures} (see the call_failed lines in the log)")
+    out.append("Soak: PASS" if summary.passed else "Soak: FAIL")
     return "\n".join(out)

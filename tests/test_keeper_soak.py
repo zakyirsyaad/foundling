@@ -69,7 +69,7 @@ class SummaryTest(unittest.TestCase):
         summary = summarize_log(lines(cycle(1), {"kind": "error", "reason": "RpcError"}))
         self.assertEqual(summary.errors, 1)
         self.assertTrue(summary.passed)
-        self.assertIn("RPC gagal: 1", render(summary))
+        self.assertIn("RPC errors: 1", render(summary))
 
     def test_a_soak_with_no_cycles_fails_unless_allowed(self):
         self.assertFalse(summarize_log([]).passed)
@@ -91,15 +91,15 @@ class SummaryTest(unittest.TestCase):
         records = [cycle(1), {"kind": "call_failed", "method": "execute_decision", "error": "x"}]
         summary = summarize_log(lines(*records))
         self.assertTrue(summary.passed)
-        self.assertIn("Peringatan: 1 panggilan gagal", render(summary))
-        self.assertNotIn("Peringatan", render(summarize_log(lines(cycle(1)))))
+        self.assertIn("Warning: failed calls: 1", render(summary))
+        self.assertNotIn("Warning", render(summarize_log(lines(cycle(1)))))
 
     def test_render_names_the_verdict_and_each_unexpected_cycle(self):
         text = render(summarize_log(lines(cycle(1), cycle(2, "Rejected", "OVER_CAP"))))
-        self.assertIn("GAGAL", text)
+        self.assertIn("Soak: FAIL", text)
         self.assertIn("nonce 2", text)
         self.assertIn("Rejected(OVER_CAP)", text)
-        self.assertIn("LULUS", render(summarize_log(lines(cycle(1)))))
+        self.assertIn("Soak: PASS", render(summarize_log(lines(cycle(1)))))
 
 
 def untriggered(nonce, **extra):
