@@ -7,12 +7,10 @@ import type { ReactNode } from "react";
 
 import { config } from "@/config";
 import { MockBanner } from "@/features/vault/MockBanner";
+import { rootMetadata } from "@/lib/seo/site";
 import { geistMono, inter } from "./fonts";
 
-export const metadata: Metadata = {
-  title: "Foundling",
-  description: "A USDC vault on NEAR, born without access keys.",
-};
+export const metadata: Metadata = rootMetadata(config, process.env.VERCEL_ENV);
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;

@@ -53,6 +53,13 @@ test("RPC and API must be https outside a test build", () => {
   expect(loadConfig({ ...mainnetEnv, NEXT_PUBLIC_TEST_BUILD: "1", NEXT_PUBLIC_RPC_URLS: "http://localhost:3199/rpc" }).rpcUrls).toEqual(["http://localhost:3199/rpc"]);
   expect(loadConfig(mainnetEnv).apiOrigin).toBeNull();
 });
+test("the site URL is an https origin, optional, and http only in a test build", () => {
+  expect(loadConfig(mainnetEnv).siteUrl).toBeNull();
+  expect(loadConfig({ ...mainnetEnv, NEXT_PUBLIC_SITE_URL: "https://foundling.example/some/path" }).siteUrl).toBe("https://foundling.example");
+  expect(() => loadConfig({ ...mainnetEnv, NEXT_PUBLIC_SITE_URL: "http://foundling.example" })).toThrow(/site URL/);
+  expect(() => loadConfig({ ...mainnetEnv, NEXT_PUBLIC_SITE_URL: "not a url" })).toThrow(/site URL/);
+  expect(loadConfig({ ...testnetEnv, NEXT_PUBLIC_TEST_BUILD: "1", NEXT_PUBLIC_SITE_URL: "http://localhost:3100" }).siteUrl).toBe("http://localhost:3100");
+});
 test("the m12 sample is opt-in", () => {
   expect(loadConfig(mainnetEnv).sample).toBeNull();
   expect(loadConfig({ ...testnetEnv, NEXT_PUBLIC_SAMPLE: "m12" }).sample).toBe("m12");

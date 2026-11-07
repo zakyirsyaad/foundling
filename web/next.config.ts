@@ -17,6 +17,8 @@ const problems = buildGuardProblems({
   vercel: Boolean(process.env.VERCEL),
   claimsExists: fs.existsSync(path.join(import.meta.dirname, "..", "claims.json")),
   terms,
+  network: process.env.NEXT_PUBLIC_NETWORK,
+  siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
 });
 if (problems.length) throw new Error(problems.join("; "));
 
