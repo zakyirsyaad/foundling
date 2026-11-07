@@ -102,6 +102,43 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("LULUS", render(summarize_log(lines(cycle(1)))))
 
 
+def untriggered(nonce, **extra):
+    return {**cycle(nonce, "Unknown", None), "resumed": True, "txs": [], **extra}
+
+
+class UntriggeredCyclesTest(unittest.TestCase):
+    def test_a_cycle_the_bot_did_not_trigger_does_not_fail_the_soak(self):
+        summary = summarize_log(lines(cycle(1), untriggered(2)))
+        self.assertTrue(summary.passed, summary.unexpected)
+        self.assertEqual((summary.cycles, summary.untriggered), (1, 1))
+
+    def test_it_is_counted_apart_and_shown(self):
+        text = render(summarize_log(lines(cycle(1), untriggered(2), untriggered(3))))
+        self.assertIn("did not trigger (not counted, not judged): 2", text)
+        self.assertNotIn("did not trigger", render(summarize_log(lines(cycle(1)))))
+
+    def test_it_does_not_count_toward_the_minimum_cycles(self):
+        summary = summarize_log(lines(untriggered(1)), min_cycles=1)
+        self.assertFalse(summary.passed)
+        self.assertEqual(summary.cycles, 0)
+
+    def test_one_that_went_stuck_still_fails(self):
+        for record in (untriggered(1, stuck=True), untriggered(1, final_stage="Stuck")):
+            with self.subTest(record):
+                summary = summarize_log(lines(cycle(2), record))
+                self.assertEqual([u["reason"] for u in summary.unexpected], ["Stuck"])
+                self.assertFalse(summary.passed)
+
+    def test_unknown_with_a_transaction_of_the_bot_still_fails(self):
+        record = {**cycle(1, "Unknown", None), "resumed": False, "txs": [{"method": "trigger_cycle", "hash": "H"}]}
+        self.assertEqual([u["reason"] for u in summarize_log(lines(record)).unexpected], ["Unknown"])
+
+    def test_a_taken_over_cycle_with_a_known_result_is_judged_as_usual(self):
+        record = {**cycle(1, "Rejected", "OVER_CAP"), "resumed": True, "txs": [{"method": "advance", "hash": "H"}]}
+        summary = summarize_log(lines(record))
+        self.assertEqual([u["reason"] for u in summary.unexpected], ["Rejected(OVER_CAP)"])
+
+
 class StorageTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

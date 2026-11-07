@@ -15,6 +15,7 @@ EXPECTED = {
 @dataclass
 class Summary:
     cycles: int = 0
+    untriggered: int = 0
     skips: int = 0
     call_failures: int = 0
     errors: int = 0
@@ -29,8 +30,18 @@ class Summary:
         return not self.unexpected and not self.malformed and self.cycles >= self.min_cycles
 
 
+def is_stuck(record):
+    return bool(record.get("stuck") or record.get("final_stage") == "Stuck")
+
+
+def is_untriggered(record):
+    """A cycle the bot found already running and took over: it has no transaction of its own, so
+    its outcome cannot be read and is `Unknown`. One it saw go Stuck is still a failure."""
+    return bool(record.get("resumed")) and not record.get("txs") and not is_stuck(record)
+
+
 def unexpected_reason(record):
-    if record.get("stuck") or record.get("final_stage") == "Stuck":
+    if is_stuck(record):
         return "Stuck"
     key = (record.get("result"), record.get("code"))
     if key in EXPECTED:
@@ -60,6 +71,9 @@ def summarize_log(lines, min_cycles=1):
         elif kind == "error":
             summary.errors += 1
         elif kind == "cycle":
+            if is_untriggered(record):
+                summary.untriggered += 1
+                continue
             summary.cycles += 1
             summary.price_retries += record.get("price_retries", 0)
             code = record.get("code")
@@ -74,6 +88,8 @@ def render(summary):
     out = [f"Siklus: {summary.cycles}   skip: {summary.skips}   panggilan gagal: {summary.call_failures}"
            f"   RPC gagal: {summary.errors}   PRICE_UNAVAILABLE diulang: {summary.price_retries}"]
     out += [f"  {name}: {count}" for name, count in sorted(summary.outcomes.items())]
+    if summary.untriggered:
+        out.append(f"Cycles the bot did not trigger (not counted, not judged): {summary.untriggered}")
     if summary.malformed:
         out.append(f"Baris log rusak: {summary.malformed}")
     if summary.cycles < summary.min_cycles:

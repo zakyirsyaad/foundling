@@ -56,7 +56,7 @@ Satu baris JSON per siklus selesai (`"kind":"cycle"`):
  "stages_seen":["AwaitingDecision"],"stuck":false,"price_retries":0,"failed_calls":0,"resumed":false}
 ```
 
-`result` dan `code` dibaca dari event `EVENT_JSON` pada transaksi siklus itu sendiri, hanya dari receipt yang dieksekusi akun vault (pohon transaksi juga memuat OutLayer, oracle, Ref, dan token, yang bisa mencetak baris berbentuk event vault); event cacat dilewati: `Hold`, `CycleFailed`, `Rejected`, `Executed`, `SwapReverted`, `CycleAborted`, atau `Unknown` bila event tidak ditemukan. `price_retries` menghitung `Rejected(PRICE_UNAVAILABLE)` yang diulang; `failed_calls` menghitung panggilan bot dalam siklus itu yang ditolak. `resumed: true` berarti bot mengambil alih siklus yang tidak dimulainya (state hilang), jadi `txs` kosong dan hasilnya `Unknown`. Siklus yang diakhiri pihak lain (siapa saja boleh memanggil `advance`, `abort_stale_cycle`, `expire_decision`) juga bisa `Unknown`, karena eventnya tidak ada di tx milik bot. State restart hanya dipakai bila ditulis untuk vault yang sama.
+`result` dan `code` dibaca dari event `EVENT_JSON` pada transaksi siklus itu sendiri, hanya dari receipt yang dieksekusi akun vault (pohon transaksi juga memuat OutLayer, oracle, Ref, dan token, yang bisa mencetak baris berbentuk event vault); event cacat dilewati: `Hold`, `CycleFailed`, `Rejected`, `Executed`, `SwapReverted`, `CycleAborted`, atau `Unknown` bila event tidak ditemukan. `price_retries` menghitung `Rejected(PRICE_UNAVAILABLE)` yang diulang; `failed_calls` menghitung panggilan bot dalam siklus itu yang ditolak. `resumed: true` berarti bot mengambil alih siklus yang tidak dimulainya (dipicu pihak lain, atau jejaknya hilang bersama state), jadi `txs` kosong dan hasilnya `Unknown`. Hash trigger bot sendiri disimpan di state (`pending`) begitu `trigger_cycle` kembali, sebelum bot menunggu nonce, jadi gangguan RPC sesaat setelah trigger tidak membuat siklus itu `Unknown`: tick berikutnya melanjutkannya dengan hash itu, atau menutupnya bila siklusnya sudah selesai. Siklus yang diakhiri pihak lain (siapa saja boleh memanggil `advance`, `abort_stale_cycle`, `expire_decision`) juga bisa `Unknown`, karena eventnya tidak ada di tx milik bot. State restart hanya dipakai bila ditulis untuk vault yang sama.
 
 Baris lain di berkas yang sama, bukan siklus: `"kind":"skip"` (alasan tidak memicu: `price_null`, `frozen`, `halted`; dicatat saat alasan berubah atau tiap 10 menit), `"kind":"call_failed"` (panggilan ditolak, dengan teks kesalahan yang sudah dibersihkan dari kunci), `"kind":"error"` (RPC gagal).
 
@@ -68,10 +68,12 @@ python3 -m tools.keeper summary keeper-soak.jsonl [--min-cycles 1]
 
 Keluar dengan kode 0 (LULUS) atau 1 (GAGAL). Yang diharapkan (SPEC §3.7): `Hold(NO_DECISION)`, `Rejected(PRICE_UNAVAILABLE)`, `Rejected(PRICE_WIDE)`, dan `CycleFailed(NULL_RESULT)`. `Executed` diizinkan. GAGAL bila ada:
 
-- siklus dengan hasil lain, termasuk `CycleFailed` selain `NULL_RESULT` (juga `EXPIRED`, kecuali siklus itu punya `price_retries` > 0 dan `failed_calls` = 0: feed null yang bertahan melewati `decision_ttl` ditolak `PRICE_UNAVAILABLE` berulang lalu berakhir di `EXPIRED`, dan itu dihitung sebagai `PRICE_UNAVAILABLE` yang diharapkan; panggilan yang gagal sendiri mencabut pengecualian itu), `SwapReverted`, `CycleAborted`, dan `Unknown`;
+- siklus dengan hasil lain, termasuk `CycleFailed` selain `NULL_RESULT` (juga `EXPIRED`, kecuali siklus itu punya `price_retries` > 0 dan `failed_calls` = 0: feed null yang bertahan melewati `decision_ttl` ditolak `PRICE_UNAVAILABLE` berulang lalu berakhir di `EXPIRED`, dan itu dihitung sebagai `PRICE_UNAVAILABLE` yang diharapkan; panggilan yang gagal sendiri mencabut pengecualian itu), `SwapReverted`, `CycleAborted`, dan `Unknown` (kecuali siklus yang tidak dipicu bot, lihat di bawah);
 - siklus yang pernah `Stuck`, walau akhirnya pulih;
 - baris log rusak;
 - siklus kurang dari `--min-cycles`.
+
+Siklus `resumed: true` tanpa `txs` (bot menemukannya sudah berjalan) tidak dihitung sebagai siklus dan tidak dinilai: jumlahnya dicetak terpisah (`Cycles the bot did not trigger`) dan tidak ikut `--min-cycles`. Yang pernah `Stuck` tetap GAGAL. Jadi trigger manual selama soak tidak menggagalkannya, tetapi siklus itu juga tidak membuktikan apa pun tentang bot.
 
 Baris `error` (RPC gagal) dan `call_failed` ditampilkan jumlahnya, dengan peringatan bila ada panggilan gagal, tetapi tidak menggagalkan soak. Keluarannya mendaftar nonce dan alasan tiap siklus tak terduga.
 
