@@ -1,7 +1,7 @@
 CONTRACTS := vault mock-oracle mock-ref mock-outlayer mock-token
 MOCKS := mock-oracle mock-ref mock-outlayer mock-token
 
-.PHONY: quick wasm sandbox attack-lab attack-warm attack-lab-full attack-proofs verify verify-strict
+.PHONY: quick wasm sandbox attack-lab attack-warm attack-lab-full attack-proofs verify verify-strict readme
 
 # Unit tests and proptest of every contract and the strategy, as CI runs them: --locked,
 # so a stale Cargo.lock fails here and is not rewritten. No sandbox, no wasm build.
@@ -67,3 +67,8 @@ verify:
 # The same, but a SKIP also fails. For CI: a fixture that stops opening its commitment must not pass quietly.
 verify-strict:
 	python3 verify.py --strict
+
+# Rebuilds README.md from claims.json and tools/readme_template.md. `python3 tools/readme.py --check`
+# (what CI should run) fails when the committed README differs from what these inputs build.
+readme:
+	python3 tools/readme.py
