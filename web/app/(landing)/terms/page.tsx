@@ -6,31 +6,43 @@ export const metadata: Metadata = { title: "Terms · Foundling" };
 
 export default function TermsPage() {
   return (
-    <main className="mx-auto max-w-[760px] px-4 py-24 max-sm:py-16">
-      <h1 className="text-[48px] leading-[1.05] font-semibold tracking-[-0.035em] max-sm:text-[36px]">Terms of use</h1>
-      <p className="mono mt-3 text-[13px] text-muted-foreground">Version of {TERMS_DATE}</p>
-      <nav aria-label="Contents" className="mt-8">
-        <ol className="grid gap-1 text-sm">
-          {SECTIONS.map((s) => (
-            <li key={s.id}>
-              <a href={`#${s.id}`} className="underline-offset-4 hover:underline">{s.title}</a>
-            </li>
-          ))}
-        </ol>
-      </nav>
-      {SECTIONS.map((s) => (
-        <section key={s.id} aria-labelledby={s.id} className="mt-12">
-          <h2 id={s.id} className="text-2xl font-semibold tracking-[-0.02em]">{s.title}</h2>
-          {s.body.map((p) => (
-            <p key={p} className="mt-3 leading-relaxed">{p}</p>
-          ))}
-          {s.id === "cross-chain" ? (
-            <p className="mt-3">
-              <a href={ONECLICK_TOS_URL} className="underline underline-offset-4">1Click terms of service</a>
-            </p>
-          ) : null}
-        </section>
-      ))}
+    <main>
+      <section className="page-hero pb-12">
+        <div className="wrap stack gap-4">
+          <p className="eyebrow">Terms</p>
+          <h1 className="display-lg">Terms of use</h1>
+          <p className="lead">Plain terms for a technical demo. <span className="mono text-[13px]">Version of {TERMS_DATE}</span></p>
+        </div>
+      </section>
+      <section className="border-t pt-12 pb-24">
+        <div className="wrap doc">
+          <nav aria-label="Contents" className="toc">
+            <p className="fm-label mb-2">On this page</p>
+            <ol>
+              {SECTIONS.map((s, i) => (
+                <li key={s.id}>
+                  <a href={`#${s.id}`}>{i + 1}. {s.title}</a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+          <div className="prose stack">
+            {SECTIONS.map((s) => (
+              <section key={s.id} aria-labelledby={s.id} className="stack gap-3">
+                <h2 id={s.id} className="h2 scroll-mt-6">{s.title}</h2>
+                {s.body.map((p) => (
+                  <p key={p}>{p}</p>
+                ))}
+                {s.id === "cross-chain" ? (
+                  <p>
+                    <a href={ONECLICK_TOS_URL} className="underline underline-offset-4">1Click terms of service</a>
+                  </p>
+                ) : null}
+              </section>
+            ))}
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

@@ -33,3 +33,13 @@ test("the known events are the ones the contract emits", () => {
   expect(KNOWN_EVENTS).toContain("claim_folded");
   expect(new Set(KNOWN_EVENTS).size).toBe(KNOWN_EVENTS.length);
 });
+
+import { eventMark } from "@/lib/cycles/outcome";
+
+test("a timeline mark is a check only for steps that went through", () => {
+  expect(eventMark({ name: "executed" })).toBe("done");
+  expect(eventMark({ name: "decision" })).toBe("done");
+  for (const name of ["rejected", "swap_reverted", "cycle_failed", "cycle_aborted", "stuck"]) expect(eventMark({ name })).toBe("stop");
+  expect(eventMark({ name: "hold" })).toBe("wait");
+  expect(eventMark({ name: "probing" })).toBe("wait");
+});

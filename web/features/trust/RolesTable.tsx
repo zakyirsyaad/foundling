@@ -8,25 +8,27 @@ const ROWS = [
 
 export function RolesTable({ roles }: { roles: Roles }) {
   return (
-    <table aria-label="Roles" className="fm-table text-sm">
-      <thead>
-        <tr>
-          <th scope="col">Role</th>
-          <th scope="col">Account</th>
-          <th scope="col">Can</th>
-          <th scope="col">Cannot</th>
-        </tr>
-      </thead>
-      <tbody>
-        {ROWS.map((r) => (
-          <tr key={r.role}>
-            <th scope="row">{r.role}</th>
-            <td data-label="Account" className="mono">{roles[r.key]}</td>
-            <td data-label="Can">{r.can}</td>
-            <td data-label="Cannot">{r.cannot}</td>
+    <div className="fm-table-wrap">
+      <table aria-label="Roles" className="fm-table text-sm">
+        <thead>
+          <tr>
+            <th scope="col">Role</th>
+            <th scope="col">Account</th>
+            <th scope="col">Can</th>
+            <th scope="col">Cannot</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {ROWS.map((r) => (
+            <tr key={r.role}>
+              <th scope="row" className="font-semibold whitespace-nowrap">{r.role}</th>
+              <td data-label="Account" className="mono">{roles[r.key]}</td>
+              <td data-label="Can">{r.can}</td>
+              <td data-label="Cannot">{r.cannot}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

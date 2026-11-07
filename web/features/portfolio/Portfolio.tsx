@@ -39,8 +39,13 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
   const busy = state.kind === "awaiting-wallet";
   if (!s) return loading ? <LoadingBlock rows={4} label="Reading the vault" /> : <VaultBanner s={null} unreadable />;
   const gate = depositGate(s, p, unreadable);
+  const crossChain = slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy, ctx, gasPrice }) : null;
   return (
     <div className="grid gap-6">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-2xl font-semibold tracking-[-0.02em]">Portfolio</h1>
+        {account ? <span className="mono fm-small">{account}</span> : null}
+      </div>
       <VaultBanner s={s} unreadable={unreadable} />
       {!ctx ? <Banner tone="danger" title="Token mismatch">This website pins different token contracts than the vault reports, so it will not ask your wallet to sign anything.</Banner> : null}
       {slots.stuck ? slots.stuck({ s, fresh, canSign: Boolean(account && ctx), run, busy, ctx, near: p?.balances.near ?? null, gasPrice }) : null}
@@ -61,11 +66,16 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
             ) : null}
           </Positions>
           <TxStatus state={state} />
-          {ctx ? <DepositForm s={s} p={p} gasPrice={gasPrice} reasons={gate.reasons} ctx={ctx} network={config.network} busy={busy} onSubmit={(steps) => run(steps)} /> : null}
-          {ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy, gasPrice }) : null}
         </>
       )}
-      {slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy, ctx, gasPrice }) : null}
+      {/* Always rendered, so the cross-chain card keeps one place in the tree and its state while the position re-reads. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <div className="grid gap-6">
+          {account && p && ctx ? <DepositForm s={s} p={p} gasPrice={gasPrice} reasons={gate.reasons} ctx={ctx} network={config.network} busy={busy} onSubmit={(steps) => run(steps)} /> : null}
+          {crossChain}
+        </div>
+        <div className="grid gap-6">{account && p && ctx && slots.exits ? slots.exits({ s, p, ctx, unreadable, run, busy, gasPrice }) : null}</div>
+      </div>
     </div>
   );
 }

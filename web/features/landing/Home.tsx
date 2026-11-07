@@ -6,15 +6,10 @@ import { BUILT_ON_FIXED, BUILT_ON_NOTE, CLOSING, GUARANTEES, HEADS, HERO, HOW_IT
 import { MEDIA } from "@/content/media";
 import { NOT_CLAIMED } from "@/content/not-claimed";
 import { type Claim, claimText } from "@/lib/claims";
+import { splitFirstSentence } from "@/lib/format/text";
 import { Section } from "./Section";
 
 type ClaimLine = ReturnType<typeof claimText>;
-
-/** "Returns or alpha." stays one bold line; a longer entry splits into a bold first sentence and the rest. */
-export function splitFirstSentence(line: string): { head: string; rest: string | null } {
-  const i = line.indexOf(". ");
-  return i < 0 ? { head: line, rest: null } : { head: line.slice(0, i + 1), rest: line.slice(i + 2) };
-}
 
 export function Home({ claims, keysLine }: { claims: Claim[]; keysLine: string }) {
   const advisor = claimText(claims, "near-ai-advisor");
