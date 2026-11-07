@@ -664,6 +664,11 @@ async fn setup_spam() -> anyhow::Result<()> {
         ..Default::default()
     })
     .await?;
+    let tight_policy: Value = tight.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part B: a second vault whose policy leaves room for two token registrations and not for Ref's storage deposit",
+        json!({"near_reserve": tight_policy["near_reserve"], "room": room.to_string()}),
+    );
     let (tight_before, _) = vault_near(&tight).await?;
     let accounts = spam_accounts(&tight, 25).await?;
     let calls = barrage(&tight, &accounts, 4, &TARGETS).await?;
@@ -905,6 +910,11 @@ async fn advance_race() -> anyhow::Result<()> {
     })
     .await?;
     settle_deposit(&slow).await?;
+    let slow_policy: Value = slow.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part B: a second vault with a short stuck_after; the swap's real answer is in flight",
+        json!({"stuck_after": slow_policy["stuck_after"], "halt_after": slow_policy["halt_after"]}),
+    );
     let slow_before = books(&slow).await?;
     let (usdc_book, wnear_book) = book(&slow).await?;
     set_fault(&slow, "SwapHang").await?;
@@ -982,6 +992,11 @@ async fn advance_race() -> anyhow::Result<()> {
     })
     .await?;
     settle_deposit(&masked).await?;
+    let masked_policy: Value = masked.view_vault("policy", json!({})).await?;
+    run.context(
+        "setup, part C: a third vault with the same stuck_after; a donation will sit at Ref before advance",
+        json!({"stuck_after": masked_policy["stuck_after"], "halt_after": masked_policy["halt_after"]}),
+    );
     let (usdc_pre, wnear_pre) = book(&masked).await?;
     set_fault(&masked, "SwapHang").await?;
     let masked_nonce = decision_ready(&masked, template("buy_risk", 1_000_000)).await?;
