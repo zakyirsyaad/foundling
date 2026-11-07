@@ -129,7 +129,7 @@ class Bot:
         if saved.get("vault") != config.vault:
             saved = {}  # state written for another vault says nothing about this one
         self.state = {"vault": config.vault, "last_trigger": saved.get("last_trigger", 0),
-                      "cycle": saved.get("cycle"),
+                      "cycle": saved.get("cycle"), "pending": saved.get("pending"),
                       "failures": saved.get("failures") or {"streak": 0, "methods": {}}}
         self._stale = 0
         self.errors = 0
@@ -201,6 +201,8 @@ class Bot:
             if cycle["stages"] or self.clock() >= cycle["started"] + SETTLE_GRACE:
                 return self._close("Idle")
             return "wait"
+        if self.state["pending"]:
+            return self._settle_pending(self.state["pending"])
         if now < self.state["last_trigger"] + policy["cooldown"] + COOLDOWN_MARGIN:
             return "wait"
         key = ("trigger",)
@@ -269,8 +271,14 @@ class Bot:
                 self._save()
             self._failed("trigger_cycle", now + spent)
             return "trigger_failed"
+        txs = [{"method": "trigger_cycle", "hash": result.tx_hash}] if result.tx_hash else []
+        # The RPC reads below can fail. Keep the hash first, so the cycle is still the bot's when
+        # the next tick finds it, and is not logged Unknown with no transaction.
+        self.state["pending"] = {"before": before, "started": started, "at": now, "txs": txs}
+        self._save()
         nonce = self._wait_for_nonce(before)
         if nonce is None:
+            self.state["pending"] = None
             self._call_failed("trigger_cycle", {}, result, "last_nonce did not move")
             self._failed("trigger_cycle", now + spent)
             return "trigger_failed"
@@ -278,11 +286,27 @@ class Bot:
         height, seen_at = self.rpc.block()
         self._height = max(self._height, height)
         self.state["last_trigger"] = max(seen_at, now)
-        txs = [{"method": "trigger_cycle", "hash": result.tx_hash}] if result.tx_hash else []
-        self.state["cycle"] = {"nonce": nonce, "started": started, "txs": txs, "stages": [],
-                               "resumed": False, "failed_calls": 0}
+        self._adopt_pending(nonce)
         self._save()
         return "trigger"
+
+    def _adopt_pending(self, nonce):
+        """The trigger the bot sent becomes the cycle it follows."""
+        pending, self.state["pending"] = self.state["pending"], None
+        self.state["last_trigger"] = max(self.state["last_trigger"], pending["at"])
+        self.state["cycle"] = {"nonce": nonce, "started": pending["started"], "txs": pending["txs"],
+                               "stages": [], "resumed": False, "failed_calls": 0}
+
+    def _settle_pending(self, pending):
+        """Idle, with a trigger sent and its cycle never followed: it ended unseen, or never landed."""
+        nonce = self._read("last_nonce")
+        if nonce > pending["before"]:
+            self._adopt_pending(nonce)
+            return self._close("Idle")
+        if self.clock() >= pending["started"] + SETTLE_GRACE:
+            self.state["pending"] = None
+            self._save()
+        return "wait"
 
     def _wait_for_nonce(self, before):
         deadline = self.clock() + self.config.nonce_wait
@@ -324,6 +348,10 @@ class Bot:
         if cycle and cycle["nonce"] != stage.nonce:
             self._close("Unobserved")
             cycle = None
+        pending = self.state["pending"]
+        if not cycle and pending and stage.nonce > pending["before"]:
+            self._adopt_pending(stage.nonce)
+            cycle = self.state["cycle"]
         if not cycle:
             # Someone else's trigger, or one this bot lost track of: its cooldown still runs.
             self.state["last_trigger"] = max(self.state["last_trigger"], now)

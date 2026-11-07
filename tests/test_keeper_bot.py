@@ -7,6 +7,7 @@ from pathlib import Path
 from tests.keeper_fakes import GAS_FLOORS as WORLD_FLOORS
 from tests.keeper_fakes import KEEPER, NEAR_ID, USDC_ID, VAULT, ListLog, MemoryStore, World
 from tools.keeper.bot import GAS_FLOORS, Bot, Config, ConfigError, GiveUp, summarize
+from tools.keeper.rpc import RpcError
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -522,6 +523,82 @@ class ConfigTest(unittest.TestCase):
         }
         self.assertEqual(GAS_FLOORS, expected)
         self.assertEqual(WORLD_FLOORS, expected)
+
+
+def fail_the_nonce_read_after_a_trigger(world):
+    """The first `last_nonce` read of a trigger is the `before`; the next one, which waits for the nonce, fails once."""
+    reads = []
+    real = world.view
+
+    def view(account, method, args=None, block_id=None):
+        if method == "last_nonce":
+            reads.append(1)
+            if len(reads) == 2:
+                raise RpcError("the node did not answer")
+        return real(account, method, args, block_id)
+
+    world.view = view
+
+
+class TriggerSentTest(unittest.TestCase):
+    def test_an_rpc_outage_right_after_the_trigger_keeps_the_cycle_the_bots(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        fail_the_nonce_read_after_a_trigger(world)
+        log = ListLog()
+        drive(make_bot(world, log=log), world, 90)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["code"]), ("Hold", "NO_DECISION"))
+        self.assertEqual(cycle["txs"], [{"method": "trigger_cycle", "hash": "TX1"}])
+        self.assertFalse(cycle["resumed"])
+        self.assertEqual(len(world.methods("trigger_cycle")), 1)
+
+    def test_a_cycle_that_ended_during_the_outage_is_closed_from_the_saved_trigger(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        fail_the_nonce_read_after_a_trigger(world)
+        store, log = MemoryStore(), ListLog()
+        bot = make_bot(world, store=store, log=log)
+        self.assertEqual(bot.tick(), "error")
+        self.assertEqual(store.data["pending"]["txs"], [{"method": "trigger_cycle", "hash": "TX1"}])
+        world.sleep(30)  # the whole cycle ends while the bot cannot read
+        self.assertEqual(world.kind(), "Idle")
+        drive(bot, world, 20)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["code"], cycle["resumed"]), ("Hold", "NO_DECISION", False))
+        self.assertEqual(cycle["txs"], [{"method": "trigger_cycle", "hash": "TX1"}])
+        self.assertIsNone(store.data["pending"])
+        self.assertEqual(len(world.methods("trigger_cycle")), 1, "no second trigger")
+
+    def test_the_saved_trigger_survives_a_restart(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        fail_the_nonce_read_after_a_trigger(world)
+        store, log = MemoryStore(), ListLog()
+        self.assertEqual(make_bot(world, store=store, log=log).tick(), "error")
+        drive(make_bot(world, store=store, log=log), world, 60)
+        (cycle,) = log.of("cycle")
+        self.assertEqual((cycle["result"], cycle["resumed"]), ("Hold", False))
+        self.assertEqual(cycle["txs"], [{"method": "trigger_cycle", "hash": "TX1"}])
+
+    def test_a_trigger_that_never_landed_is_dropped_after_the_grace(self):
+        world = World()
+        pending = {"before": 0, "started": world.now - 100, "at": int(world.now) - 100, "txs": []}
+        store = MemoryStore({"vault": VAULT, "last_trigger": 0, "cycle": None, "pending": pending})
+        log = ListLog()
+        bot = make_bot(world, store=store, log=log)
+        bot.tick()
+        self.assertIsNone(bot.state["pending"])
+        self.assertEqual(log.of("cycle"), [])
+
+    def test_a_trigger_just_sent_is_waited_for_before_it_is_dropped(self):
+        world = World()
+        pending = {"before": 0, "started": world.now, "at": int(world.now), "txs": []}
+        store = MemoryStore({"vault": VAULT, "last_trigger": 0, "cycle": None, "pending": pending})
+        bot = make_bot(world, store=store)
+        self.assertEqual(bot.tick(), "wait")
+        self.assertIsNotNone(bot.state["pending"])
+        self.assertEqual(world.methods("trigger_cycle"), [], "it does not trigger again meanwhile")
 
 
 if __name__ == "__main__":
