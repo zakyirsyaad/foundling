@@ -447,33 +447,83 @@ class PacingTest(unittest.TestCase):
                 client.call("block", {"finality": "final"})
         self.assertLessEqual(len(sent), verify_live.MAX_CALLS)
 
-    def test_an_endpoint_that_answered_429_is_not_asked_again_in_the_run(self):
+    def test_a_429_is_waited_out_once_and_the_same_endpoint_is_asked_again(self):
+        clock = FakeClock()
+        first = verify_live.ENDPOINTS["testnet"][0]
+        chain, sent = FakeChain(), []
+
+        def transport(url, payload):
+            sent.append((clock(), url))
+            if url == first and len([s for s in sent if s[1] == first]) == 1:
+                raise TransportError(429, "too many requests", retry_after=7)
+            return chain(url, payload)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+        self.assertEqual(client.call("block", {"finality": "final"})["result"], chain(first, {"method": "block"})["result"])
+        self.assertEqual(clock.pauses, [7], "it slept the Retry-After the node sent")
+        self.assertEqual([url for _, url in sent], [first, first], "and asked the same endpoint again, not the next")
+
+    def test_a_429_without_retry_after_waits_one_rate_window(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(fail_status=429), clock)
+        with self.assertRaises(verify_live.Unavailable):
+            client.call("block", {"finality": "final"})
+        self.assertEqual(clock.pauses, [verify_live.RATE_WINDOW] * 3)
+
+    def test_a_huge_retry_after_is_capped_at_one_rate_window(self):
+        clock = FakeClock()
+        calls = []
+
+        def transport(url, payload):
+            calls.append(url)
+            if len(calls) == 1:
+                raise TransportError(429, "slow down", retry_after=3600)
+            return FakeChain()(url, payload)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+        client.call("block", {"finality": "final"})
+        self.assertEqual(clock.pauses, [verify_live.RATE_WINDOW])
+
+    def test_an_endpoint_that_says_429_twice_is_left_alone_for_the_rest_of_the_run(self):
         clock = FakeClock()
         limited = verify_live.ENDPOINTS["testnet"][0]
-        chain = FakeChain()
-        sent = []
+        chain, sent = FakeChain(), []
 
         def transport(url, payload):
             sent.append(url)
             if url == limited:
-                raise TransportError(429, "too many requests")
+                raise TransportError(429, "too many requests", retry_after=1)
             return chain(url, payload)
 
         client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
         rep = verify_live.run_live(VAULT, "testnet", client)
-        self.assertEqual(sent.count(limited), 1, "one 429, then the other two endpoints carry the run")
+        self.assertEqual(sent.count(limited), 2, "one 429, one wait, a second 429, then never again")
         self.assertEqual(by_name(rep)["keys"].status, "PASS")
 
-    def test_when_every_endpoint_said_429_the_run_gives_up_without_waiting(self):
+    def test_when_every_endpoint_stays_limited_the_run_gives_up_after_one_wait_each(self):
         clock = FakeClock()
         client, sent = paced_client(FakeChain(fail_status=429), clock)
+        for _ in range(2):
+            with self.assertRaises(verify_live.Unavailable) as caught:
+                client.call("block", {"finality": "final"})
+            self.assertTrue(caught.exception.reason.startswith("NETWORK_"))
+        self.assertEqual(len(sent), 6, "two tries on each of the three endpoints, then nothing more")
+        self.assertEqual(len(clock.pauses), 3)
+        self.assertLessEqual(sum(clock.pauses), 3 * verify_live.RATE_WINDOW)
+
+    def test_the_retry_after_a_429_counts_against_the_call_budget(self):
+        clock = FakeClock()
+        sent = []
+
+        def transport(url, payload):
+            sent.append(url)
+            raise TransportError(429, "too many requests", retry_after=1)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, max_calls=2, sleep=clock.sleep, clock=clock)
         with self.assertRaises(verify_live.Unavailable) as caught:
             client.call("block", {"finality": "final"})
-        self.assertTrue(caught.exception.reason.startswith("NETWORK_"))
-        with self.assertRaises(verify_live.Unavailable):
-            client.call("block", {"finality": "final"})
-        self.assertEqual(len(sent), 3, "each endpoint is tried once and then left alone")
-        self.assertEqual(clock.pauses, [])
+        self.assertEqual(caught.exception.reason, "NETWORK_BUDGET")
+        self.assertEqual(len(sent), 2)
 
     def test_a_main_run_on_an_injected_transport_never_sleeps(self):
         from unittest import mock
@@ -505,6 +555,35 @@ TIMEOUT = {"name": "HANDLER_ERROR", "cause": {"name": "TIMEOUT_ERROR", "info": {
 TIMEOUT_TOP = {"name": "TIMEOUT_ERROR", "cause": {"name": "TIMEOUT_ERROR", "info": {}},
                "code": -32000, "message": "Server error", "data": "Timeout"}
 NODE_ERRORS = {"internal": INTERNAL, "timeout in cause": TIMEOUT, "timeout at top": TIMEOUT_TOP}
+
+
+class RetryAfterHeaderTest(unittest.TestCase):
+    def failing(self, status, headers):
+        import email.message
+        import urllib.error
+        message = email.message.Message()
+        for key, value in headers.items():
+            message[key] = value
+        return urllib.error.HTTPError("http://node", status, "Too Many Requests", message, None)
+
+    def status(self, headers):
+        from unittest import mock
+        with mock.patch("urllib.request.urlopen", side_effect=self.failing(429, headers)):
+            with self.assertRaises(TransportError) as caught:
+                verify_live.http_transport("http://node", {})
+        self.assertEqual(caught.exception.status, 429)
+        return caught.exception.retry_after
+
+    def test_a_number_of_seconds_is_read(self):
+        self.assertEqual(self.status({"Retry-After": "12"}), 12.0)
+
+    def test_a_missing_header_is_none(self):
+        self.assertIsNone(self.status({}))
+
+    def test_a_date_or_garbage_or_a_negative_number_is_none(self):
+        for value in ("Wed, 21 Oct 2026 07:28:00 GMT", "soon", "-5", "nan", "inf", ""):
+            with self.subTest(value=value):
+                self.assertIsNone(self.status({"Retry-After": value}))
 
 
 class NodeErrorTest(unittest.TestCase):
