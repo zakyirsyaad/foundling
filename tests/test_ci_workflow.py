@@ -158,7 +158,8 @@ def check(text):
         if module not in ran:
             problems.append(f"tests.{module} is never run by any job")
     runs("docs", r"python3 tools/readme\.py --check")
-    runs("offline-verifier", r"python3 verify\.py")
+    # --strict: a SKIP fails too, so a fixture that stops opening its commitment cannot pass quietly (#18).
+    runs("offline-verifier", r"python3 verify\.py --strict")
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
 
@@ -235,7 +236,8 @@ class TamperingTest(unittest.TestCase):
         workflow = "  workflow:\n    name: Workflow shape\n"
         attack_run = "  attack-lab-run:\n    name: Attack Lab (run-all)\n"
         cases = {
-            "verify.py || true": tampered(b, "run: python3 verify.py\n", "run: python3 verify.py || true\n"),
+            "verify.py || true": tampered(b, "run: python3 verify.py --strict\n", "run: python3 verify.py --strict || true\n"),
+            "verify.py without --strict": tampered(b, "run: python3 verify.py --strict\n", "run: python3 verify.py\n"),
             "|| : after a command": tampered(b, "run: make sandbox\n", "run: make sandbox || :\n"),
             "|| echo ok": tampered(b, "run: make sandbox\n", "run: make sandbox || echo ok\n"),
             "; true": tampered(b, "run: make sandbox\n", "run: make sandbox; true\n"),
