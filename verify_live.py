@@ -13,6 +13,7 @@ import datetime
 import hashlib
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -25,6 +26,11 @@ ENDPOINTS = {
 }
 MAX_CALLS = 15
 TIMEOUT = 20
+# Public nodes without a key answer about 3 requests a minute each (SPEC 11, item 3).
+RATE_LIMIT = 3
+RATE_WINDOW = 60.0
+# JSON-RPC errors that say the node failed, not the vault: try the next endpoint.
+NODE_ERRORS = {"INTERNAL_ERROR", "TIMEOUT_ERROR"}
 DECISIONS_KEPT = 64
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -64,32 +70,75 @@ def http_transport(url, payload, timeout=TIMEOUT):
         raise TransportError(None, str(err)) from err
 
 
-class Client:
-    """JSON-RPC over several endpoints with a hard cap on calls. A failing endpoint goes behind the others."""
+def is_node_error(error):
+    """A JSON-RPC error object that names a node-side failure, in its name or in its cause."""
+    if not isinstance(error, dict):
+        return False
+    cause = error.get("cause")
+    names = {error.get("name"), cause.get("name") if isinstance(cause, dict) else None}
+    return bool(names & NODE_ERRORS)
 
-    def __init__(self, endpoints, transport=http_transport, max_calls=MAX_CALLS):
+
+class Client:
+    """JSON-RPC over several endpoints with a hard cap on calls. A failing endpoint goes behind the others.
+
+    An endpoint that answered 429 is left alone for the rest of the run. With a `sleep`, each endpoint
+    also gets at most RATE_LIMIT requests per RATE_WINDOW seconds; without one nothing waits.
+    """
+
+    def __init__(self, endpoints, transport=http_transport, max_calls=MAX_CALLS, sleep=None, clock=time.monotonic):
         self.endpoints = list(endpoints)
         self.transport = transport
         self.max_calls = max_calls
+        self.sleep = sleep
+        self.clock = clock
         self.calls = 0
         self._failures = [0] * len(self.endpoints)
+        self._limited = [False] * len(self.endpoints)
+        self._sent = [[] for _ in self.endpoints]
         self._start = 0
+
+    def _wait(self, index):
+        """Seconds until this endpoint may be asked again without passing its rate (0 when not pacing)."""
+        if self.sleep is None:
+            return 0.0
+        now = self.clock()
+        recent = [at for at in self._sent[index] if now - at < RATE_WINDOW]
+        self._sent[index] = recent
+        return max(0.0, recent[-RATE_LIMIT] + RATE_WINDOW - now) if len(recent) >= RATE_LIMIT else 0.0
 
     def call(self, method, params):
         count = len(self.endpoints)
-        order = sorted(range(count), key=lambda i: (self._failures[i], (i - self._start) % count))
+        usable = [i for i in range(count) if not self._limited[i]]
+        if not usable:
+            raise Unavailable("NETWORK_UNAVAILABLE", f"{method}: every endpoint answered 429 in this run")
+        order = sorted(usable, key=lambda i: (self._failures[i], self._wait(i), (i - self._start) % count))
         self._start += 1
         last = None
         for index in order:
+            if self._limited[index]:
+                continue
             if self.calls >= self.max_calls:
                 raise Unavailable("NETWORK_BUDGET", f"the budget of {self.max_calls} calls is used up")
             self.calls += 1
+            wait = self._wait(index)
+            if wait > 0:
+                self.sleep(wait)
+            if self.sleep is not None:
+                self._sent[index].append(self.clock())
             payload = {"jsonrpc": "2.0", "id": "verify", "method": method, "params": params}
             try:
                 data = self.transport(self.endpoints[index], payload)
             except TransportError as err:
+                if err.status is None and self._sent[index]:
+                    self._sent[index].pop()  # no answer at all: the node never counted this request
                 self._failures[index] += 1
+                self._limited[index] = self._limited[index] or err.status == 429
                 last = err
+                continue
+            if isinstance(data, dict) and is_node_error(data.get("error")):
+                self._failures[index] += 1
+                last = TransportError(None, f"node error {json.dumps(data['error'])[:80]}")
                 continue
             if isinstance(data, dict) and ("result" in data or "error" in data):
                 return data
@@ -374,7 +423,8 @@ def main(argv=None, transport=http_transport):
             expected = expected.lower()
             if not verify.HEX64.fullmatch(expected):
                 raise verify.ToolError("--expect-code-hash must be 64 hex characters")
-        client = Client(ENDPOINTS[args.network], transport)
+        # Only the real network is paced; a test's stand-in transport answers at once.
+        client = Client(ENDPOINTS[args.network], transport, sleep=time.sleep if transport is http_transport else None)
         report = run_live(args.vault, args.network, client, expected)
     except verify.ToolError as err:
         print(f"ERROR {err}", file=sys.stderr)
