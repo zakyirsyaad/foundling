@@ -385,5 +385,271 @@ class WiringTest(unittest.TestCase):
         self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
 
 
+class FakeClock:
+    """A clock the test owns: `sleep` moves it forward and records the pause. Nothing really waits."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.pauses = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def paced_client(chain, clock):
+    """A Client on `chain` whose requests are stamped with the fake time they were sent."""
+    sent = []
+
+    def transport(url, payload):
+        sent.append((clock(), url))
+        return chain(url, payload)
+
+    client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+    return client, sent
+
+
+class PacingTest(unittest.TestCase):
+    def test_twelve_reads_stay_under_three_requests_a_minute_per_endpoint(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(), clock)
+        rep = verify_live.run_live(VAULT, "testnet", client)
+        self.assertEqual(len(sent), 12, "a full run is twelve reads")
+        self.assertEqual(by_name(rep)["keys"].status, "PASS")
+        for url in verify_live.ENDPOINTS["testnet"]:
+            times = [at for at, sent_to in sent if sent_to == url]
+            for first, fourth in zip(times, times[3:]):
+                self.assertGreaterEqual(fourth - first, 60.0, f"four requests to {url} within a minute")
+
+    def test_the_wait_is_bounded_by_one_window(self):
+        clock = FakeClock()
+        client, _ = paced_client(FakeChain(), clock)
+        verify_live.run_live(VAULT, "testnet", client)
+        self.assertTrue(clock.pauses, "twelve reads over three endpoints do need a pause")
+        self.assertLessEqual(sum(clock.pauses), 60.0)
+
+    def test_a_short_run_does_not_wait(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(), clock)
+        for _ in range(9):
+            client.call("block", {"finality": "final"})
+        self.assertEqual(len(sent), 9)
+        self.assertEqual(clock.pauses, [])
+
+    def test_the_call_budget_still_holds_while_pacing(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(fail_status=500), clock)
+        with self.assertRaises(verify_live.Unavailable):
+            for _ in range(20):
+                client.call("block", {"finality": "final"})
+        self.assertLessEqual(len(sent), verify_live.MAX_CALLS)
+
+    def test_a_429_is_waited_out_once_and_the_same_endpoint_is_asked_again(self):
+        clock = FakeClock()
+        first = verify_live.ENDPOINTS["testnet"][0]
+        chain, sent = FakeChain(), []
+
+        def transport(url, payload):
+            sent.append((clock(), url))
+            if url == first and len([s for s in sent if s[1] == first]) == 1:
+                raise TransportError(429, "too many requests", retry_after=7)
+            return chain(url, payload)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+        self.assertEqual(client.call("block", {"finality": "final"})["result"], chain(first, {"method": "block"})["result"])
+        self.assertEqual(clock.pauses, [7], "it slept the Retry-After the node sent")
+        self.assertEqual([url for _, url in sent], [first, first], "and asked the same endpoint again, not the next")
+
+    def test_a_429_without_retry_after_waits_one_rate_window(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(fail_status=429), clock)
+        with self.assertRaises(verify_live.Unavailable):
+            client.call("block", {"finality": "final"})
+        self.assertEqual(clock.pauses, [verify_live.RATE_WINDOW] * 3)
+
+    def test_a_huge_retry_after_is_capped_at_one_rate_window(self):
+        clock = FakeClock()
+        calls = []
+
+        def transport(url, payload):
+            calls.append(url)
+            if len(calls) == 1:
+                raise TransportError(429, "slow down", retry_after=3600)
+            return FakeChain()(url, payload)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+        client.call("block", {"finality": "final"})
+        self.assertEqual(clock.pauses, [verify_live.RATE_WINDOW])
+
+    def test_an_endpoint_that_says_429_twice_is_left_alone_for_the_rest_of_the_run(self):
+        clock = FakeClock()
+        limited = verify_live.ENDPOINTS["testnet"][0]
+        chain, sent = FakeChain(), []
+
+        def transport(url, payload):
+            sent.append(url)
+            if url == limited:
+                raise TransportError(429, "too many requests", retry_after=1)
+            return chain(url, payload)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, sleep=clock.sleep, clock=clock)
+        rep = verify_live.run_live(VAULT, "testnet", client)
+        self.assertEqual(sent.count(limited), 2, "one 429, one wait, a second 429, then never again")
+        self.assertEqual(by_name(rep)["keys"].status, "PASS")
+
+    def test_when_every_endpoint_stays_limited_the_run_gives_up_after_one_wait_each(self):
+        clock = FakeClock()
+        client, sent = paced_client(FakeChain(fail_status=429), clock)
+        for _ in range(2):
+            with self.assertRaises(verify_live.Unavailable) as caught:
+                client.call("block", {"finality": "final"})
+            self.assertTrue(caught.exception.reason.startswith("NETWORK_"))
+        self.assertEqual(len(sent), 6, "two tries on each of the three endpoints, then nothing more")
+        self.assertEqual(len(clock.pauses), 3)
+        self.assertLessEqual(sum(clock.pauses), 3 * verify_live.RATE_WINDOW)
+
+    def test_the_retry_after_a_429_counts_against_the_call_budget(self):
+        clock = FakeClock()
+        sent = []
+
+        def transport(url, payload):
+            sent.append(url)
+            raise TransportError(429, "too many requests", retry_after=1)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport, max_calls=2, sleep=clock.sleep, clock=clock)
+        with self.assertRaises(verify_live.Unavailable) as caught:
+            client.call("block", {"finality": "final"})
+        self.assertEqual(caught.exception.reason, "NETWORK_BUDGET")
+        self.assertEqual(len(sent), 2)
+
+    def test_a_main_run_on_an_injected_transport_never_sleeps(self):
+        from unittest import mock
+        with mock.patch("time.sleep", side_effect=AssertionError("slept")):
+            code, out, _ = run(FakeChain(fail_status=429))
+            self.assertEqual(code, 2, out)
+            code, out, _ = run(FakeChain())
+            self.assertEqual(code, 0, out)
+
+
+class NodeErrorChain(FakeChain):
+    """A node that answers `method` with a node-side JSON-RPC error, on all endpoints or only on `only`."""
+
+    def __init__(self, method, error, only=(), **kwargs):
+        super().__init__(**kwargs)
+        self.method, self.error, self.only = method, error, set(only)
+
+    def __call__(self, url, payload):
+        if self._name(payload) == self.method and (not self.only or url in self.only):
+            self.calls.append((url, payload))
+            return {"jsonrpc": "2.0", "id": "1", "error": self.error}
+        return super().__call__(url, payload)
+
+
+INTERNAL = {"name": "INTERNAL_ERROR", "cause": {"name": "INTERNAL_ERROR", "info": {"error_message": "boom"}},
+            "code": -32000, "message": "Server error", "data": "boom"}
+TIMEOUT = {"name": "HANDLER_ERROR", "cause": {"name": "TIMEOUT_ERROR", "info": {}},
+           "code": -32000, "message": "Server error", "data": "Timeout"}
+TIMEOUT_TOP = {"name": "TIMEOUT_ERROR", "cause": {"name": "TIMEOUT_ERROR", "info": {}},
+               "code": -32000, "message": "Server error", "data": "Timeout"}
+NODE_ERRORS = {"internal": INTERNAL, "timeout in cause": TIMEOUT, "timeout at top": TIMEOUT_TOP}
+
+
+class RetryAfterHeaderTest(unittest.TestCase):
+    def failing(self, status, headers):
+        import email.message
+        import urllib.error
+        message = email.message.Message()
+        for key, value in headers.items():
+            message[key] = value
+        return urllib.error.HTTPError("http://node", status, "Too Many Requests", message, None)
+
+    def status(self, headers):
+        from unittest import mock
+        with mock.patch("urllib.request.urlopen", side_effect=self.failing(429, headers)):
+            with self.assertRaises(TransportError) as caught:
+                verify_live.http_transport("http://node", {})
+        self.assertEqual(caught.exception.status, 429)
+        return caught.exception.retry_after
+
+    def test_a_number_of_seconds_is_read(self):
+        self.assertEqual(self.status({"Retry-After": "12"}), 12.0)
+
+    def test_a_missing_header_is_none(self):
+        self.assertIsNone(self.status({}))
+
+    def test_a_date_or_garbage_or_a_negative_number_is_none(self):
+        for value in ("Wed, 21 Oct 2026 07:28:00 GMT", "soon", "-5", "nan", "inf", ""):
+            with self.subTest(value=value):
+                self.assertIsNone(self.status({"Retry-After": value}))
+
+
+class NodeErrorTest(unittest.TestCase):
+    def test_a_node_side_error_on_one_endpoint_is_retried_on_the_next(self):
+        urls = verify_live.ENDPOINTS["testnet"]
+        for label, error in NODE_ERRORS.items():
+            with self.subTest(error=label):
+                chain = NodeErrorChain("stage", error, only=urls[:1])
+                client = verify_live.Client(urls, chain)
+                value, _ = client.view(VAULT, "stage")  # a fresh client asks the first endpoint first
+                self.assertEqual(value, "Idle", "the second endpoint answered the view")
+                self.assertEqual([url for url, _ in chain.calls], urls[:2])
+                rep = report(NodeErrorChain("stage", error, only=urls[:2]))
+                self.assertNotIn("VIEW_REFUSED", {r.reason for r in rep.results})
+
+    def test_a_node_side_error_on_every_endpoint_is_exit_2_and_not_a_refused_view(self):
+        for label, error in NODE_ERRORS.items():
+            with self.subTest(error=label):
+                code, out, _ = run(NodeErrorChain("published_decision", error))
+                self.assertEqual(code, 2, out)
+                self.assertIn("NETWORK_", out)
+                self.assertNotIn("VIEW_REFUSED", out)
+                self.assertNotIn("FAIL", out)
+
+    def test_a_node_side_error_counts_against_the_call_budget(self):
+        chain = NodeErrorChain("block", INTERNAL)
+        report(chain)
+        self.assertLessEqual(len(chain.calls), verify_live.MAX_CALLS)
+
+    def test_other_json_rpc_errors_are_still_refused(self):
+        unknown = {"name": "HANDLER_ERROR", "cause": {"name": "UNKNOWN_ACCOUNT", "info": {}}, "code": -32000,
+                   "message": "Server error", "data": "no such account"}
+        code, out, err = run(NodeErrorChain("view_account", unknown))
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("ERROR cannot read the vault account", err)
+
+
+class ImportGuardTest(unittest.TestCase):
+    """test_verify_offline.py allows `verify_live` anywhere in verify.py; this pins where it may be."""
+
+    @staticmethod
+    def live_imports_outside_main(source):
+        def names(node):
+            return [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+
+        tree = ast.parse(source)
+        found = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
+                 and any(name.split(".")[0] == "verify_live" for name in names(n))]
+        for function in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name != "main"):
+            found += [n for n in ast.walk(function) if isinstance(n, (ast.Import, ast.ImportFrom))
+                      and any(name.split(".")[0] == "verify_live" for name in names(n))]
+        return found
+
+    def test_verify_py_imports_verify_live_only_inside_main(self):
+        source = (ROOT / "verify.py").read_text(encoding="utf-8")
+        self.assertEqual(self.live_imports_outside_main(source), [])
+        self.assertIn("import verify_live", source, "main still loads it for --live")
+
+    def test_the_guard_catches_an_import_moved_to_the_top_or_into_another_function(self):
+        source = (ROOT / "verify.py").read_text(encoding="utf-8")
+        self.assertTrue(self.live_imports_outside_main("import verify_live\n" + source))
+        self.assertTrue(self.live_imports_outside_main("from verify_live import main as live\n" + source))
+        elsewhere = source.replace("def main(argv=None):", "def helper():\n    import verify_live\n\n\ndef main(argv=None):", 1)
+        self.assertNotEqual(elsewhere, source)
+        self.assertTrue(self.live_imports_outside_main(elsewhere))
+
+
 if __name__ == "__main__":
     unittest.main()
