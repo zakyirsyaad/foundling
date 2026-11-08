@@ -29,8 +29,11 @@ TIMEOUT = 20
 # Public nodes without a key answer about 3 requests a minute each (SPEC 11, item 3).
 RATE_LIMIT = 3
 RATE_WINDOW = 60.0
-# JSON-RPC errors that say the node failed, not the vault: try the next endpoint.
-NODE_ERRORS = {"INTERNAL_ERROR", "TIMEOUT_ERROR"}
+# JSON-RPC errors that say the node failed, not the vault: try the next endpoint. A node that is still
+# syncing (NO_SYNCED_BLOCKS) or does not track the vault's shard (UNAVAILABLE_SHARD) is one of them.
+NODE_ERRORS = {"INTERNAL_ERROR", "TIMEOUT_ERROR", "NO_SYNCED_BLOCKS", "UNAVAILABLE_SHARD"}
+# A paced run stops waiting after this many seconds: pacing, a 429 and slow nodes cannot add up to a hang.
+MAX_SECONDS = 180.0
 DECISIONS_KEPT = 64
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -40,10 +43,13 @@ EXIT_OK, EXIT_FAIL, EXIT_TOOL = verify.EXIT_OK, verify.EXIT_FAIL, verify.EXIT_TO
 class TransportError(Exception):
     """One request failed: a status code (429 included) or no answer at all."""
 
-    def __init__(self, status=None, message="", retry_after=None):
+    def __init__(self, status=None, message="", retry_after=None, reached=None):
         super().__init__(f"HTTP {status}: {message}" if status else message)
         self.status = status
         self.retry_after = retry_after  # seconds the node asked us to wait, when it said so
+        # Whether the request reached the node, which then counts it against the rate. Every status
+        # code did; with no status it is unknown unless the transport says so, and taken as not.
+        self.reached = status is not None if reached is None else reached
 
 
 class Unavailable(Exception):
@@ -67,8 +73,12 @@ def http_transport(url, payload, timeout=TIMEOUT):
             return json.load(response)
     except urllib.error.HTTPError as err:
         raise TransportError(err.code, str(err.reason), retry_after_seconds(err.headers)) from err
-    except (urllib.error.URLError, OSError, ValueError) as err:
-        raise TransportError(None, str(err)) from err
+    except urllib.error.URLError as err:
+        # Refused, a name that does not resolve, or a connect timeout: the request never got there.
+        raise TransportError(None, str(err), reached=False) from err
+    except (OSError, ValueError) as err:
+        # Sent, then no usable answer: a read timeout, a dropped connection, or a body that is not JSON.
+        raise TransportError(None, str(err), reached=True) from err
 
 
 def retry_after_seconds(headers):
@@ -110,6 +120,13 @@ class Client:
         self._waited = [False] * len(self.endpoints)
         self._sent = [[] for _ in self.endpoints]
         self._start = 0
+        self._began = None
+
+    def _pause(self, seconds):
+        """Sleep, unless that would take the run past MAX_SECONDS: then give up with a SKIP."""
+        if self._began is not None and self.clock() + seconds - self._began > MAX_SECONDS:
+            raise Unavailable("NETWORK_BUDGET", f"waiting {seconds:.0f} s more would pass the {MAX_SECONDS:.0f} s limit")
+        self.sleep(seconds)
 
     def _wait(self, index):
         """Seconds until this endpoint may be asked again without passing its rate (0 when not pacing)."""
@@ -125,7 +142,12 @@ class Client:
         usable = [i for i in range(count) if not self._limited[i]]
         if not usable:
             raise Unavailable("NETWORK_UNAVAILABLE", f"{method}: every endpoint answered 429 in this run")
-        order = sorted(usable, key=lambda i: (self._failures[i], self._wait(i), (i - self._start) % count))
+        if self.sleep is not None and self._began is None:
+            self._began = self.clock()
+        # An endpoint that failed more than once goes last. One failure does not outrank a pacing wait:
+        # a free endpoint that timed out once is asked before sleeping for a busy one.
+        order = sorted(usable, key=lambda i: (self._failures[i] > 1, self._wait(i), self._failures[i],
+                                              (i - self._start) % count))
         self._start += 1
         last = None
         for index in order:
@@ -135,15 +157,15 @@ class Client:
                 self.calls += 1
                 wait = self._wait(index)
                 if wait > 0:
-                    self.sleep(wait)
+                    self._pause(wait)
                 if self.sleep is not None:
                     self._sent[index].append(self.clock())
                 payload = {"jsonrpc": "2.0", "id": "verify", "method": method, "params": params}
                 try:
                     data = self.transport(self.endpoints[index], payload)
                 except TransportError as err:
-                    if err.status is None and self._sent[index]:
-                        self._sent[index].pop()  # no answer at all: the node never counted this request
+                    if not err.reached and self._sent[index]:
+                        self._sent[index].pop()  # it never got to the node, so the node did not count it
                     self._failures[index] += 1
                     last = err
                     if err.status == 429:
@@ -151,7 +173,7 @@ class Client:
                             self._limited[index] = True
                         else:
                             self._waited[index] = True
-                            self.sleep(min(err.retry_after if err.retry_after is not None else RATE_WINDOW, RATE_WINDOW))
+                            self._pause(min(err.retry_after if err.retry_after is not None else RATE_WINDOW, RATE_WINDOW))
                             self._sent[index].clear()  # the pause was the node's own window
                             continue
                     break

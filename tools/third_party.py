@@ -127,7 +127,8 @@ def render(rust, npm, rust_dev=frozenset()):
         "`Cargo.toml` in the repository and from `package-lock.json`. Each license is read from the crate's "
         "manifest or the lockfile entry; nothing is guessed, and a package that declares none is listed as such. "
         "The license texts are in each package's source and are not copied here. Packages marked `(dev)` are "
-        "build and test tooling, not part of what runs. The license of this project is in `LICENSE`.",
+        "used only to develop and test: npm devDependencies, and Rust crates reached only through "
+        "dev-dependencies or the test harness. Rust build-dependencies are not marked, because they build what runs. The license of this project is in `LICENSE`.",
         "",
     ]
     lines += render_ecosystem("Rust crates", rust_groups) + [""]
