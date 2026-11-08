@@ -130,6 +130,12 @@ def check(text):
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
     if flagged:
         problems.append(f"continue-on-error lets a job or step fail without failing the workflow; found {len(flagged)}")
+    # A download with no retry fails the whole job on one GitHub 5xx (a 504 from Releases
+    # failed "Vault reproducible" on PR #60). The sha256 check after each download still runs.
+    for line in code.splitlines():
+        # `--retry N` itself: --retry-all-errors or --retry-delay alone do not retry.
+        if re.search(r"\bcurl\s", line) and not re.search(r"--retry\s+[1-9]", line):
+            problems.append(f"curl without --retry N: {line.strip()[:80]}")
     run_body = jobs.get(ATTACK_RUN_JOB, "")
     if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", run_body):
         problems.append(f"{ATTACK_RUN_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
@@ -254,6 +260,7 @@ class TamperingTest(unittest.TestCase):
             "step shell: sh": tampered(b, "run: make sandbox\n", "shell: sh\n        run: make sandbox\n"),
             "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
             "readme tests dropped": tampered_in(b, "docs", " tests.test_readme", ""),
+            "a download without retries": tampered_in(b, "vault-reproducible", " --retry 3", ""),
             "third-party tests only in a comment": tampered_in(b, "docs", " tests.test_third_party", "\n        # tests.test_third_party"),
             "readme check replaced": tampered_in(b, "docs", "python3 tools/readme.py --check", "true"),
             "docs job deleted": without_job(b, "docs"),
