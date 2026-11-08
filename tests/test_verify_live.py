@@ -651,5 +651,124 @@ class ImportGuardTest(unittest.TestCase):
         self.assertTrue(self.live_imports_outside_main(elsewhere))
 
 
+
+NO_SYNCED = {"name": "HANDLER_ERROR", "cause": {"name": "NO_SYNCED_BLOCKS", "info": {}},
+             "code": -32000, "message": "Server error", "data": "syncing"}
+NO_SHARD = {"name": "HANDLER_ERROR", "cause": {"name": "UNAVAILABLE_SHARD", "info": {}},
+            "code": -32000, "message": "Server error", "data": "shard"}
+
+
+class ReviewFollowUpTest(unittest.TestCase):
+    """The lead's follow-up to the #62 review: more node errors, honest pacing, a time limit, and order."""
+
+    def test_a_syncing_node_or_a_missing_shard_is_tried_on_the_next_endpoint(self):
+        # Every endpoint but the last answers with the node error, so the read must move on to reach a good one.
+        failing = verify_live.ENDPOINTS["testnet"][:-1]
+        for name, error in (("syncing", NO_SYNCED), ("shard", NO_SHARD)):
+            with self.subTest(error=name):
+                chain = NodeErrorChain("view_account", error, only=failing)
+                rep = verify_live.run_live(VAULT, "testnet", verify_live.Client(verify_live.ENDPOINTS["testnet"], chain))
+                self.assertNotEqual(by_name(rep)["code_hash"].reason, "VIEW_REFUSED")
+                self.assertIsNotNone(rep.facts["code_hash"], "the next endpoint answered view_account")
+
+    def test_a_request_that_reached_the_node_still_counts_against_its_rate(self):
+        clock = FakeClock()
+        url = verify_live.ENDPOINTS["testnet"][0]
+        seen = {"n": 0}
+
+        def transport(_url, payload):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                raise TransportError(None, "timed out", reached=True)
+            return FakeChain()(_url, payload)
+
+        client = verify_live.Client([url], transport, sleep=clock.sleep, clock=clock)
+        with self.assertRaises(verify_live.Unavailable):
+            client.call("block", {"finality": "final"})
+        self.assertEqual(len(client._sent[0]), 1, "a read timeout is not forgotten by the pacer")
+
+    def test_a_request_that_never_got_through_is_not_counted(self):
+        clock = FakeClock()
+        url = verify_live.ENDPOINTS["testnet"][0]
+
+        def transport(_url, payload):
+            raise TransportError(None, "connection refused")
+
+        client = verify_live.Client([url], transport, sleep=clock.sleep, clock=clock)
+        with self.assertRaises(verify_live.Unavailable):
+            client.call("block", {"finality": "final"})
+        self.assertEqual(client._sent[0], [])
+
+    def test_the_real_transport_says_whether_the_request_reached_the_node(self):
+        import urllib.error
+        from unittest import mock
+
+        cases = [
+            (urllib.error.URLError(ConnectionRefusedError("refused")), False),
+            (TimeoutError("timed out"), True),
+            (ConnectionResetError("reset"), True),
+        ]
+        for raised, reached in cases:
+            with self.subTest(error=type(raised).__name__):
+                with mock.patch("urllib.request.urlopen", side_effect=raised):
+                    with self.assertRaises(TransportError) as caught:
+                        verify_live.http_transport("https://node.invalid", {})
+                self.assertIs(caught.exception.reached, reached)
+
+        class NotJson(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        with mock.patch("urllib.request.urlopen", return_value=NotJson(b"<html>busy</html>")):
+            with self.assertRaises(TransportError) as caught:
+                verify_live.http_transport("https://node.invalid", {})
+        self.assertIs(caught.exception.reached, True, "a body that is not JSON was an answer")
+
+    def test_a_status_code_always_reached_the_node(self):
+        self.assertTrue(TransportError(429, "slow down").reached)
+        self.assertFalse(TransportError(None, "refused").reached)
+
+    def test_a_paced_run_stops_at_the_time_limit_instead_of_waiting_on(self):
+        from unittest import mock
+
+        clock = FakeClock()
+
+        def throttled(_url, payload):
+            raise TransportError(429, "too many requests", retry_after=60)
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], throttled, sleep=clock.sleep, clock=clock)
+        with mock.patch.object(verify_live, "MAX_SECONDS", 90.0):
+            with self.assertRaises(verify_live.Unavailable) as caught:
+                client.call("block", {"finality": "final"})
+        self.assertEqual(caught.exception.reason, "NETWORK_BUDGET")
+        self.assertLessEqual(sum(clock.pauses), 90.0)
+
+    def test_a_free_endpoint_that_failed_once_is_asked_before_sleeping_for_a_busy_one(self):
+        clock = FakeClock()
+        endpoints = verify_live.ENDPOINTS["testnet"]
+        flaky = endpoints[0]
+        state = {"flaky_failed": False}
+        sent = []
+
+        def transport(url, payload):
+            sent.append((clock(), url))
+            if url == flaky and not state["flaky_failed"]:
+                state["flaky_failed"] = True
+                raise TransportError(503, "busy")
+            return FakeChain()(url, payload)
+
+        client = verify_live.Client(endpoints, transport, sleep=clock.sleep, clock=clock)
+        for _ in range(7):
+            client.call("block", {"finality": "final"})
+        # flaky: 1 failed request; the other two: 3 each. The next read goes to flaky at once.
+        before = clock()
+        client.call("block", {"finality": "final"})
+        self.assertEqual(clock(), before, "no sleep while an endpoint with one failure is free")
+        self.assertEqual(sent[-1][1], flaky)
+
+
 if __name__ == "__main__":
     unittest.main()
