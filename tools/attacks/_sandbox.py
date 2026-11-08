@@ -8,9 +8,12 @@ Exit codes follow the dispatcher: 0 held, 1 breached, 2 tool error. A breach is 
 "breached", or any observed reason code outside the registry's codes for the attack. Without
 a proof the test never reached a verdict (a build error, a missing or stale wasm, a failed
 harness call), which is 2 and never a pass or a fail of the attack.
+After a verdict, run() adds `source_commit` to the proof: the commit the repository was at, so the
+vault_wasm_sha256 in a committed proof can be rebuilt from it. It is null outside a repository.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +27,29 @@ WASM = [
     ("mock-outlayer", "mock_outlayer"),
     ("mock-token", "mock_token"),
 ]
+
+
+def git_head(root):
+    """The commit checked out in `root` itself, or None (not a repository, no commit, or a folder inside another repository)."""
+    root = Path(root).resolve()
+
+    def ask(*args):
+        try:
+            done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+        except OSError:
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    top, head = ask("rev-parse", "--show-toplevel"), ask("rev-parse", "HEAD")
+    if top is None or Path(top).resolve() != root or head is None or not re.fullmatch(r"[0-9a-f]{40}", head):
+        return None
+    return head
+
+
+def record_source_commit(proof_path, proof, root):
+    """Rewrites the proof with `source_commit`, in the format the Rust writer uses (sorted keys, 2 spaces)."""
+    proof["source_commit"] = git_head(root)
+    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def registry_entry(root, name):
@@ -97,6 +123,11 @@ def run(name, root=ROOT, cargo=("cargo",)):
             return fail(f"{name}: proof expects {proof['expected_codes']}, registry {expected}")
     except (OSError, ValueError, KeyError, TypeError, StopIteration) as err:
         return fail(f"{name}: no usable proof at {proof_path} (cargo exit {code}): {err!r}")
+
+    try:
+        record_source_commit(proof_path, proof, root)
+    except OSError as err:
+        return fail(f"{name}: cannot record source_commit in {proof_path}: {err!r}")
 
     stray = [code for code in observed if code not in expected]
     if verdict == "breached" or stray:
