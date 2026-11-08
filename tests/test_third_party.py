@@ -132,5 +132,88 @@ class CommittedNoticesTest(unittest.TestCase):
         self.assertIn(third_party.END, NOTICES)
 
 
+def graph(members, packages, edges):
+    """A `cargo metadata` answer with the dependency graph. Edges are (from, to, kind); kind None is a normal dependency."""
+    items = [{"id": n, "name": n.split()[0], "version": n.split()[1], "source": None if n in members else REGISTRY,
+              "license": "MIT", "license_file": None} for n in packages]
+    nodes = []
+    for node in packages:
+        deps = [{"pkg": to, "dep_kinds": [{"kind": kind, "target": None}]} for src, to, kind in edges if src == node]
+        nodes.append({"id": node, "deps": deps})
+    return {"packages": items, "workspace_members": list(members), "resolve": {"nodes": nodes}}
+
+
+class DevCrateTest(unittest.TestCase):
+    MEMBER = "vault 0.1.0"
+
+    def dev(self, packages, edges):
+        meta = graph([self.MEMBER], [self.MEMBER, *packages], edges)
+        return third_party.rust_dev_from_metadata(meta)
+
+    def test_a_crate_reached_only_through_a_dev_dependency_is_dev(self):
+        found = self.dev(["near-sdk 5.0.0", "near-workspaces 0.24.0"],
+                         [(self.MEMBER, "near-sdk 5.0.0", None), (self.MEMBER, "near-workspaces 0.24.0", "dev")])
+        self.assertEqual(found, {("near-workspaces", "0.24.0")})
+
+    def test_what_a_dev_crate_pulls_in_is_dev_too(self):
+        found = self.dev(["near-workspaces 0.24.0", "tokio 1.0.0"],
+                         [(self.MEMBER, "near-workspaces 0.24.0", "dev"), ("near-workspaces 0.24.0", "tokio 1.0.0", None)])
+        self.assertEqual(found, {("near-workspaces", "0.24.0"), ("tokio", "1.0.0")})
+
+    def test_a_crate_that_is_both_normal_and_dev_ships(self):
+        found = self.dev(["serde 1.0.0"], [(self.MEMBER, "serde 1.0.0", None), (self.MEMBER, "serde 1.0.0", "dev")])
+        self.assertEqual(found, set())
+
+    def test_a_crate_that_a_shipped_crate_needs_ships_even_if_a_dev_crate_also_does(self):
+        found = self.dev(["a 1.0.0", "b 1.0.0", "shared 1.0.0"],
+                         [(self.MEMBER, "a 1.0.0", None), (self.MEMBER, "b 1.0.0", "dev"),
+                          ("a 1.0.0", "shared 1.0.0", None), ("b 1.0.0", "shared 1.0.0", None)])
+        self.assertEqual(found, {("b", "1.0.0")})
+
+    def test_a_build_dependency_is_not_marked_dev(self):
+        self.assertEqual(self.dev(["cc 1.0.0"], [(self.MEMBER, "cc 1.0.0", "build")]), set())
+
+    def test_workspace_members_themselves_are_never_listed(self):
+        self.assertEqual(self.dev([], []), set())
+
+    def test_what_only_a_test_harness_member_needs_is_dev_even_as_a_normal_dependency(self):
+        harness = "foundling-sandbox 0.1.0"
+        meta = graph([self.MEMBER, harness], [self.MEMBER, harness, "near-workspaces 0.24.0", "serde 1.0.0", "tokio 1.0.0"],
+                     [(harness, "near-workspaces 0.24.0", None), (harness, "serde 1.0.0", None),
+                      (self.MEMBER, "serde 1.0.0", None), ("near-workspaces 0.24.0", "tokio 1.0.0", None)])
+        self.assertEqual(third_party.rust_dev_from_metadata(meta), {("near-workspaces", "0.24.0"), ("tokio", "1.0.0")})
+
+    def test_the_test_harness_members_are_named_in_one_place(self):
+        self.assertEqual(third_party.TEST_ONLY_PACKAGES, {"foundling-sandbox"})
+        sandbox = (ROOT / "sandbox" / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('name = "foundling-sandbox"', sandbox)
+
+    def test_a_dependency_with_several_kinds_is_normal_if_any_is_normal(self):
+        meta = graph([self.MEMBER], [self.MEMBER, "x 1.0.0"], [])
+        meta["resolve"]["nodes"][0]["deps"] = [{"pkg": "x 1.0.0", "dep_kinds": [{"kind": "dev", "target": None}, {"kind": None, "target": None}]}]
+        self.assertEqual(third_party.rust_dev_from_metadata(meta), set())
+
+    def test_a_crate_is_dev_overall_only_if_every_manifest_that_has_it_says_so(self):
+        both = {("t", "1"): "MIT", ("n", "1"): "MIT"}
+        only_n = {("n", "1"): "MIT"}
+        merged = third_party.merge_dev([(both, {("t", "1")}), (only_n, set()), ({("t", "1"): "MIT"}, {("t", "1")})])
+        self.assertEqual(merged, {("t", "1")})
+        shipped_elsewhere = third_party.merge_dev([(both, {("t", "1")}), ({("t", "1"): "MIT"}, set())])
+        self.assertEqual(shipped_elsewhere, set())
+
+    def test_render_marks_rust_dev_crates_and_leaves_the_rest_alone(self):
+        rust = {("a", "1.0.0"): "MIT", ("tool", "2.0.0"): "MIT"}
+        text = third_party.render(rust, {}, rust_dev={("tool", "2.0.0")})
+        self.assertIn("tool 2.0.0 (dev)", text)
+        self.assertNotIn("a 1.0.0 (dev)", text)
+        self.assertEqual(third_party.render(rust, {}), third_party.render(rust, {}, rust_dev=set()))
+
+    def test_the_committed_inventory_marks_the_test_tooling_and_not_the_runtime(self):
+        self.assertRegex(NOTICES, r"near-workspaces \S+ \(dev\)")
+        self.assertRegex(NOTICES, r"proptest \S+ \(dev\)")
+        self.assertNotRegex(NOTICES, r"near-sdk \S+ \(dev\)")
+        self.assertNotRegex(NOTICES, r"serde_json \S+ \(dev\)")
+
+
 if __name__ == "__main__":
     unittest.main()

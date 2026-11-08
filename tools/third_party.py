@@ -22,6 +22,9 @@ BEGIN = "<!-- BEGIN GENERATED: tools/third_party.py -->"
 END = "<!-- END GENERATED -->"
 FILE_ONLY = "no license field in the manifest (license file only)"
 NOT_DECLARED = "not declared in the manifest"
+# Workspace members that are test harnesses and are never deployed. Their dependencies are test tooling
+# even when Cargo lists them as normal dependencies (near-workspaces is one of sandbox/).
+TEST_ONLY_PACKAGES = {"foundling-sandbox"}
 
 
 def rust_from_metadata(meta):
@@ -33,6 +36,34 @@ def rust_from_metadata(meta):
         license_ = package.get("license") or (FILE_ONLY if package.get("license_file") else NOT_DECLARED)
         found[(package["name"], package["version"])] = license_
     return found
+
+
+def rust_dev_from_metadata(meta):
+    """Registry crates that only a dev-dependency edge reaches: test tooling, not part of what runs.
+
+    A crate any normal or build edge reaches from a workspace member ships; so does everything such a
+    crate pulls in. A member in TEST_ONLY_PACKAGES is not a starting point. What is left among the
+    reached registry crates is dev.
+    """
+    nodes = {node["id"]: node for node in meta["resolve"]["nodes"]}
+    names = {package["id"]: package["name"] for package in meta["packages"]}
+    roots = [m for m in meta.get("workspace_members", []) if names.get(m) not in TEST_ONLY_PACKAGES]
+    shipped, todo = set(roots), list(roots)
+    while todo:
+        for dep in nodes.get(todo.pop(), {}).get("deps", []):
+            kinds = {kind.get("kind") for kind in dep.get("dep_kinds", [])} or {None}
+            if kinds != {"dev"} and dep["pkg"] not in shipped:
+                shipped.add(dep["pkg"])
+                todo.append(dep["pkg"])
+    by_id = {package["id"]: package for package in meta["packages"]}
+    return {(by_id[i]["name"], by_id[i]["version"]) for i in nodes
+            if i in by_id and by_id[i].get("source") and i not in shipped}
+
+
+def merge_dev(parts):
+    """Dev overall only if every manifest that has the crate says dev. parts: [(found, dev), ...]."""
+    present = set().union(*(found for found, _ in parts)) if parts else set()
+    return {key for key in present if all(key in dev for found, dev in parts if key in found)}
 
 
 def npm_license(entry):
@@ -84,8 +115,9 @@ def render_ecosystem(title, groups):
     return lines
 
 
-def render(rust, npm):
-    rust_groups = group((f"{name} {version}", license_) for (name, version), license_ in rust.items())
+def render(rust, npm, rust_dev=frozenset()):
+    rust_groups = group((f"{name} {version}" + (" (dev)" if (name, version) in rust_dev else ""), license_)
+                        for (name, version), license_ in rust.items())
     npm_groups = group((f"{name} {version}" + (" (dev)" if dev else ""), license_)
                        for (name, version), (license_, dev) in npm.items())
     lines = [
@@ -114,14 +146,16 @@ def splice(text, section):
 
 def gather_rust(root):
     listed = subprocess.run(["git", "ls-files", "*Cargo.toml"], cwd=root, capture_output=True, text=True, check=True)
-    parts = []
+    parts, devs = [], []
     for manifest in sorted(listed.stdout.split()):
         done = subprocess.run(["cargo", "metadata", "--format-version", "1", "--locked", "--all-features", "--manifest-path", manifest],
                               cwd=root, capture_output=True, text=True)
         if done.returncode:
             raise RuntimeError(f"cargo metadata failed for {manifest}: {done.stderr.strip()[:300]}")
-        parts.append(rust_from_metadata(json.loads(done.stdout)))
-    return merge(*parts)
+        meta = json.loads(done.stdout)
+        parts.append(rust_from_metadata(meta))
+        devs.append(rust_dev_from_metadata(meta))
+    return merge(*parts), merge_dev(list(zip(parts, devs)))
 
 
 def main(argv=None):
@@ -132,10 +166,10 @@ def main(argv=None):
     root = Path(args.root)
     notices = root / "THIRD_PARTY_NOTICES.md"
     try:
-        rust = gather_rust(root)
+        rust, rust_dev = gather_rust(root)
         npm = npm_from_lock(json.loads((root / "package-lock.json").read_text(encoding="utf-8")))
         current = notices.read_text(encoding="utf-8")
-        updated = splice(current, render(rust, npm))
+        updated = splice(current, render(rust, npm, rust_dev))
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as err:
         print(f"ERROR {err}", file=sys.stderr)
         return 2
