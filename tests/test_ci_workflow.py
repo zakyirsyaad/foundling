@@ -24,7 +24,7 @@ ATTACK_RUN_JOB = "attack-lab-run"
 REQUIRED_JOBS = {
     "strategy", "contract", "verifier", "offline-verifier", "attack-lab", "keeper",
     "vault-wasm", "sandbox", "web", "dependencies", "secrets", ATTACK_RUN_JOB, "workflow",
-    "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
+    "vault-reproducible", "vault-reproducible-compare", "recheck-obs", "docs",
 }
 # GitHub runs a step with no shell as `bash -e {0}`, which has no pipefail, so `cmd | tee`
 # reports tee's status. A workflow default of `shell: bash` runs `bash -eo pipefail {0}`.
@@ -32,6 +32,9 @@ DEFAULT_SHELL = "defaults:\n  run:\n    shell: bash\n"
 # Every Attack Lab unittest module must run in the scaffold job, so a new batch cannot be
 # added without its binding tests reaching CI.
 ATTACK_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_attack_*.py"))
+# Every unittest module under tests/ must run in some job, so a new test file cannot sit
+# outside CI (issue #21: test_readme and test_third_party landed with no job).
+ALL_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_*.py"))
 # Patterns that make a failing command succeed. Every `||` is rejected separately, except
 # `|| status=$?`, which records the status and lets the step fail on it, and the two lines
 # below: the Web job runs an image that is meant to refuse an empty env, captures what it
@@ -143,6 +146,12 @@ def check(text):
     for module in ATTACK_TESTS:
         if module not in scaffold_modules:
             problems.append(f"attack-lab: tests.{module} is never run")
+    run_anywhere = "\n".join(l for body in jobs.values() for l in body.splitlines() if not l.lstrip().startswith("#"))
+    ran = set(re.findall(r"\btests\.(test_\w+)", run_anywhere))
+    for module in ALL_TESTS:
+        if module not in ran:
+            problems.append(f"tests.{module} is never run by any job")
+    runs("docs", r"python3 tools/readme\.py --check")
     runs("offline-verifier", r"python3 verify\.py")
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
@@ -244,6 +253,10 @@ class TamperingTest(unittest.TestCase):
             "job defaults without shell": tampered_in(b, "strategy", "        shell: bash\n", ""),
             "step shell: sh": tampered(b, "run: make sandbox\n", "shell: sh\n        run: make sandbox\n"),
             "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
+            "readme tests dropped": tampered_in(b, "docs", " tests.test_readme", ""),
+            "third-party tests only in a comment": tampered_in(b, "docs", " tests.test_third_party", "\n        # tests.test_third_party"),
+            "readme check replaced": tampered_in(b, "docs", "python3 tools/readme.py --check", "true"),
+            "docs job deleted": without_job(b, "docs"),
             "batch 3 tests only in a comment": tampered_in(
                 b, "attack-lab", " tests.test_attack_batch3\n", "\n        # run: python3 -m unittest tests.test_attack_batch3\n"
             ),
