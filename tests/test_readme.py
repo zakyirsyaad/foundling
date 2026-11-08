@@ -210,19 +210,33 @@ class DisclosureTest(unittest.TestCase):
             self.assertNotIn(word, README.lower())
 
 
+def git_ignored(path):
+    """True when .gitignore covers `path`, like the local Attack Lab output the README names.
+
+    Such a folder exists only after a local run, so a fresh checkout (CI) never has it.
+    """
+    return subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT, check=False).returncode == 0
+
+
+def missing_repo_paths(text):
+    """Relative links and repo paths in `text` that are neither on disk nor git-ignored, sorted."""
+    top_level = {p.name for p in ROOT.iterdir() if not p.name.startswith(".")}
+    candidates = [t for t in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", text) if not re.match(r"[a-z]+://", t)]
+    for token in re.findall(r"`([^`\s|]+)`", text):
+        first = token.split("/", 1)[0]
+        looks_like_path = "/" in token and first in top_level or token in top_level
+        if looks_like_path and not re.search(r"[<>*{}]", token):
+            candidates.append(token)
+    return sorted({p for p in candidates if not (ROOT / p).exists() and not git_ignored(p)})
+
+
 class LinkTest(unittest.TestCase):
     def test_every_relative_link_and_every_repo_path_in_the_readme_exists(self):
-        top_level = {p.name for p in ROOT.iterdir() if not p.name.startswith(".")}
-        missing = []
-        for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", README):
-            if not re.match(r"[a-z]+://", target) and not (ROOT / target).exists():
-                missing.append(target)
-        for token in re.findall(r"`([^`\s|]+)`", README):
-            first = token.split("/", 1)[0]
-            looks_like_path = "/" in token and first in top_level or token in top_level
-            if looks_like_path and not re.search(r"[<>*{}]", token) and not (ROOT / token).exists():
-                missing.append(token)
-        self.assertEqual(sorted(set(missing)), [])
+        self.assertEqual(missing_repo_paths(README), [])
+
+    def test_only_a_git_ignored_output_path_may_be_absent(self):
+        text = "Results go to `proofs/attack/local/`; see `docs/no-such.md`, `proofs/no-such/` and [x](tools/no_such.py)."
+        self.assertEqual(missing_repo_paths(text), ["docs/no-such.md", "proofs/no-such/", "tools/no_such.py"])
 
     def test_every_path_a_claim_names_exists(self):
         missing = [ref for claim in CLAIMS for key in ("evidence", "code_refs", "test_refs")

@@ -24,7 +24,7 @@ ATTACK_RUN_JOB = "attack-lab-run"
 REQUIRED_JOBS = {
     "strategy", "contract", "verifier", "offline-verifier", "attack-lab", "keeper",
     "vault-wasm", "sandbox", "web", "dependencies", "secrets", ATTACK_RUN_JOB, "workflow",
-    "vault-reproducible", "vault-reproducible-compare", "recheck-obs",
+    "vault-reproducible", "vault-reproducible-compare", "recheck-obs", "docs",
 }
 # GitHub runs a step with no shell as `bash -e {0}`, which has no pipefail, so `cmd | tee`
 # reports tee's status. A workflow default of `shell: bash` runs `bash -eo pipefail {0}`.
@@ -32,6 +32,9 @@ DEFAULT_SHELL = "defaults:\n  run:\n    shell: bash\n"
 # Every Attack Lab unittest module must run in the scaffold job, so a new batch cannot be
 # added without its binding tests reaching CI.
 ATTACK_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_attack_*.py"))
+# Every unittest module under tests/ must run in some job, so a new test file cannot sit
+# outside CI (issue #21: test_readme and test_third_party landed with no job).
+ALL_TESTS = sorted(p.stem for p in (ROOT / "tests").glob("test_*.py"))
 # Patterns that make a failing command succeed. Every `||` is rejected separately, except
 # `|| status=$?`, which records the status and lets the step fail on it, and the two lines
 # below: the Web job runs an image that is meant to refuse an empty env, captures what it
@@ -127,6 +130,12 @@ def check(text):
     flagged = [l for l in code.splitlines() if "continue-on-error" in l]
     if flagged:
         problems.append(f"continue-on-error lets a job or step fail without failing the workflow; found {len(flagged)}")
+    # A download with no retry fails the whole job on one GitHub 5xx (a 504 from Releases
+    # failed "Vault reproducible" on PR #60). The sha256 check after each download still runs.
+    for line in code.splitlines():
+        # `--retry N` itself: --retry-all-errors or --retry-delay alone do not retry.
+        if re.search(r"\bcurl\s", line) and not re.search(r"--retry\s+[1-9]", line):
+            problems.append(f"curl without --retry N: {line.strip()[:80]}")
     run_body = jobs.get(ATTACK_RUN_JOB, "")
     if not re.search(r"python3 tools/attack\.py run-all --strict(\s|$)", run_body):
         problems.append(f"{ATTACK_RUN_JOB} must run `python3 tools/attack.py run-all --strict`, so a missing script is not a pass")
@@ -143,6 +152,12 @@ def check(text):
     for module in ATTACK_TESTS:
         if module not in scaffold_modules:
             problems.append(f"attack-lab: tests.{module} is never run")
+    run_anywhere = "\n".join(l for body in jobs.values() for l in body.splitlines() if not l.lstrip().startswith("#"))
+    ran = set(re.findall(r"\btests\.(test_\w+)", run_anywhere))
+    for module in ALL_TESTS:
+        if module not in ran:
+            problems.append(f"tests.{module} is never run by any job")
+    runs("docs", r"python3 tools/readme\.py --check")
     runs("offline-verifier", r"python3 verify\.py")
     runs("sandbox", r"make sandbox")
     runs("workflow", r"python3 -m unittest tests\.test_ci_workflow")
@@ -244,6 +259,11 @@ class TamperingTest(unittest.TestCase):
             "job defaults without shell": tampered_in(b, "strategy", "        shell: bash\n", ""),
             "step shell: sh": tampered(b, "run: make sandbox\n", "shell: sh\n        run: make sandbox\n"),
             "batch 3 tests dropped from the scaffold": tampered_in(b, "attack-lab", " tests.test_attack_batch3", ""),
+            "readme tests dropped": tampered_in(b, "docs", " tests.test_readme", ""),
+            "a download without retries": tampered_in(b, "vault-reproducible", " --retry 3", ""),
+            "third-party tests only in a comment": tampered_in(b, "docs", " tests.test_third_party", "\n        # tests.test_third_party"),
+            "readme check replaced": tampered_in(b, "docs", "python3 tools/readme.py --check", "true"),
+            "docs job deleted": without_job(b, "docs"),
             "batch 3 tests only in a comment": tampered_in(
                 b, "attack-lab", " tests.test_attack_batch3\n", "\n        # run: python3 -m unittest tests.test_attack_batch3\n"
             ),
