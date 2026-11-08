@@ -115,5 +115,83 @@ class RunRecordsSourceCommitTest(unittest.TestCase):
         self.assertEqual(text, json.dumps(json.loads(text), indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
+class CommittedProofsTest(unittest.TestCase):
+    """With FOUNDLING_PROOF_DIR set (make attack-proofs) the run must be able to say which commit it describes."""
+
+    BUILT = NEW - 500  # a commit made before the WASM was built (the WASM's mtime is NEW)
+
+    def setUp(self):
+        RunRecordsSourceCommitTest.setUp(self)
+        self.proof_path = self.root / "proofs" / "attack" / "reproducible" / "over-cap.json"
+        self.proof_path.parent.mkdir(parents=True)
+
+    def commit(self, when, message="one"):
+        env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when} +0000", "GIT_COMMITTER_DATE": f"@{when} +0000"}
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", message],
+            check=True, capture_output=True, env=env,
+        )
+
+    def repository(self, when=None):
+        git(self.root, "init", "-q")
+        (self.root / ".gitignore").write_text("target/\nproofs/attack/reproducible/\n")
+        self.commit(self.BUILT if when is None else when)
+
+    def run_attack(self):
+        env = {"FAKE_LOG": str(self.root / "cargo.json"), "FAKE_RC": "0", "FAKE_PROOF_PATH": str(self.proof_path),
+               "FAKE_PROOF": proof("held"), "FOUNDLING_PROOF_DIR": str(self.proof_path.parent)}
+        saved = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            return _sandbox.run("over-cap", root=self.root, cargo=[str(self.cargo)])
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_a_clean_tree_at_a_commit_older_than_the_wasm_is_recorded(self):
+        self.repository()
+        self.assertEqual(self.run_attack(), 0)
+        self.assertEqual(json.loads(self.proof_path.read_text())["source_commit"], git(self.root, "rev-parse", "HEAD"))
+
+    def test_without_a_commit_the_run_is_refused_and_no_proof_is_written(self):
+        self.assertEqual(self.run_attack(), 2)
+        self.assertFalse(self.proof_path.exists())
+
+    def test_a_dirty_tree_is_refused(self):
+        self.repository()
+        edited = self.root / "contracts" / "vault" / "src" / "lib.rs"
+        edited.write_text("// edited after the commit\n")
+        os.utime(edited, (OLD, OLD))  # so only the dirty tree, not a stale WASM, can refuse the run
+        self.assertEqual(self.run_attack(), 2)
+        self.assertFalse(self.proof_path.exists())
+
+    def test_an_untracked_file_outside_the_proof_folder_is_refused(self):
+        self.repository()
+        (self.root / "stray.rs").write_text("")
+        self.assertEqual(self.run_attack(), 2)
+
+    def test_proofs_written_by_earlier_attacks_do_not_make_the_tree_dirty(self):
+        self.repository()
+        (self.proof_path.parent / "drip.json").write_text("{}\n")
+        self.assertEqual(self.run_attack(), 0)
+
+    def test_a_commit_newer_than_the_wasm_is_refused(self):
+        self.repository(when=NEW + 500)
+        self.assertEqual(self.run_attack(), 2)
+        self.assertFalse(self.proof_path.exists())
+
+    def test_a_local_run_still_allows_a_dirty_tree_and_no_commit(self):
+        self.proof_path = self.root / "proofs" / "attack" / "local" / "over-cap.json"
+        edited = self.root / "contracts" / "vault" / "src" / "lib.rs"
+        edited.write_text("// not a repository at all\n")
+        os.utime(edited, (OLD, OLD))
+        self.assertEqual(RunRecordsSourceCommitTest.run_attack(self), 0)
+        self.assertIsNone(json.loads(self.proof_path.read_text())["source_commit"])
+
+
 if __name__ == "__main__":
     unittest.main()

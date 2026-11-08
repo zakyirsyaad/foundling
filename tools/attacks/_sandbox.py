@@ -9,7 +9,9 @@ Exit codes follow the dispatcher: 0 held, 1 breached, 2 tool error. A breach is 
 a proof the test never reached a verdict (a build error, a missing or stale wasm, a failed
 harness call), which is 2 and never a pass or a fail of the attack.
 After a verdict, run() adds `source_commit` to the proof: the commit the repository was at, so the
-vault_wasm_sha256 in a committed proof can be rebuilt from it. It is null outside a repository.
+vault_wasm_sha256 in a committed proof can be rebuilt from it. It is null outside a repository, but
+when the proof dir is proofs/attack/reproducible (the committed ones, make attack-proofs) a missing commit,
+a dirty tree, or a commit made after the vault WASM was built is exit 2 before anything runs.
 """
 import json
 import os
@@ -44,6 +46,42 @@ def git_head(root):
     if top is None or Path(top).resolve() != root or head is None or not re.fullmatch(r"[0-9a-f]{40}", head):
         return None
     return head
+
+
+def provenance_problem(root, wasm):
+    """Why the commit checked out in `root` cannot stand for the build under test, or None.
+
+    The reproducible build embeds the commit it was made at, so a proof is only worth keeping when
+    HEAD is that commit: a clean tree (apart from the proof folder, which earlier attacks fill) and no
+    commit made after the WASM was built.
+    """
+    root = Path(root).resolve()
+    if git_head(root) is None:
+        return "no commit is checked out here, so source_commit would be null"
+
+    def ask(*args):
+        try:
+            done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+        except OSError:
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    spec = ["."]
+    try:
+        spec.append(f":(exclude){proof_dir(root).resolve().relative_to(root).as_posix()}")
+    except ValueError:
+        pass
+    dirty = ask("status", "--porcelain", "--untracked-files=normal", "--", *spec)
+    if dirty is None:
+        return "git status failed, so a clean tree cannot be confirmed"
+    if dirty:
+        return f"the working tree has uncommitted changes ({dirty.splitlines()[0].strip()}), so source_commit would not describe the build"
+    stamp = ask("log", "-1", "--format=%ct")
+    if stamp is None or not stamp.isdigit():
+        return "the date of HEAD is unreadable"
+    if int(stamp) > wasm.stat().st_mtime:
+        return "HEAD is newer than the vault WASM, so the WASM was built at an earlier commit"
+    return None
 
 
 def record_source_commit(proof_path, proof, root):
@@ -95,6 +133,11 @@ def run(name, root=ROOT, cargo=("cargo",)):
         return fail(f"{name}: wasm not built ({', '.join(missing)}); run `make wasm`")
     if stale:
         return fail(f"{name}: wasm older than its sources ({', '.join(stale)}); run `make wasm`")
+    if proof_dir(root).resolve() == (root / "proofs" / "attack" / "reproducible").resolve():
+        directory, file = WASM[0]
+        problem = provenance_problem(root, root / "contracts" / directory / "target" / "near" / f"{file}.wasm")
+        if problem:
+            return fail(f"{name}: {problem}; committed proofs come from `make attack-proofs` on a clean, committed checkout")
 
     try:
         binary = test_binary(name, root)
