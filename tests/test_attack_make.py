@@ -13,6 +13,28 @@ def dry_run(target):
     return result.stdout
 
 
+def recipe_line(plan, index):
+    """The whole line of `make -n` output that holds `plan[index]`, however long the checkout path makes it."""
+    start = plan.rfind("\n", 0, index) + 1
+    end = plan.find("\n", index)
+    return plan[start : len(plan) if end < 0 else end]
+
+
+class RecipeLineTest(unittest.TestCase):
+    def test_a_long_checkout_path_does_not_push_the_variable_out_of_view(self):
+        root = "/" + "very-long-directory/" * 20 + "foundling"
+        command = f"FOUNDLING_PROOF_DIR={root}/proofs/attack/reproducible python3 tools/attack.py run-all"
+        plan = "cd sandbox && cargo test\n" + command + "\n"
+        line = recipe_line(plan, plan.index("tools/attack.py run-all"))
+        self.assertEqual(line, command)
+        self.assertGreater(plan.index("tools/attack.py run-all") - plan.index("FOUNDLING_PROOF_DIR="), 140)
+
+    def test_the_line_stops_at_the_previous_and_the_next_recipe_line(self):
+        plan = "first\nsecond tools/attack.py run-all\nthird"
+        self.assertEqual(recipe_line(plan, plan.index("tools/")), "second tools/attack.py run-all")
+        self.assertEqual(recipe_line("only tools/attack.py run-all", 5), "only tools/attack.py run-all")
+
+
 class AttackLabMakeTest(unittest.TestCase):
     def test_attack_lab_needs_no_toolchain(self):
         # The CI scaffold job has Python only, and tests.test_attack_lab runs this target.
@@ -48,10 +70,11 @@ class AttackLabMakeTest(unittest.TestCase):
         reproducible = plan.index("cargo near build reproducible-wasm")
         run_all = plan.index("tools/attack.py run-all")
         self.assertLess(reproducible, run_all)
-        self.assertIn("FOUNDLING_PROOF_DIR=", plan[run_all - 120 : run_all])
+        line = recipe_line(plan, run_all)
+        self.assertIn("FOUNDLING_PROOF_DIR=", line)
         # Not proofs/attack/<name>.json: web/lib/proof/sample.ts reads those as results, and the
         # web test of the lead expects every attack there to be "Not run yet".
-        self.assertIn("proofs/attack/reproducible", plan[run_all - 140 : run_all])
+        self.assertIn("proofs/attack/reproducible", line)
         # The mocks are built the usual way; only the vault is the audited artifact.
         loop = plan.split("; do", 1)[0]
         self.assertNotIn("vault", loop.split())
