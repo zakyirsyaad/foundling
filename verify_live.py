@@ -34,6 +34,9 @@ RATE_WINDOW = 60.0
 NODE_ERRORS = {"INTERNAL_ERROR", "TIMEOUT_ERROR", "NO_SYNCED_BLOCKS", "UNAVAILABLE_SHARD"}
 # A paced run stops waiting after this many seconds: pacing, a 429 and slow nodes cannot add up to a hang.
 MAX_SECONDS = 180.0
+# Views a Foundling vault must have (lead's decision on #62): MethodNotFound on one of these is a FAIL.
+REQUIRED_VIEWS = ("agent", "reveal_after", "revealed", "revealed_salt", "last_nonce", "published_decision",
+                  "ops_spent", "policy")
 DECISIONS_KEPT = 64
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -61,7 +64,16 @@ class Unavailable(Exception):
 
 
 class Refused(Exception):
-    """The node answered, but the vault or the account did not."""
+    """The node answered, but the vault or the account did not. `missing`: the vault has no such method."""
+
+    def __init__(self, message, missing=False):
+        super().__init__(message)
+        self.missing = missing
+
+
+def is_method_not_found(text):
+    """The node's own words for a method the contract does not export (not any text that mentions it)."""
+    return "MethodResolveError(MethodNotFound)" in text
 
 
 def http_transport(url, payload, timeout=TIMEOUT):
@@ -191,10 +203,11 @@ class Client:
     def result(self, method, params):
         data = self.call(method, params)
         if "error" in data:
-            raise Refused(json.dumps(data["error"])[:200])
+            text = json.dumps(data["error"])
+            raise Refused(text[:200], missing=is_method_not_found(text))
         result = data["result"]
         if isinstance(result, dict) and isinstance(result.get("error"), str):
-            raise Refused(result["error"][:200])
+            raise Refused(result["error"][:200], missing=is_method_not_found(result["error"]))
         return result
 
     def query(self, request_type, **params):
@@ -253,7 +266,12 @@ def attempt(thunk):
     except Unavailable as err:
         return Problem(err.reason, str(err))
     except Refused as err:
-        return Problem("VIEW_REFUSED", str(err))
+        return Problem("VIEW_MISSING" if err.missing else "VIEW_REFUSED", str(err))
+
+
+def problem_result(name, read):
+    """A claim that could not read what it needs: FAIL when the vault lacks the view, else SKIP."""
+    return verify.Result(name, "FAIL" if read.reason == "VIEW_MISSING" else "SKIP", read.reason, read.detail)
 
 
 def account_read(thunk, what):
@@ -308,8 +326,9 @@ def run_live(vault, network, client, expect_code_hash=None):
 
     def view(method, args=None):
         read = attempt(lambda: client.view(vault, method, args))
-        if isinstance(read, Problem) and read.reason == "VIEW_REFUSED":
-            return Problem(read.reason, f"the vault has no usable view {method}: {read.detail}")
+        if isinstance(read, Problem) and read.reason in ("VIEW_REFUSED", "VIEW_MISSING"):
+            reason = read.reason if method in REQUIRED_VIEWS else "VIEW_REFUSED"
+            return Problem(reason, f"the vault has no usable view {method}: {read.detail}")
         return read
 
     def value(read):
@@ -337,8 +356,15 @@ def run_live(vault, network, client, expect_code_hash=None):
 
     results.append(commitment_result(vault, agent, reveal_after, revealed, salt, chain_time, block))
     results.append(decision_result(view, last_nonce))
-    facts["ops_spent"] = value(view("ops_spent"))
-    facts["policy"] = value(view("policy"))
+    ops_spent, policy = view("ops_spent"), view("policy")
+    facts["ops_spent"] = value(ops_spent)
+    facts["policy"] = value(policy)
+    named = " ".join(r.detail for r in results if r.reason == "VIEW_MISSING")
+    absent = [name for name, read in (("reveal_after", reveal_after), ("ops_spent", ops_spent), ("policy", policy))
+              if isinstance(read, Problem) and read.reason == "VIEW_MISSING" and f"view {name}:" not in named]
+    if absent:
+        results.append(verify.Result("views", "FAIL", "VIEW_MISSING",
+                                     f"the vault has no view {', '.join(absent)}, which a Foundling vault must have"))
     report.calls = client.calls
     return report
 
@@ -349,7 +375,7 @@ def commitment_result(vault, agent, reveal_after, revealed, salt, chain_time, bl
 
     for read in (agent, revealed, salt):
         if isinstance(read, Problem):
-            return result("SKIP", read.reason, read.detail)
+            return problem_result("commitment", read)
     config = agent[0]
     if not isinstance(config, dict) or not isinstance(config.get("commitment"), str):
         return result("FAIL", "COMMITMENT_FORMAT", "the vault's agent view has no commitment")
@@ -360,7 +386,7 @@ def commitment_result(vault, agent, reveal_after, revealed, salt, chain_time, bl
     if params is None or secret is None:
         for late in (reveal_after, block):
             if isinstance(late, Problem):
-                return result("SKIP", late.reason, late.detail)
+                return problem_result("commitment", late)
         opens_at = reveal_after[0]
         if not isinstance(opens_at, int) or isinstance(opens_at, bool):
             return result("FAIL", "COMMITMENT_FORMAT", "reveal_after is not a number of seconds")
@@ -390,7 +416,7 @@ def decision_result(view, last_nonce):
         return verify.Result("decision", status, reason, detail)
 
     if isinstance(last_nonce, Problem):
-        return result("SKIP", last_nonce.reason, last_nonce.detail)
+        return problem_result("decision", last_nonce)
     nonce = last_nonce[0]
     if not isinstance(nonce, int) or isinstance(nonce, bool):
         return result("FAIL", "DECISION_FORMAT", "last_nonce is not a number")
@@ -398,7 +424,7 @@ def decision_result(view, last_nonce):
         return result("SKIP", "DECISION_NO_CYCLES", "the vault has not run a cycle yet")
     read = view("published_decision", {"nonce": nonce})
     if isinstance(read, Problem):
-        return result("SKIP", read.reason, read.detail)
+        return problem_result("decision", read)
     decision = read[0]
     if decision is None:
         return result("SKIP", "DECISION_NOT_KEPT",

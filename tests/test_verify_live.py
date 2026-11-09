@@ -31,13 +31,14 @@ class FakeChain:
     """Answers like a node: one block, one vault, the recorded views. `calls` lists every request."""
 
     def __init__(self, views=None, keys=None, block_ns=None, down=(), fail_status=None,
-                 refused=(), account_error=None, code_hash=None):
+                 refused=(), account_error=None, code_hash=None, refused_other=()):
         self.views = {**copy.deepcopy(FIXTURE["views"]), **(views or {})}
         self.keys = copy.deepcopy(FIXTURE["access_keys"] if keys is None else keys)
         self.block_ns = FIXTURE["block"]["timestamp_ns"] if block_ns is None else block_ns
         self.down = set(down)
         self.fail_status = fail_status
         self.refused = set(refused)
+        self.refused_other = set(refused_other)
         self.account_error = account_error
         self.code_hash = code_hash or FIXTURE["code_hash_base58"]
         self.calls = []
@@ -80,6 +81,8 @@ class FakeChain:
         name = params["method_name"]
         if name in self.refused:
             return {"error": "wasm execution failed with error: MethodResolveError(MethodNotFound)", "logs": [], **self._height()}
+        if name in self.refused_other:
+            return {"error": "wasm execution failed with error: HostError(GasExceeded)", "logs": [], **self._height()}
         if name == "published_decision":
             args = json.loads(base64.b64decode(params["args_base64"]))
             assert args == {"nonce": self.views["last_nonce"]}, args
@@ -244,13 +247,97 @@ class ClaimTest(unittest.TestCase):
         none = by_name(report(FakeChain(code_hash="1" * 32)))["code_hash"]
         self.assertEqual((none.status, none.reason), ("FAIL", "NO_CONTRACT"))
 
-    def test_a_vault_without_a_view_skips_that_claim_instead_of_failing(self):
-        decision = by_name(report(FakeChain(refused={"published_decision"})))["decision"]
+    # Lead's decision on #62: MethodNotFound on a view a Foundling vault must have is a FAIL
+    # (VIEW_MISSING); any other refusal stays a SKIP. This replaces the old test that wanted SKIP.
+    def test_a_required_view_the_vault_does_not_have_fails_the_claim_that_needs_it(self):
+        cases = {
+            "agent": "commitment", "revealed": "commitment", "revealed_salt": "commitment",
+            "last_nonce": "decision", "published_decision": "decision",
+        }
+        for view, claim in cases.items():
+            with self.subTest(view=view):
+                result = by_name(report(FakeChain(refused={view})))[claim]
+                self.assertEqual((result.status, result.reason), ("FAIL", "VIEW_MISSING"))
+                self.assertIn(view, result.detail, "the reader is told which view the vault lacks")
+
+    def test_a_missing_reveal_after_ops_spent_or_policy_fails_in_a_views_result(self):
+        for view in ("reveal_after", "ops_spent", "policy"):
+            with self.subTest(view=view):
+                rep = report(FakeChain(refused={view}))
+                result = by_name(rep)["views"]
+                self.assertEqual((result.status, result.reason), ("FAIL", "VIEW_MISSING"))
+                self.assertIn(view, result.detail)
+
+    def test_a_vault_with_every_view_has_no_views_result(self):
+        self.assertNotIn("views", by_name(report(FakeChain())))
+
+    def test_a_missing_view_makes_the_run_exit_1_with_or_without_strict(self):
+        for extra in ((), ("--strict",)):
+            with self.subTest(extra=extra):
+                code, out, _ = run(FakeChain(refused={"published_decision"}), *extra)
+                self.assertEqual(code, 1, out)
+                self.assertIn("FAIL decision: VIEW_MISSING", out)
+
+    def test_a_refusal_that_is_not_method_not_found_stays_a_skip(self):
+        decision = by_name(report(FakeChain(refused_other={"published_decision"})))["decision"]
         self.assertEqual((decision.status, decision.reason), ("SKIP", "VIEW_REFUSED"))
-        self.assertIn("published_decision", decision.detail, "the reader is told which view the vault lacks")
-        revealed = by_name(report(FakeChain(refused={"revealed_salt"})))["commitment"]
-        self.assertEqual((revealed.status, revealed.reason), ("SKIP", "VIEW_REFUSED"))
-        self.assertIn("revealed_salt", revealed.detail)
+        self.assertIn("published_decision", decision.detail)
+        commitment = by_name(report(FakeChain(refused_other={"revealed_salt"})))["commitment"]
+        self.assertEqual((commitment.status, commitment.reason), ("SKIP", "VIEW_REFUSED"))
+        self.assertNotIn("views", by_name(report(FakeChain(refused_other={"ops_spent", "policy"}))))
+        code, _, _ = run(FakeChain(refused_other={"published_decision"}))
+        self.assertEqual(code, 0, "a SKIP alone still exits 0 without --strict")
+
+    def test_a_missing_stage_is_not_a_required_view_and_stays_a_skip_fact(self):
+        rep = report(FakeChain(refused={"stage"}))
+        self.assertNotIn("FAIL", {r.status for r in rep.results})
+        self.assertIsNone(rep.facts["stage"])
+
+    def test_method_not_found_is_read_from_a_json_rpc_error_object_too(self):
+        error = {"name": "HANDLER_ERROR", "cause": {"name": "CONTRACT_EXECUTION_ERROR",
+                                                       "info": {"error": "MethodResolveError(MethodNotFound)"}}}
+
+        def transport(url, payload):
+            return {"jsonrpc": "2.0", "id": "1", "error": error}
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport)
+        with self.assertRaises(verify_live.Refused) as caught:
+            client.view(VAULT, "agent")
+        self.assertTrue(caught.exception.missing)
+
+    def test_a_panic_text_that_merely_contains_the_word_is_not_a_missing_method(self):
+        # Only the node's own MethodResolveError(MethodNotFound) means the method is missing.
+        def transport(url, payload):
+            return {"jsonrpc": "2.0", "id": "1",
+                    "result": {"error": "wasm execution failed with error: GuestPanic { msg: \"MethodNotFound\" }", "logs": []}}
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport)
+        with self.assertRaises(verify_live.Refused) as caught:
+            client.view(VAULT, "agent")
+        self.assertFalse(caught.exception.missing)
+
+    def test_the_real_node_text_for_a_missing_method_is_recognised(self):
+        # Recorded from the testnet RPC for vault.fdl-adv2-7d4520.testnet and a view that does not exist.
+        text = "wasm execution failed with error: MethodResolveError(MethodNotFound)"
+        self.assertTrue(verify_live.is_method_not_found(text))
+        # An account with no contract is a different failure (handled as NO_CONTRACT), not a missing view.
+        self.assertFalse(verify_live.is_method_not_found(
+            'wasm execution failed with error: CompilationError(CodeDoesNotExist { account_id: "x.testnet" })'))
+
+    def test_a_missing_reveal_after_that_the_commitment_already_reported_is_not_listed_twice(self):
+        rep = report(FakeChain(views={"revealed": None, "revealed_salt": None}, refused={"reveal_after"}))
+        results = by_name(rep)
+        self.assertEqual((results["commitment"].status, results["commitment"].reason), ("FAIL", "VIEW_MISSING"))
+        self.assertNotIn("views", results, "reveal_after was named by the commitment claim already")
+
+    def test_other_refusals_are_not_marked_missing(self):
+        def transport(url, payload):
+            return {"jsonrpc": "2.0", "id": "1", "result": {"error": "HostError(GasExceeded)", "logs": []}}
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport)
+        with self.assertRaises(verify_live.Refused) as caught:
+            client.view(VAULT, "agent")
+        self.assertFalse(caught.exception.missing)
 
 
 class OutputTest(unittest.TestCase):
