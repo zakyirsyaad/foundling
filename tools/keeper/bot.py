@@ -272,7 +272,9 @@ class Bot:
             self._failed("trigger_cycle", now + spent)
             return "trigger_failed"
         txs = [{"method": "trigger_cycle", "hash": result.tx_hash}] if result.tx_hash else []
-        pending = {"before": before, "started": started, "at": now, "txs": txs,
+        # `confirmed`: near-cli said the call went through. A timeout without a hash may never have
+        # reached the chain, so a nonce that moves after it may be someone else's trigger.
+        pending = {"before": before, "started": started, "at": now, "txs": txs, "confirmed": bool(result.ok),
                    "until": started + self.config.nonce_wait + SETTLE_GRACE}
         if txs:
             # The reads below can fail or lag. Keep the hash first, so the cycle is still the
@@ -294,13 +296,16 @@ class Bot:
     def _adopt(self, pending, nonce):
         """The trigger the bot sent becomes the cycle it follows. With a hash it is the nonce right
         after `before`, whatever the vault has moved on to since; without one, only the nonce seen.
-        Either way it is the bot's own cycle, so the soak judges it (lead, #21): a trigger near-cli
-        reported without a hash is marked `hashless`, not passed off as someone else's cycle."""
+        A trigger near-cli confirmed is the bot's own cycle even without a hash, so the soak judges it
+        (lead, #21) and `hashless` says why its outcome may be Unknown. One that timed out with no hash
+        may never have landed, so the cycle is taken over as before, not claimed."""
+        own = bool(pending["txs"]) or pending.get("confirmed", True)
         self.state["pending"] = None
         self.state["last_trigger"] = max(self.state["last_trigger"], pending["at"])
         self.state["cycle"] = {"nonce": pending["before"] + 1 if pending["txs"] else nonce,
                                "started": pending["started"], "txs": pending["txs"], "stages": [],
-                               "resumed": False, "hashless": not pending["txs"], "failed_calls": 0}
+                               "resumed": not own, "hashless": own and not pending["txs"],
+                               "failed_calls": 0}
         self._succeeded("trigger_cycle")  # the trigger landed, so its failed waits do not count
 
     def _settle_pending(self, pending):

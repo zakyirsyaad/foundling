@@ -724,5 +724,30 @@ class HashlessTriggerTest(unittest.TestCase):
         self.assertFalse(first["trigger_hash_missing"])
 
 
+
+class UnconfirmedTriggerTest(unittest.TestCase):
+    """A trigger near-cli timed out on with no hash may never have landed: the cycle that follows is
+    taken over, not claimed as the bot's own (#70 review)."""
+
+    def test_a_timed_out_hashless_trigger_leaves_the_cycle_taken_over(self):
+        world = World(cooldown=3600)
+        real = world.near.call
+
+        def call(contract, method, args, gas):
+            if method == "trigger_cycle":
+                world.apply("trigger_cycle", {}, 300)  # a trigger lands: the bot cannot tell whose
+                return CallResult(False, None, "timeout: no answer")
+            return real(contract, method, args, gas)
+
+        world.near.call = call
+        world.trigger_result = "hold"
+        log = ListLog()
+        bot = make_bot(world, store=MemoryStore(), log=log)
+        drive(bot, world, 120)
+        cycle = log.of("cycle")[0]
+        self.assertTrue(cycle["resumed"])
+        self.assertFalse(cycle["trigger_hash_missing"])
+
+
 if __name__ == "__main__":
     unittest.main()

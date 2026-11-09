@@ -23,17 +23,19 @@ fn main() {
 /// remote node or exchange decides what its own error says and how long it is.
 const MAX_ERR_CHARS: usize = 200;
 
-/// An error value a remote service sent, as text cut to `MAX_ERR_CHARS` characters. A string is
-/// cut as it is, any other JSON (an object or an array of errors) as its JSON text; `null`, which
-/// means the service named no error, stays `null`. Kept at the crate root, like `encode_base64`,
-/// so it is tested on the host.
+/// An error value a remote service sent, at most `MAX_ERR_CHARS` characters of it. A value whose
+/// JSON fits is kept as it is, so an error list stays a list; a longer string is cut, and any other
+/// longer JSON becomes its JSON text, cut. `null` (no error named) stays `null`. Kept at the crate
+/// root, like `encode_base64`, so it is tested on the host.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn clip_remote(value: &serde_json::Value) -> serde_json::Value {
     let text = match value {
-        serde_json::Value::Null => return serde_json::Value::Null,
         serde_json::Value::String(text) => text.clone(),
         other => other.to_string(),
     };
+    if text.chars().count() <= MAX_ERR_CHARS {
+        return value.clone();
+    }
     serde_json::Value::String(text.chars().take(MAX_ERR_CHARS).collect())
 }
 
@@ -61,7 +63,13 @@ mod clip_tests {
         let text = clipped.as_str().expect("JSON text, not the array itself");
         assert_eq!(text.chars().count(), MAX_ERR_CHARS);
         assert!(text.starts_with("[\"EGeneral:Too many requests\""));
-        assert_eq!(clip_remote(&json!({"code": 1})), json!("{\"code\":1}"));
+    }
+
+    #[test]
+    fn a_short_error_list_or_object_keeps_its_shape() {
+        let kraken = json!(["EGeneral:Too many requests"]);
+        assert_eq!(clip_remote(&kraken), kraken);
+        assert_eq!(clip_remote(&json!({"code": 1})), json!({"code": 1}));
     }
 
     #[test]
