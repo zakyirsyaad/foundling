@@ -305,6 +305,31 @@ class ClaimTest(unittest.TestCase):
             client.view(VAULT, "agent")
         self.assertTrue(caught.exception.missing)
 
+    def test_a_panic_text_that_merely_contains_the_word_is_not_a_missing_method(self):
+        # Only the node's own MethodResolveError(MethodNotFound) means the method is missing.
+        def transport(url, payload):
+            return {"jsonrpc": "2.0", "id": "1",
+                    "result": {"error": "wasm execution failed with error: GuestPanic { msg: \"MethodNotFound\" }", "logs": []}}
+
+        client = verify_live.Client(verify_live.ENDPOINTS["testnet"], transport)
+        with self.assertRaises(verify_live.Refused) as caught:
+            client.view(VAULT, "agent")
+        self.assertFalse(caught.exception.missing)
+
+    def test_the_real_node_text_for_a_missing_method_is_recognised(self):
+        # Recorded from the testnet RPC for vault.fdl-adv2-7d4520.testnet and a view that does not exist.
+        text = "wasm execution failed with error: MethodResolveError(MethodNotFound)"
+        self.assertTrue(verify_live.is_method_not_found(text))
+        # An account with no contract is a different failure (handled as NO_CONTRACT), not a missing view.
+        self.assertFalse(verify_live.is_method_not_found(
+            'wasm execution failed with error: CompilationError(CodeDoesNotExist { account_id: "x.testnet" })'))
+
+    def test_a_missing_reveal_after_that_the_commitment_already_reported_is_not_listed_twice(self):
+        rep = report(FakeChain(views={"revealed": None, "revealed_salt": None}, refused={"reveal_after"}))
+        results = by_name(rep)
+        self.assertEqual((results["commitment"].status, results["commitment"].reason), ("FAIL", "VIEW_MISSING"))
+        self.assertNotIn("views", results, "reveal_after was named by the commitment claim already")
+
     def test_other_refusals_are_not_marked_missing(self):
         def transport(url, payload):
             return {"jsonrpc": "2.0", "id": "1", "result": {"error": "HostError(GasExceeded)", "logs": []}}

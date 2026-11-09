@@ -72,7 +72,8 @@ class Refused(Exception):
 
 
 def is_method_not_found(text):
-    return "MethodNotFound" in text
+    """The node's own words for a method the contract does not export (not any text that mentions it)."""
+    return "MethodResolveError(MethodNotFound)" in text
 
 
 def http_transport(url, payload, timeout=TIMEOUT):
@@ -358,8 +359,9 @@ def run_live(vault, network, client, expect_code_hash=None):
     ops_spent, policy = view("ops_spent"), view("policy")
     facts["ops_spent"] = value(ops_spent)
     facts["policy"] = value(policy)
+    named = " ".join(r.detail for r in results if r.reason == "VIEW_MISSING")
     absent = [name for name, read in (("reveal_after", reveal_after), ("ops_spent", ops_spent), ("policy", policy))
-              if isinstance(read, Problem) and read.reason == "VIEW_MISSING"]
+              if isinstance(read, Problem) and read.reason == "VIEW_MISSING" and f"view {name}:" not in named]
     if absent:
         results.append(verify.Result("views", "FAIL", "VIEW_MISSING",
                                      f"the vault has no view {', '.join(absent)}, which a Foundling vault must have"))
