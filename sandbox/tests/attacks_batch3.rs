@@ -504,11 +504,17 @@ async fn never_flat() -> anyhow::Result<()> {
                "change": claim_change.to_string(), "dust_value_bound": dust_value(dust).to_string(),
                "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
+    // The depositor's side of the same dust: the shares are worth their part of the USDC book plus
+    // their part of the wNEAR dust, and they may gain over the deposit by at most the dust's worth.
+    let depositor_value = new_shares * (usdc_after + dust_value(wnear_flat)) / total_after;
+    let depositor_gain = delta(NEW_DEPOSIT, depositor_value);
     run.step(
-        "the new depositor's shares are worth no more than what was deposited",
-        new_shares * usdc_after / total_after <= NEW_DEPOSIT,
+        "valuing the wNEAR dust at the anchor price, the new depositor gains at most the dust's worth over the deposit",
+        depositor_gain <= dust_value(dust) as i128,
         None,
-        json!({"value": (new_shares * usdc_after / total_after).to_string(), "deposited": NEW_DEPOSIT.to_string()}),
+        json!({"value": depositor_value.to_string(), "deposited": NEW_DEPOSIT.to_string(),
+               "gain": depositor_gain.to_string(), "dust_value_bound": dust_value(dust).to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
     run.note(
         "LEDGER",
