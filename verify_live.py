@@ -324,11 +324,16 @@ def run_live(vault, network, client, expect_code_hash=None):
         else:
             add("code_hash", "FAIL", "CODE_HASH_MISMATCH", f"the vault runs {code_hash}, expected {expect_code_hash}")
 
+    missing = {}  # required view -> its Problem, for every view the vault does not have
+
     def view(method, args=None):
         read = attempt(lambda: client.view(vault, method, args))
         if isinstance(read, Problem) and read.reason in ("VIEW_REFUSED", "VIEW_MISSING"):
             reason = read.reason if method in REQUIRED_VIEWS else "VIEW_REFUSED"
-            return Problem(reason, f"the vault has no usable view {method}: {read.detail}")
+            problem = Problem(reason, f"the vault has no usable view {method}: {read.detail}")
+            if reason == "VIEW_MISSING":
+                missing.setdefault(method, problem)
+            return problem
         return read
 
     def value(read):
@@ -359,9 +364,9 @@ def run_live(vault, network, client, expect_code_hash=None):
     ops_spent, policy = view("ops_spent"), view("policy")
     facts["ops_spent"] = value(ops_spent)
     facts["policy"] = value(policy)
-    named = " ".join(r.detail for r in results if r.reason == "VIEW_MISSING")
-    absent = [name for name, read in (("reveal_after", reveal_after), ("ops_spent", ops_spent), ("policy", policy))
-              if isinstance(read, Problem) and read.reason == "VIEW_MISSING" and f"view {name}:" not in named]
+    # A missing view a claim already reported carries that claim's detail; list only the rest here.
+    reported = {result.detail for result in results}
+    absent = [name for name, problem in missing.items() if problem.detail not in reported]
     if absent:
         results.append(verify.Result("views", "FAIL", "VIEW_MISSING",
                                      f"the vault has no view {', '.join(absent)}, which a Foundling vault must have"))
