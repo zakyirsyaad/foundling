@@ -316,13 +316,26 @@ pub async fn has_stage(env: &Foundling, key: &str) -> anyhow::Result<bool> {
 
 /// Polls the stage until it is `key`; a run that cannot get there is a tool error, not a verdict.
 pub async fn wait_for_stage(env: &Foundling, key: &str) -> anyhow::Result<()> {
+    if poll_until(move || async move { has_stage(env, key).await }).await? {
+        return Ok(());
+    }
+    anyhow::bail!("the vault never reached {key}: {}", stage(env).await?)
+}
+
+/// Asks `check` every 200 ms for up to 30 s of wall time; false when it never said yes. The one
+/// bound for every wait on the sandbox, so a slow runner needs one change, not one per copy.
+pub async fn poll_until<F, Fut>(mut check: F) -> anyhow::Result<bool>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<bool>>,
+{
     for _ in 0..150 {
-        if has_stage(env, key).await? {
-            return Ok(());
+        if check().await? {
+            return Ok(true);
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-    anyhow::bail!("the vault never reached {key}: {}", stage(env).await?)
+    Ok(false)
 }
 
 /// How many times `event` was logged in every receipt of `result`.

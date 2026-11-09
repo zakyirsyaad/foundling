@@ -491,18 +491,20 @@ async fn never_flat() -> anyhow::Result<()> {
                "book_after": usdc_after.to_string(), "shares_after": total_after.to_string()}),
     );
     // The dust is left out of the mint's price, so it is shared with the new depositor. Value the
-    // book with it at the anchor price: what the holders before lose is at most the dust's worth.
+    // book with it at the anchor price: what the holders before lose is at most the worth of the dust
+    // the vault holds (not the policy's dust line, which is looser), plus one unit for rounding.
     let dust_value = |wnear: u128| wnear * NEAR_PRICE / 10u128.pow(26);
+    let held_bound = dust_value(wnear_flat) as i128 + 1;
     let claim_before = usdc_flat + dust_value(wnear_flat);
     let claim_after = (usdc_after + dust_value(wnear_flat)) * shares_at_flat / total_after;
     let claim_change = delta(claim_before, claim_after);
     run.step(
         "valuing the wNEAR dust at the anchor price, the holders before lose at most the dust's worth",
-        claim_change >= -(dust_value(dust) as i128),
+        claim_change >= -held_bound,
         None,
         json!({"claim_before": claim_before.to_string(), "claim_after": claim_after.to_string(),
-               "change": claim_change.to_string(), "dust_value_bound": dust_value(dust).to_string(),
-               "dust_value_held": dust_value(wnear_flat).to_string()}),
+               "change": claim_change.to_string(), "bound": held_bound.to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string(), "dust_line_value": dust_value(dust).to_string()}),
     );
     // The depositor's side of the same dust: the shares are worth their part of the USDC book plus
     // their part of the wNEAR dust, and they may gain over the deposit by at most the dust's worth.
@@ -510,11 +512,11 @@ async fn never_flat() -> anyhow::Result<()> {
     let depositor_gain = delta(NEW_DEPOSIT, depositor_value);
     run.step(
         "valuing the wNEAR dust at the anchor price, the new depositor gains at most the dust's worth over the deposit",
-        depositor_gain <= dust_value(dust) as i128,
+        depositor_gain <= held_bound,
         None,
         json!({"value": depositor_value.to_string(), "deposited": NEW_DEPOSIT.to_string(),
-               "gain": depositor_gain.to_string(), "dust_value_bound": dust_value(dust).to_string(),
-               "dust_value_held": dust_value(wnear_flat).to_string()}),
+               "gain": depositor_gain.to_string(), "bound": held_bound.to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string(), "dust_line_value": dust_value(dust).to_string()}),
     );
     run.note(
         "LEDGER",
@@ -1016,18 +1018,14 @@ async fn advance_race() -> anyhow::Result<()> {
     wait_for_stage(&masked, "Swapping").await?;
     // The swap lands at Ref while its answer hangs. Take this vault's own output from Ref before the
     // donation, so the check below does not lean on part B's number.
-    let mut landed_output = 0;
-    for _ in 0..150 {
-        landed_output = rhea_holds(&masked).await?.1;
-        if landed_output > 0 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
+    let at_ref = &masked;
+    let landed =
+        poll_until(move || async move { anyhow::Ok(rhea_holds(at_ref).await?.1 > 0) }).await?;
     anyhow::ensure!(
-        landed_output > 0,
+        landed,
         "the swap never landed at Ref for the third vault, so there is no output to measure"
     );
+    let landed_output = rhea_holds(&masked).await?.1;
     donate_at_rhea(&masked, 1_000_000).await?;
     wait_seconds(&masked, STUCK_AFTER + 1).await?;
     let masked_rescue = masked

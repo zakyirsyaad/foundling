@@ -232,5 +232,40 @@ class CommittedProofsTest(unittest.TestCase):
         self.assertIsNone(json.loads(self.proof_path.read_text())["source_commit"])
 
 
+
+class SourceDirtyTest(unittest.TestCase):
+    """A local run says whether the tree it built from had uncommitted changes."""
+
+    setUp = RunRecordsSourceCommitTest.setUp
+    run_attack = RunRecordsSourceCommitTest.run_attack
+
+    def commit_all(self):
+        (self.root / ".gitignore").write_text("cargo.json\n")  # the fake cargo's own log
+        git(self.root, "init", "-q")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "one")
+
+    def recorded(self):
+        return json.loads(self.proof_path.read_text())
+
+    def test_a_clean_local_run_says_the_tree_was_clean(self):
+        self.commit_all()
+        self.assertEqual(self.run_attack(), 0)
+        self.assertIs(self.recorded()["source_dirty"], False)
+
+    def test_a_local_run_with_uncommitted_changes_says_so_beside_the_commit(self):
+        self.commit_all()
+        edited = self.root / "contracts" / "vault" / "src" / "lib.rs"
+        edited.write_text("// edited, not committed\n")
+        os.utime(edited, (OLD, OLD))
+        self.assertEqual(self.run_attack(), 0)
+        self.assertEqual(self.recorded()["source_commit"], git(self.root, "rev-parse", "HEAD"))
+        self.assertIs(self.recorded()["source_dirty"], True)
+
+    def test_outside_a_repository_it_is_null_like_the_commit(self):
+        self.assertEqual(self.run_attack(), 0)
+        self.assertIsNone(self.recorded()["source_dirty"])
+
+
 if __name__ == "__main__":
     unittest.main()

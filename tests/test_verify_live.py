@@ -857,5 +857,30 @@ class ReviewFollowUpTest(unittest.TestCase):
         self.assertEqual(sent[-1][1], flaky)
 
 
+
+class MissingViewListTest(unittest.TestCase):
+    """Every required view the vault lacks is named once: by the claim that stopped on it, or in `views`."""
+
+    def test_a_view_the_claim_did_not_reach_is_listed_in_views(self):
+        results = by_name(report(FakeChain(refused={"agent", "revealed_salt"})))
+        self.assertEqual((results["commitment"].status, results["commitment"].reason), ("FAIL", "VIEW_MISSING"))
+        self.assertIn("agent", results["commitment"].detail)
+        self.assertIn("revealed_salt", results["views"].detail)
+        self.assertNotIn("agent", results["views"].detail, "agent is already named by the commitment claim")
+
+    def test_the_listing_does_not_depend_on_the_wording_of_the_detail(self):
+        from unittest import mock
+
+        class Reworded(verify_live.Problem):
+            def __init__(self, reason, detail):
+                super().__init__(reason, detail.replace("has no usable view ", "is missing the method ").replace(": ", " - ", 1))
+
+        with mock.patch.object(verify_live, "Problem", Reworded):
+            results = by_name(report(FakeChain(views={"revealed": None, "revealed_salt": None}, refused={"reveal_after"})))
+        self.assertEqual(results["commitment"].reason, "VIEW_MISSING")
+        self.assertIn("is missing the method reveal_after - ", results["commitment"].detail, "the new wording is in use")
+        self.assertNotIn("views", results, "reveal_after is named once, by the commitment claim")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,17 @@ def wasm_commit(wasm):
     return found.group(1).decode() if found else None
 
 
+def tree_changes(root):
+    """`git status --porcelain` of `root` (resolved) without the proof folder, which earlier attacks fill;
+    "" for a clean tree, None when git cannot say."""
+    spec = ["."]
+    try:
+        spec.append(f":(exclude){proof_dir(root).resolve().relative_to(root).as_posix()}")
+    except ValueError:
+        pass
+    return ask_git(root, "status", "--porcelain", "--untracked-files=normal", "--", *spec)
+
+
 def provenance_problem(root, wasm):
     """Why the commit checked out in `root` cannot stand for the build under test, or None.
 
@@ -74,12 +85,7 @@ def provenance_problem(root, wasm):
     head = git_head(root)
     if head is None:
         return "no commit is checked out here, so source_commit would be null"
-    spec = ["."]
-    try:
-        spec.append(f":(exclude){proof_dir(root).resolve().relative_to(root).as_posix()}")
-    except ValueError:
-        pass
-    dirty = ask_git(root, "status", "--porcelain", "--untracked-files=normal", "--", *spec)
+    dirty = tree_changes(root)
     if dirty is None:
         return "git status failed, so a clean tree cannot be confirmed"
     if dirty:
@@ -94,7 +100,12 @@ def provenance_problem(root, wasm):
 
 def record_source_commit(proof_path, proof, root):
     """Rewrites the proof with `source_commit`, in the format the Rust writer uses (sorted keys, 2 spaces)."""
-    proof["source_commit"] = git_head(root)
+    head = git_head(root)
+    proof["source_commit"] = head
+    # A local run may build from uncommitted changes; say so, so the commit is not read as the build's
+    # whole source. Committed proofs are refused on a dirty tree before they run, so there it is false.
+    changes = None if head is None else tree_changes(Path(root).resolve())
+    proof["source_dirty"] = None if changes is None else bool(changes)
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
