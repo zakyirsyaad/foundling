@@ -19,6 +19,65 @@ fn main() {
     }
 }
 
+/// The most characters of error text the probe prints for one step. Its output is public, and a
+/// remote node or exchange decides what its own error says and how long it is.
+const MAX_ERR_CHARS: usize = 200;
+
+/// An error value a remote service sent, at most `MAX_ERR_CHARS` characters of it. A value whose
+/// JSON fits is kept as it is, so an error list stays a list; a longer string is cut, and any other
+/// longer JSON becomes its JSON text, cut. `null` (no error named) stays `null`. Kept at the crate
+/// root, like `encode_base64`, so it is tested on the host.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn clip_remote(value: &serde_json::Value) -> serde_json::Value {
+    let text = match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    if text.chars().count() <= MAX_ERR_CHARS {
+        return value.clone();
+    }
+    serde_json::Value::String(text.chars().take(MAX_ERR_CHARS).collect())
+}
+
+#[cfg(test)]
+mod clip_tests {
+    use super::{clip_remote, MAX_ERR_CHARS};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn a_long_error_string_is_cut_to_the_limit_in_characters_not_bytes() {
+        let long = "é".repeat(MAX_ERR_CHARS * 3);
+        let clipped = clip_remote(&Value::String(long));
+        assert_eq!(clipped.as_str().unwrap().chars().count(), MAX_ERR_CHARS);
+    }
+
+    #[test]
+    fn a_short_error_string_is_kept_as_it_is() {
+        assert_eq!(clip_remote(&json!("rate limited")), json!("rate limited"));
+    }
+
+    #[test]
+    fn an_error_object_or_array_becomes_its_json_text_cut_to_the_limit() {
+        let errors = Value::Array(vec![json!("EGeneral:Too many requests"); 50]);
+        let clipped = clip_remote(&errors);
+        let text = clipped.as_str().expect("JSON text, not the array itself");
+        assert_eq!(text.chars().count(), MAX_ERR_CHARS);
+        assert!(text.starts_with("[\"EGeneral:Too many requests\""));
+    }
+
+    #[test]
+    fn a_short_error_list_or_object_keeps_its_shape() {
+        let kraken = json!(["EGeneral:Too many requests"]);
+        assert_eq!(clip_remote(&kraken), kraken);
+        assert_eq!(clip_remote(&json!({"code": 1})), json!({"code": 1}));
+    }
+
+    #[test]
+    fn no_error_stays_null() {
+        assert_eq!(clip_remote(&Value::Null), Value::Null);
+    }
+}
+
 /// Plain base64 (RFC 4648, with padding), not wasm32-specific: kept at the crate root, not
 /// inside `wasm`, so it can be unit-tested on the host instead of only compiling untested.
 /// The host build has no caller for it outside `#[cfg(test)]` — `wasm::run` is its only
@@ -216,7 +275,9 @@ mod wasm {
     /// body failed — a parse failure is itself a result (not throwing away the HTTP
     /// status is the one thing a diagnostic probe cannot skip).
     fn probe(step: Result<Value, String>) -> Value {
-        step.unwrap_or_else(|message| json!({"err": message.chars().take(200).collect::<String>()}))
+        step.unwrap_or_else(|message| {
+            json!({"err": message.chars().take(super::MAX_ERR_CHARS).collect::<String>()})
+        })
     }
 
     fn secret_info() -> Result<Value, String> {
@@ -249,7 +310,9 @@ mod wasm {
             Err(_) => return Ok(json!({"status": status, "err": "reply is not JSON"})),
         };
         if status != 200 {
-            return Ok(json!({"status": status, "err": parsed["error"]["message"]}));
+            return Ok(
+                json!({"status": status, "err": super::clip_remote(&parsed["error"]["message"])}),
+            );
         }
         let choice = &parsed["choices"][0];
         Ok(json!({
@@ -275,7 +338,7 @@ mod wasm {
             .as_array()
             .is_none_or(|rows| rows.is_empty());
         if status != 200 || !errors_empty {
-            return Ok(json!({"status": status, "err": parsed["error"]}));
+            return Ok(json!({"status": status, "err": super::clip_remote(&parsed["error"])}));
         }
         let row = parsed["result"]["NEARUSD"][0].clone();
         Ok(json!({"status": status, "price": row[0], "time": row[2]}))
@@ -307,7 +370,9 @@ mod wasm {
             Err(_) => return Ok(json!({"status": status, "err": "reply is not JSON"})),
         };
         if status != 200 {
-            return Ok(json!({"status": status, "err": parsed["error"]["message"]}));
+            return Ok(
+                json!({"status": status, "err": super::clip_remote(&parsed["error"]["message"])}),
+            );
         }
         let Some(result) = parsed["result"]["result"].as_array() else {
             return Ok(json!({"status": status, "err": "rpc result missing"}));

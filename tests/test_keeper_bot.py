@@ -616,7 +616,7 @@ def without_hash(world):
 
 
 class PendingAttributionTest(unittest.TestCase):
-    def test_a_trigger_with_no_hash_is_not_carried_over_and_is_marked_as_taken_over(self):
+    def test_a_trigger_with_no_hash_is_not_carried_over_and_stays_the_bots_own_cycle(self):
         world = World(cooldown=3600)
         without_hash(world)
         store, log = MemoryStore(), ListLog()
@@ -624,7 +624,10 @@ class PendingAttributionTest(unittest.TestCase):
         bot.tick()
         self.assertIsNone(store.data["pending"])
         self.assertEqual(store.data["cycle"]["txs"], [])
-        self.assertTrue(store.data["cycle"]["resumed"], "its outcome cannot be read, as for any taken-over cycle")
+        # Lead's decision (#21, after the #53 review): the bot's own trigger stays judged even without a
+        # hash, so it is not marked as taken over; `hashless` says why its outcome may be Unknown.
+        self.assertFalse(store.data["cycle"]["resumed"])
+        self.assertTrue(store.data["cycle"]["hashless"])
 
     def test_a_cycle_of_someone_else_is_not_taken_for_the_bots_after_a_trigger_with_no_hash(self):
         world = World(cooldown=10)
@@ -682,6 +685,68 @@ class PendingAttributionTest(unittest.TestCase):
         self.assertEqual((cycle["nonce"], cycle["result"], cycle["resumed"]), (1, "Hold", False))
         self.assertEqual(len(world.methods("trigger_cycle")), 1, "no second trigger")
         self.assertEqual(store.data["failures"]["streak"], 0, "the trigger landed, so its failed wait is forgiven")
+
+
+
+class HashlessTriggerTest(unittest.TestCase):
+    """Lead's decision (#21): a trigger the bot sent stays its own cycle and is judged, hash or not."""
+
+    def test_a_hashless_cycle_is_logged_as_the_bots_and_says_its_hash_is_missing(self):
+        world = World(cooldown=3600)
+        without_hash(world)
+        world.trigger_result = "hold"
+        log = ListLog()
+        bot = make_bot(world, store=MemoryStore(), log=log)
+        drive(bot, world, 120)
+        cycles = log.of("cycle")
+        self.assertEqual(len(cycles), 1)
+        self.assertFalse(cycles[0]["resumed"])
+        self.assertTrue(cycles[0]["trigger_hash_missing"])
+        self.assertEqual(cycles[0]["txs"], [])
+
+    def test_a_cycle_with_its_hash_says_nothing_is_missing(self):
+        world = World(cooldown=3600)
+        world.trigger_result = "hold"
+        log = ListLog()
+        bot = make_bot(world, store=MemoryStore(), log=log)
+        drive(bot, world, 120)
+        self.assertFalse(log.of("cycle")[0]["trigger_hash_missing"])
+
+    def test_someone_elses_cycle_is_still_taken_over_and_not_marked_hashless(self):
+        world = World(cooldown=3600)
+        world.apply("trigger_cycle", {}, 300)  # someone else triggers before the bot runs
+        world.trigger_result = "hold"
+        log = ListLog()
+        bot = make_bot(world, store=MemoryStore(), log=log)
+        drive(bot, world, 120)
+        first = log.of("cycle")[0]
+        self.assertTrue(first["resumed"])
+        self.assertFalse(first["trigger_hash_missing"])
+
+
+
+class UnconfirmedTriggerTest(unittest.TestCase):
+    """A trigger near-cli timed out on with no hash may never have landed: the cycle that follows is
+    taken over, not claimed as the bot's own (#70 review)."""
+
+    def test_a_timed_out_hashless_trigger_leaves_the_cycle_taken_over(self):
+        world = World(cooldown=3600)
+        real = world.near.call
+
+        def call(contract, method, args, gas):
+            if method == "trigger_cycle":
+                world.apply("trigger_cycle", {}, 300)  # a trigger lands: the bot cannot tell whose
+                return CallResult(False, None, "timeout: no answer")
+            return real(contract, method, args, gas)
+
+        world.near.call = call
+        world.trigger_result = "hold"
+        log = ListLog()
+        bot = make_bot(world, store=MemoryStore(), log=log)
+        drive(bot, world, 120)
+        cycle = log.of("cycle")[0]
+        self.assertTrue(cycle["resumed"])
+        self.assertFalse(cycle["trigger_hash_missing"])
 
 
 if __name__ == "__main__":
