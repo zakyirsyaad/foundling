@@ -1,0 +1,198 @@
+{
+  "attack": "forged-caller",
+  "expected_codes": [
+    "NOT_KEEPER"
+  ],
+  "findings": [],
+  "ledger_after": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "NOT_KEEPER"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [
+    "Method on_decision is private",
+    "Method on_deposited is private",
+    "Method on_price is private",
+    "Method on_probe is private",
+    "Method on_selftest is private",
+    "Method on_setup is private",
+    "Method on_swapped is private",
+    "Method on_withdrawn is private",
+    "Method on_xfer is private",
+    "MethodNotFound"
+  ],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "cycle_nonce": 1,
+        "stage": "Idle"
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: the real callbacks ran in the setup cycle, so these methods are live"
+    },
+    {
+      "detail": {
+        "pending_while_queued": "5000000"
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: the same 5 USDC deposit through the USDC contract is queued (then cancelled)"
+    },
+    {
+      "detail": {
+        "callbacks_match_the_deployed_exports": true,
+        "callers": [
+          "stranger",
+          "parent",
+          "governor",
+          "guardian",
+          "alice",
+          "keeper",
+          "outlayer"
+        ],
+        "calls": 63,
+        "not_refused": [],
+        "refused_as_private": 63,
+        "refused_with": "Method <name> is private",
+        "state_unchanged": true
+      },
+      "held": true,
+      "observed": null,
+      "step": "every #[private] callback, called from every other account including the keeper and OutLayer"
+    },
+    {
+      "detail": {
+        "text": true
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: a method that does not exist reads differently, so 'is private' is the guard and not a missing method"
+    },
+    {
+      "detail": {
+        "returned": "5000000 (all of it, unused)",
+        "state_unchanged": true
+      },
+      "held": true,
+      "observed": null,
+      "step": "ft_on_transfer called directly by an account that is not the USDC contract"
+    },
+    {
+      "detail": {
+        "alice_wnear_back": "5000000",
+        "pending_alice": "0",
+        "vault_wnear_wallet": "0"
+      },
+      "held": true,
+      "observed": null,
+      "step": "a deposit that arrives through another token contract, with everything else valid"
+    },
+    {
+      "detail": {
+        "refused": [
+          "stranger->trigger_cycle",
+          "parent->trigger_cycle",
+          "governor->trigger_cycle",
+          "guardian->trigger_cycle",
+          "alice->trigger_cycle"
+        ],
+        "slipped": []
+      },
+      "held": true,
+      "observed": "NOT_KEEPER",
+      "step": "trigger_cycle from every non-keeper"
+    },
+    {
+      "detail": {
+        "executed": [],
+        "nonce": 2,
+        "refused": [
+          "stranger->execute_decision",
+          "parent->execute_decision",
+          "governor->execute_decision",
+          "guardian->execute_decision",
+          "alice->execute_decision"
+        ],
+        "stage": "DecisionReady"
+      },
+      "held": true,
+      "observed": "NOT_KEEPER",
+      "step": "execute_decision on a ready decision, with the right nonce, from every non-keeper"
+    },
+    {
+      "detail": {
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: the keeper executes the same decision, so the refusals were about the caller"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

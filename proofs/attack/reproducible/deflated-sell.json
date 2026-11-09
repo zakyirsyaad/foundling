@@ -1,0 +1,167 @@
+{
+  "attack": "deflated-sell",
+  "expected_codes": [
+    "OVER_ABS_CAP"
+  ],
+  "findings": [
+    {
+      "finding": "min_amount_out is computed from the anchor price. With the anchor at 1/100, the sell of 100000000000000000000000 wNEAR was sent to Ref with a floor of 4433 USDC units where the honest price gives about 443250. The pool still paid its own price here, but the slippage floor protects nothing against a wrong anchor: only cap_wnear (and cap_sell_bps) bound what a sell can lose. Not a breach of I13.",
+      "id": "SLIPPAGE_FOLLOWS_THE_ANCHOR"
+    }
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "18450000",
+      "wnear": "344444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "18450000",
+    "wallet_wnear": "344444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "100000000000000000000000"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "18000000",
+      "wnear": "444444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "18000000",
+    "wallet_wnear": "444444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "LEDGER",
+      "note": "ledger_after differs from ledger_before by the one control sell at the cap; every refused sell asserts the books, shares and Ref ledger unchanged"
+    }
+  ],
+  "observed_codes": [
+    "OVER_ABS_CAP"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "300000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "1000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "bps_line": "222222222222222222222222",
+        "cap_wnear": "300000000000000000000000",
+        "sell": "261111111111111111111111",
+        "wnear_book": "444444444444444444444444"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: the wNEAR book is over cap_wnear and the bps line is the lower one"
+    },
+    {
+      "detail": {
+        "amount_in": "261111111111111111111111",
+        "books_unchanged": true,
+        "nonce": 3,
+        "price": "450000000"
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 1/1, sell over cap_sell_bps of the book"
+    },
+    {
+      "detail": {
+        "amount_in": "261111111111111111111111",
+        "books_unchanged": true,
+        "nonce": 4,
+        "price": "45000000"
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 1/10, sell over cap_sell_bps of the book"
+    },
+    {
+      "detail": {
+        "amount_in": "261111111111111111111111",
+        "books_unchanged": true,
+        "nonce": 5,
+        "price": "4500000"
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 1/100, sell over cap_sell_bps of the book"
+    },
+    {
+      "detail": {
+        "bps_line": "222222222222222222222222",
+        "cap_wnear": "100000000000000000000000",
+        "sell": "161111111111111111111111"
+      },
+      "held": null,
+      "observed": null,
+      "step": "the governor tightens cap_wnear under the bps line"
+    },
+    {
+      "detail": {
+        "amount_in": "161111111111111111111111",
+        "books_unchanged": true,
+        "cap_wnear": "100000000000000000000000",
+        "nonce": 6
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 1/100, sell over cap_wnear and under the bps line"
+    },
+    {
+      "detail": {
+        "amount_in": "100000000000000000000000",
+        "min_amount_out": "4433",
+        "usdc_book_gain": "450000",
+        "wnear_book_drop": "100000000000000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "control: a sell of exactly cap_wnear at 1/100 of the price goes through, and the wNEAR book falls by that much only"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

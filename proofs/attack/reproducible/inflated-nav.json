@@ -1,0 +1,175 @@
+{
+  "attack": "inflated-nav",
+  "expected_codes": [
+    "OVER_ABS_CAP"
+  ],
+  "findings": [],
+  "ledger_after": {
+    "book": {
+      "usdc": "18000000",
+      "wnear": "444444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "1018000000",
+    "wallet_wnear": "1000444444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "18000000",
+      "wnear": "444444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "18000000",
+    "wallet_wnear": "444444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "LEDGER",
+      "note": "ledger_after differs from ledger_before by the 1,000 USDC and 1,000 wNEAR donated to the vault's wallet; the books, shares and Ref ledger are equal, which each step asserts"
+    }
+  ],
+  "observed_codes": [
+    "OVER_ABS_CAP"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "buy": "15000001",
+        "cap_bps": "1000",
+        "cap_usdc": "15000000",
+        "usdc_book": "18000000",
+        "wnear_book": "444444444444444444444444"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: the vault holds USDC and wNEAR, and the buy is one unit over the absolute cap"
+    },
+    {
+      "detail": {
+        "bps_cap": "1999999",
+        "nonce": 3,
+        "refused_with": "OVER_CAP"
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: at the honest price the same buy is refused by the bps cap, not the absolute cap"
+    },
+    {
+      "detail": {
+        "books_unchanged": true,
+        "donated_usdc": "1000000000",
+        "donated_wnear": "1000000000000000000000000000",
+        "refused_with": "OVER_CAP"
+      },
+      "held": true,
+      "observed": null,
+      "step": "1,000 USDC and 1,000 wNEAR sent straight to the vault: the books and the bps cap do not move"
+    },
+    {
+      "detail": {
+        "bps_cap": "2199999",
+        "nav": "21999999",
+        "refused_with": "OVER_CAP"
+      },
+      "held": true,
+      "observed": null,
+      "step": "anchor price 2x: the bps cap still binds"
+    },
+    {
+      "detail": {
+        "bps_cap": "3799999",
+        "nav": "37999999",
+        "refused_with": "OVER_CAP"
+      },
+      "held": true,
+      "observed": null,
+      "step": "anchor price 10x: the bps cap still binds"
+    },
+    {
+      "detail": {
+        "bps_cap": "21799999",
+        "cap_usdc": "15000000",
+        "nav": "217999999"
+      },
+      "held": null,
+      "observed": null,
+      "step": "the anchor price is 100x: the bps cap now sits above the absolute cap"
+    },
+    {
+      "detail": {
+        "amount_in": "15000001",
+        "books_unchanged": true,
+        "nonce": 7
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 100x, buy of 15000001: the absolute cap refuses"
+    },
+    {
+      "detail": {
+        "amount_in": "18000000",
+        "books_unchanged": true,
+        "nonce": 8
+      },
+      "held": true,
+      "observed": "OVER_ABS_CAP",
+      "step": "anchor price 100x, buy of 18000000: the absolute cap refuses"
+    },
+    {
+      "detail": {},
+      "held": true,
+      "observed": null,
+      "step": "after the series the vault is Idle with the books it started with"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

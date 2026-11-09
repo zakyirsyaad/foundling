@@ -1,0 +1,206 @@
+{
+  "attack": "advance-race",
+  "expected_codes": [
+    "NOT_STUCK"
+  ],
+  "findings": [],
+  "ledger_after": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "1000000",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "RACE",
+      "note": "the five advances are submitted back to back with transact_async, so they land in the same or in adjacent blocks; that they overlap the winner's own receipts is likely and not forced. A call that comes after the swap is Idle reads NOT_STUCK as well, so the Probing lock is shown by the single probing event, not by the count of refusals alone"
+    },
+    {
+      "code": "DONATION_AFTER_THE_SWAP",
+      "note": "The vault ends the swap as swap_reverted, as SPEC 3.4 item 8 says: the donor's USDC takes the swap's place, the books stay closed, and the real output stays at Ref and in no book. Holders lose nothing; the donor's gift is lost with the output."
+    },
+    {
+      "code": "LEDGER",
+      "note": "ledger_after differs from ledger_before only in the turnover window, because the swap that was undone still counts there; books, shares and wallets are equal"
+    }
+  ],
+  "observed_codes": [
+    "NOT_STUCK"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "in_ref": "1000000",
+        "ledger": "1000000",
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a buy is stuck at the swap step, and Ref's balance equals the vault's ledger"
+    },
+    {
+      "detail": {
+        "books_unchanged": true,
+        "in_ref": "4000000",
+        "ledger": "1000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "3 USDC given to the vault's account at Ref while the swap is stuck: the books and the ledger do not move"
+    },
+    {
+      "detail": {
+        "callers": 5,
+        "probing_events": 1,
+        "refused_not_stuck": 4,
+        "succeeded": 1,
+        "swap_reverted_events": 1
+      },
+      "held": true,
+      "observed": "NOT_STUCK",
+      "step": "five advances at once on one stuck swap: one goes through, the other four read NOT_STUCK"
+    },
+    {
+      "detail": {
+        "books_unchanged": true,
+        "donation": "3000000",
+        "in_ref": "3000000",
+        "ledger": "0"
+      },
+      "held": true,
+      "observed": null,
+      "step": "afterwards the vault is Idle with the books it had, and Ref holds the ledger plus the donation only"
+    },
+    {
+      "detail": {
+        "halt_after": 600,
+        "stuck_after": 30
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup, part B: a second vault with a short stuck_after; the swap's real answer is in flight"
+    },
+    {
+      "detail": {
+        "stage": "Swapping"
+      },
+      "held": true,
+      "observed": "NOT_STUCK",
+      "step": "advance while the real answer is in flight and stuck_after has not passed"
+    },
+    {
+      "detail": {
+        "amount_in": "1000000",
+        "amount_out": "222222222222222222222222",
+        "executed_events": 1,
+        "probing_events": 1,
+        "stage": "Idle"
+      },
+      "held": true,
+      "observed": null,
+      "step": "advance after stuck_after, then the late original answer arrives: the swap executes once"
+    },
+    {
+      "detail": {
+        "in_ref": "0",
+        "ledger": "0"
+      },
+      "held": true,
+      "observed": null,
+      "step": "Ref holds nothing for the vault, the ledger is empty and the wallets equal the books"
+    },
+    {
+      "detail": {
+        "halt_after": 600,
+        "stuck_after": 30
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup, part C: a third vault with the same stuck_after; a donation will sit at Ref before advance"
+    },
+    {
+      "detail": {
+        "book_after": {
+          "usdc": "20000000",
+          "wnear": "0"
+        },
+        "book_before": {
+          "usdc": "20000000",
+          "wnear": "0"
+        },
+        "executed_events": 0,
+        "ref_holds": {
+          "usdc": "0",
+          "wnear": "222222222222222222222222"
+        },
+        "swap_output_at_ref_before_the_donation": "222222222222222222222222",
+        "swap_reverted_events": 1
+      },
+      "held": true,
+      "observed": null,
+      "step": "SPEC 3.4 item 8: a donation of the input token at Ref, as large as the swap, after the swap landed: the vault unwinds from the donation, the books stay closed and the output stays at Ref"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

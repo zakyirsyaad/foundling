@@ -1,0 +1,345 @@
+{
+  "attack": "governor-loosen",
+  "expected_codes": [
+    "POLICY_NOT_TIGHTER",
+    "POLICY_BELOW_FLOOR",
+    "TIMELOCK"
+  ],
+  "findings": [],
+  "ledger_after": {
+    "book": {
+      "usdc": "25000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "25000000000000",
+    "wallet_usdc": "25000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "25000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "25000000000000",
+    "wallet_usdc": "25000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "POLICY_NOT_TIGHTER",
+    "POLICY_BELOW_FLOOR",
+    "TIMELOCK"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": true,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 120,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [
+    "MethodNotFound",
+    "no change scheduled",
+    "only governor"
+  ],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "open_deposits": true,
+        "timelock": 120
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a vault that starts with open deposits, and an unlisted account already deposited"
+    },
+    {
+      "detail": {
+        "accepted": [],
+        "policy_unchanged": true,
+        "refused": [
+          "cap_bps+1",
+          "epoch_cap_bps+1",
+          "cap_usdc+1",
+          "epoch_cap_usdc+1",
+          "cap_wnear+1",
+          "epoch_cap_wnear+1",
+          "cap_sell_bps+1",
+          "dust_wnear+1",
+          "max_risk_bps+1",
+          "slippage_bps+1",
+          "price_max_age+1",
+          "price_max_conf_bps+1",
+          "ref_dev_bps+1",
+          "ops_budget+1",
+          "tvl_cap+1",
+          "per_user_cap+1",
+          "max_mint_per_cycle+1",
+          "cooldown-1",
+          "min_deposit-1",
+          "cap_usdc+0",
+          "cooldown+0"
+        ],
+        "refused_with": "POLICY_NOT_TIGHTER"
+      },
+      "held": true,
+      "observed": null,
+      "step": "every parameter moved one unit the loosening way, and left unchanged"
+    },
+    {
+      "detail": {
+        "accepted": [],
+        "floors": "SPEC 3.6: caps 10% of initial, cooldown 4x, price_max_age 30, price_max_conf_bps 10, ref_dev_bps 50, slippage_bps 50, ops_budget 25%, min_deposit 5x. The vault also gives tvl_cap, per_user_cap, cap_sell_bps and max_risk_bps 10% and max_mint_per_cycle 1",
+        "refused": [
+          {
+            "field": "cap_bps",
+            "value": 99
+          },
+          {
+            "field": "epoch_cap_bps",
+            "value": 199
+          },
+          {
+            "field": "cap_usdc",
+            "value": "1499999"
+          },
+          {
+            "field": "epoch_cap_usdc",
+            "value": "2999999"
+          },
+          {
+            "field": "cap_wnear",
+            "value": "399999999999999999999999"
+          },
+          {
+            "field": "epoch_cap_wnear",
+            "value": "799999999999999999999999"
+          },
+          {
+            "field": "slippage_bps",
+            "value": 49
+          },
+          {
+            "field": "price_max_age",
+            "value": 29
+          },
+          {
+            "field": "price_max_conf_bps",
+            "value": 9
+          },
+          {
+            "field": "ref_dev_bps",
+            "value": 49
+          },
+          {
+            "field": "ops_budget",
+            "value": "149999999999999999999999"
+          },
+          {
+            "field": "cooldown",
+            "value": 241
+          },
+          {
+            "field": "min_deposit",
+            "value": "5000001"
+          },
+          {
+            "field": "cap_sell_bps",
+            "value": 499
+          },
+          {
+            "field": "max_risk_bps",
+            "value": 499
+          },
+          {
+            "field": "tvl_cap",
+            "value": "9999999"
+          },
+          {
+            "field": "per_user_cap",
+            "value": "4999999"
+          },
+          {
+            "field": "max_mint_per_cycle",
+            "value": 0
+          }
+        ],
+        "refused_with": "POLICY_BELOW_FLOOR"
+      },
+      "held": true,
+      "observed": null,
+      "step": "every parameter with a floor or ceiling, one unit past it"
+    },
+    {
+      "detail": {
+        "attempts": 14,
+        "not_refused": [],
+        "refused_with": "POLICY_NOT_TIGHTER",
+        "state_unchanged": true
+      },
+      "held": true,
+      "observed": null,
+      "step": "tighten_policy with fields that cannot be tightened (timing, assets, route, strategy, roles): ignored, an empty change, refused"
+    },
+    {
+      "detail": {
+        "not_refused": [],
+        "refused_with": "only governor"
+      },
+      "held": true,
+      "observed": null,
+      "step": "a valid tightening from the keeper, the guardian and unrelated accounts"
+    },
+    {
+      "detail": {
+        "exports": 70,
+        "governance_methods_present": [
+          "freeze",
+          "unfreeze",
+          "clear_halt",
+          "tighten_policy",
+          "add_depositor",
+          "schedule_keeper_change",
+          "schedule_guardian_change",
+          "cancel_keeper_change",
+          "apply_keeper_change",
+          "apply_guardian_change"
+        ],
+        "source": "export section of the code deployed in the sandbox",
+        "suspicious": []
+      },
+      "held": true,
+      "observed": null,
+      "step": "the deployed vault exports no upgrade, migrate, set_*, update, add-asset or drain method"
+    },
+    {
+      "detail": {
+        "keys": 0
+      },
+      "held": true,
+      "observed": null,
+      "step": "the vault account has no access key"
+    },
+    {
+      "detail": {
+        "answered": [],
+        "refused_with": "MethodNotFound",
+        "tried": 29
+      },
+      "held": true,
+      "observed": null,
+      "step": "the governor calls each loosening method by name"
+    },
+    {
+      "detail": {
+        "refused_with": "POLICY_NOT_TIGHTER"
+      },
+      "held": true,
+      "observed": null,
+      "step": "open_deposits: true while it is open"
+    },
+    {
+      "detail": {
+        "control": "closing succeeded, so the refusal is about the direction",
+        "late_deposit": "refunded in full",
+        "refused_with": "POLICY_NOT_TIGHTER"
+      },
+      "held": true,
+      "observed": null,
+      "step": "open_deposits: true after the governor closed it, and an unlisted deposit afterwards"
+    },
+    {
+      "detail": {
+        "apply_after_within_the_timelock": true,
+        "keeper_still": "keeper.test.near",
+        "refused_with": "TIMELOCK",
+        "timelock": 120
+      },
+      "held": true,
+      "observed": null,
+      "step": "the governor schedules a new keeper, and anyone applies it at once"
+    },
+    {
+      "detail": {
+        "refused_with": "no change scheduled"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the guardian cancels the rotation, then someone tries to apply it"
+    },
+    {
+      "detail": {
+        "keeper_now": "stranger.test.near"
+      },
+      "held": null,
+      "observed": null,
+      "step": "control: after the timelock the same rotation applies, so the refusals were about the timer"
+    },
+    {
+      "detail": {
+        "final": "1500000",
+        "initial": "15000000",
+        "walk_accepted": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "held": true,
+      "observed": null,
+      "step": "four cuts down to 10% of the initial cap_usdc are accepted, one unit below and a repeat are not"
+    },
+    {
+      "detail": {
+        "cap_usdc": "reached by the walk above",
+        "checked": 19,
+        "turned_away": []
+      },
+      "held": true,
+      "observed": null,
+      "step": "every parameter tightens exactly to its floor or ceiling"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}
