@@ -16,6 +16,7 @@ EXPECTED = {
 class Summary:
     cycles: int = 0
     untriggered: int = 0
+    hashless: int = 0
     skips: int = 0
     call_failures: int = 0
     errors: int = 0
@@ -77,6 +78,7 @@ def summarize_log(lines, min_cycles=1):
                 summary.untriggered += 1
                 continue
             summary.cycles += 1
+            summary.hashless += bool(record.get("trigger_hash_missing"))
             summary.price_retries += record.get("price_retries", 0)
             code = record.get("code")
             summary.outcomes[f"{record.get('result')}({code})" if code else str(record.get("result"))] += 1
@@ -92,6 +94,8 @@ def render(summary):
     out += [f"  {name}: {count}" for name, count in sorted(summary.outcomes.items())]
     if summary.untriggered:
         out.append(f"Cycles the bot did not trigger (not counted, not judged): {summary.untriggered}")
+    if summary.hashless:
+        out.append(f"Cycles the bot triggered without a tx hash (judged; their outcome may be Unknown): {summary.hashless}")
     if summary.malformed:
         out.append(f"Malformed log lines: {summary.malformed}")
     if summary.cycles < summary.min_cycles:

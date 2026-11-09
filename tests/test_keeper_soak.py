@@ -170,5 +170,33 @@ class StorageTest(unittest.TestCase):
             FileStore(self.path / "state.json").load()
 
 
+
+class HashlessCyclesTest(unittest.TestCase):
+    """A cycle the bot triggered without a tx hash is judged like any other of its own, and counted."""
+
+    @staticmethod
+    def lines(*records):
+        return [json.dumps(record) for record in records]
+
+    def test_an_unknown_hashless_cycle_fails_the_soak(self):
+        record = {**cycle(1, result="Unknown", code=None), "resumed": False, "trigger_hash_missing": True}
+        summary = summarize_log(self.lines(record))
+        self.assertFalse(summary.passed)
+        self.assertEqual(summary.cycles, 1)
+        self.assertEqual(summary.untriggered, 0, "the bot triggered it, so it is not set aside")
+
+    def test_a_hashless_cycle_with_a_known_result_counts_and_passes(self):
+        record = {**cycle(1), "resumed": False, "trigger_hash_missing": True}
+        summary = summarize_log(self.lines(record))
+        self.assertTrue(summary.passed)
+        self.assertEqual(summary.hashless, 1)
+
+    def test_the_hashless_count_is_shown(self):
+        record = {**cycle(1, result="Unknown", code=None), "resumed": False, "trigger_hash_missing": True}
+        text = render(summarize_log(self.lines(record)))
+        self.assertIn("Cycles the bot triggered without a tx hash", text)
+        self.assertIn("Soak: FAIL", text)
+
+
 if __name__ == "__main__":
     unittest.main()

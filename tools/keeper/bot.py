@@ -293,12 +293,14 @@ class Bot:
 
     def _adopt(self, pending, nonce):
         """The trigger the bot sent becomes the cycle it follows. With a hash it is the nonce right
-        after `before`, whatever the vault has moved on to since; without one, only the nonce seen."""
+        after `before`, whatever the vault has moved on to since; without one, only the nonce seen.
+        Either way it is the bot's own cycle, so the soak judges it (lead, #21): a trigger near-cli
+        reported without a hash is marked `hashless`, not passed off as someone else's cycle."""
         self.state["pending"] = None
         self.state["last_trigger"] = max(self.state["last_trigger"], pending["at"])
         self.state["cycle"] = {"nonce": pending["before"] + 1 if pending["txs"] else nonce,
                                "started": pending["started"], "txs": pending["txs"], "stages": [],
-                               "resumed": not pending["txs"], "failed_calls": 0}
+                               "resumed": False, "hashless": not pending["txs"], "failed_calls": 0}
         self._succeeded("trigger_cycle")  # the trigger landed, so its failed waits do not count
 
     def _settle_pending(self, pending):
@@ -385,7 +387,7 @@ class Bot:
             "stages_seen": cycle["stages"],
             "stuck": outcome["stuck"] or "Stuck" in cycle["stages"],
             "price_retries": outcome["price_retries"], "failed_calls": cycle.get("failed_calls", 0),
-            "resumed": cycle["resumed"],
+            "resumed": cycle["resumed"], "trigger_hash_missing": bool(cycle.get("hashless")),
         })
         self.state["cycle"] = None
         self._next_try.clear()
