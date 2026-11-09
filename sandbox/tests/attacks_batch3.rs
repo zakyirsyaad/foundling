@@ -504,11 +504,17 @@ async fn never_flat() -> anyhow::Result<()> {
                "change": claim_change.to_string(), "dust_value_bound": dust_value(dust).to_string(),
                "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
+    // The depositor's side of the same dust: the shares are worth their part of the USDC book plus
+    // their part of the wNEAR dust, and they may gain over the deposit by at most the dust's worth.
+    let depositor_value = new_shares * (usdc_after + dust_value(wnear_flat)) / total_after;
+    let depositor_gain = delta(NEW_DEPOSIT, depositor_value);
     run.step(
-        "the new depositor's shares are worth no more than what was deposited",
-        new_shares * usdc_after / total_after <= NEW_DEPOSIT,
+        "valuing the wNEAR dust at the anchor price, the new depositor gains at most the dust's worth over the deposit",
+        depositor_gain <= dust_value(dust) as i128,
         None,
-        json!({"value": (new_shares * usdc_after / total_after).to_string(), "deposited": NEW_DEPOSIT.to_string()}),
+        json!({"value": depositor_value.to_string(), "deposited": NEW_DEPOSIT.to_string(),
+               "gain": depositor_gain.to_string(), "dust_value_bound": dust_value(dust).to_string(),
+               "dust_value_held": dust_value(wnear_flat).to_string()}),
     );
     run.note(
         "LEDGER",
@@ -1008,6 +1014,20 @@ async fn advance_race() -> anyhow::Result<()> {
         .transact_async()
         .await?;
     wait_for_stage(&masked, "Swapping").await?;
+    // The swap lands at Ref while its answer hangs. Take this vault's own output from Ref before the
+    // donation, so the check below does not lean on part B's number.
+    let mut landed_output = 0;
+    for _ in 0..150 {
+        landed_output = rhea_holds(&masked).await?.1;
+        if landed_output > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    anyhow::ensure!(
+        landed_output > 0,
+        "the swap never landed at Ref for the third vault, so there is no output to measure"
+    );
     donate_at_rhea(&masked, 1_000_000).await?;
     wait_seconds(&masked, STUCK_AFTER + 1).await?;
     let masked_rescue = masked
@@ -1031,7 +1051,7 @@ async fn advance_race() -> anyhow::Result<()> {
             && executed_events == 0
             && stage(&masked).await? == json!("Idle")
             && (usdc_post, wnear_post) == (usdc_pre, wnear_pre)
-            && (ref_usdc, ref_wnear) == (0, amount_out)
+            && (ref_usdc, ref_wnear) == (0, landed_output)
             && rhea_ledger(&masked).await? == (0, 0)
             && wallet_of(&masked, &masked.usdc, &masked.vault_id).await? == usdc_post
             && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post,
@@ -1040,7 +1060,7 @@ async fn advance_race() -> anyhow::Result<()> {
                "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
                "book_after": {"usdc": usdc_post.to_string(), "wnear": wnear_post.to_string()},
                "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()},
-               "amount_out": amount_out.to_string()}),
+               "swap_output_at_ref_before_the_donation": landed_output.to_string()}),
     );
     run.note(
         "DONATION_AFTER_THE_SWAP",
