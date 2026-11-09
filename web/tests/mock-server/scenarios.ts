@@ -1,3 +1,4 @@
+import { HELD_DECISION } from "../fixtures/decision";
 import { assetsJson, policyJson, vaultViews } from "../fixtures/vault";
 import { API_ROUTES } from "./api-fixtures";
 import type { Scenario } from "./state";
@@ -10,7 +11,10 @@ export const MAINNET_VAULT = "foundling-vault.near";
 const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 const mainnetVault = { [MAINNET_VAULT]: { assets: { ...assetsJson, usdc: MAINNET_USDC, wnear: "wrap.near" } } };
 
-const decisions = Object.fromEntries([41, 40, 39].map((n) => [`published_decision:{"nonce":${n}}`, n === 40 ? null : `{"action":"buy","nonce":${n}}`]));
+const decisions = {
+  ...Object.fromEntries([41, 40, 39].map((n) => [`published_decision:{"nonce":${n}}`, n === 40 ? null : `{"action":"buy","nonce":${n}}`])),
+  'published_decision:{"nonce":25}': HELD_DECISION,
+};
 /** Defaults for any account the tests connect; a /__tx call overrides them per account. */
 const accountDefaults = { shares_of: "0", pending_of: "0", net_deposit_of: "0", claimable_of: "0", storage_balance_of: null, ft_balance_of: "50000000", is_allowed: true, bucket_claim: "0", bucket: null };
 const views = { ...vaultViews, ...accountDefaults, ...decisions, published_decision: null, assets: { ...assetsJson, usdc: USDC, wnear: WNEAR } };

@@ -6,8 +6,11 @@ import { shellQuote } from "@/lib/format/shell";
 import { Hash } from "@/components/fm/Hash";
 import { Status } from "@/components/fm/Status";
 import type { Network } from "@/config/deployment";
+import { DecisionCard, InputsCard, WhyCard } from "@/features/cycles/DecisionCards";
+import { Mark } from "@/features/cycles/Mark";
+import { decisionFacts, explainDecision, parseDecision } from "@/lib/cycles/decision";
 import type { CycleRow, ProofResult } from "@/lib/history/client";
-import { type EventMark, cycleWord, eventMark } from "@/lib/cycles/outcome";
+import { type CycleWord, cycleWord, eventMark } from "@/lib/cycles/outcome";
 import { proofWord, replayWord } from "@/lib/proof/tally";
 
 /** Shell-safe, like TRIGGER_TX: a `<…>` placeholder would be read as a redirect. */
@@ -18,15 +21,11 @@ function verifyCommand(network: Network, vaultId: string, tx: string | undefined
   return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
 }
 
-const MARK_PATH: Record<EventMark, string> = { done: "M20 6 9 17l-5-5", stop: "M18 6 6 18M6 6l12 12", wait: "M5 12h14" };
-
-/** A filled check for a step that went through; an outlined cross or dash for a refusal, failure or pause. */
-function Mark({ mark }: { mark: EventMark }) {
-  return (
-    <span aria-hidden="true" className={`inline-grid size-5 place-items-center rounded-full ${mark === "done" ? "bg-foreground text-background" : "border border-foreground text-foreground"}`}>
-      <svg className="fm-icon size-3" viewBox="0 0 24 24"><path d={MARK_PATH[mark]} /></svg>
-    </span>
-  );
+/** Everything the decision cards need, or null when nothing was published or it is not Decision v1. */
+function decisionView(raw: string | null, word: CycleWord, rejectCode: string | undefined) {
+  const parsed = parseDecision(raw);
+  if (!parsed || raw === null) return null;
+  return { raw, parsed, reason: explainDecision(parsed, word, rejectCode), facts: decisionFacts(parsed) };
 }
 
 function TallyLine({ name, t }: { name: string; t: ProofResult["verifier"] }) {
@@ -42,7 +41,10 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
   // A proof result, when there is one, wins over the list row: null there means "not run".
   const verifier = proof ? proof.verifier : row.verifier;
   const obs = proof ? proof.obsRecheck : row.obsRecheck;
-  const limitEvent = row.events.find((e) => e.name === "rejected" || e.name === "executed");
+  // The latest limit outcome: a PRICE_UNAVAILABLE rejection is retried, so a later one is what the cycle ended on.
+  const limitEvent = [...row.events].reverse().find((e) => e.name === "rejected" || e.name === "executed");
+  const word = cycleWord(row.events);
+  const view = decisionView(decision, word, limitEvent?.name === "rejected" ? limitEvent.code : undefined);
   return (
     <article className="grid gap-6">
       <nav aria-label="Breadcrumb" className="fm-small">
@@ -50,12 +52,13 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
       </nav>
       <header className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold tracking-[-0.02em]">Cycle {row.nonce.toString()}</h1>
-        <Status group="cycle" word={cycleWord(row.events)} />
+        <Status group="cycle" word={word} />
         <Status group="proof" word={proofWord(verifier, obs)} />
         <span className="mono fm-small ml-auto">{row.startedAt.replace("T", " ").slice(0, 19)} UTC</span>
       </header>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="grid gap-6">
+          {view ? <WhyCard reason={view.reason} /> : null}
           <Card id="timeline" title="Timeline">
             <ol className="grid gap-3 p-5">
               {row.events.map((e, i) => (
@@ -79,9 +82,16 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
         </div>
         <div className="grid gap-6">
           <ProofCard row={row} proof={proof} verifier={verifier} obs={obs} revealAfter={revealAfter} chainTime={chainTime} network={network} vaultId={vaultId} />
-          <Card id="decision" title="Decision">
-            <p className="mono p-5 text-[13px] break-all">{decision ?? "No decision to verify"}</p>
-          </Card>
+          {view ? (
+            <>
+              <DecisionCard decision={view.parsed} facts={view.facts} raw={view.raw} />
+              <InputsCard facts={view.facts} network={network} />
+            </>
+          ) : (
+            <Card id="decision" title="Decision">
+              <p className="mono p-5 text-[13px] break-all">{decision ?? "No decision to verify"}</p>
+            </Card>
+          )}
         </div>
       </div>
     </article>

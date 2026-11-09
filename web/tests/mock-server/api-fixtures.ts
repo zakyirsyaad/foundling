@@ -19,5 +19,7 @@ export const API_ROUTES: Record<string, unknown> = {
   "/api/v1/cycles/41": CYCLES[0],
   "/api/v1/cycles/40": CYCLES[1],
   "/api/v1/cycles/39": CYCLES[2],
+  /** Detail only, not in the list: a buy the AI tripwire held (RPC answers its decision, scenarios.ts). */
+  "/api/v1/cycles/25": { nonce: "25", started_at: "2026-11-08T19:59:01Z", finished_at: "2026-11-08T19:59:41Z", events: [{ name: "cycle_started" }, { name: "decision" }, { name: "hold", code: "NO_DECISION" }], amount_in: null, amount_out: null, tx_hashes: ["9wWipkWrrVCWMGpSDMBMmsxTszCW9rNjVEsybjFHF9Pd"], verifier: null, obs_recheck: null },
   "/api/v1/proofs/41": { verifier: tally(6, 1, 0), obs_recheck: tally(2, 0, 0), replay: "sealed" },
 };
