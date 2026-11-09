@@ -8,9 +8,15 @@ Exit codes follow the dispatcher: 0 held, 1 breached, 2 tool error. A breach is 
 "breached", or any observed reason code outside the registry's codes for the attack. Without
 a proof the test never reached a verdict (a build error, a missing or stale wasm, a failed
 harness call), which is 2 and never a pass or a fail of the attack.
+After a verdict, run() adds `source_commit` to the proof: the commit the repository was at, so the
+vault_wasm_sha256 in a committed proof can be rebuilt from it. It is null outside a repository, but
+when the proof dir is proofs/attack/reproducible (the committed ones, make attack-proofs) a missing commit,
+a dirty tree, or a vault WASM that was not built at HEAD (the commit is read from the WASM's own
+metadata) is exit 2 before anything runs.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +30,72 @@ WASM = [
     ("mock-outlayer", "mock_outlayer"),
     ("mock-token", "mock_token"),
 ]
+
+
+def ask_git(root, *args):
+    """stdout of `git -C root args`, or None when git is missing or the command fails."""
+    try:
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    except OSError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def git_head(root):
+    """The commit checked out in `root` itself, or None (not a repository, no commit, or a folder inside another repository)."""
+    root = Path(root).resolve()
+    top, head = ask_git(root, "rev-parse", "--show-toplevel"), ask_git(root, "rev-parse", "HEAD")
+    if top is None or Path(top).resolve() != root or head is None or not re.fullmatch(r"[0-9a-f]{40}", head):
+        return None
+    return head
+
+
+SNAPSHOT = re.compile(rb'"source_code_snapshot":"git\+[^"?]*\?rev=([0-9a-f]{40})"')
+
+
+def wasm_commit(wasm):
+    """The commit `cargo near build` recorded inside the WASM (NEP-330 contract metadata), or None."""
+    try:
+        found = SNAPSHOT.search(Path(wasm).read_bytes())
+    except OSError:
+        return None
+    return found.group(1).decode() if found else None
+
+
+def provenance_problem(root, wasm):
+    """Why the commit checked out in `root` cannot stand for the build under test, or None.
+
+    The reproducible build embeds the commit it was made at, so a committed proof is only worth keeping
+    when HEAD is exactly that commit and the tree is clean (apart from the proof folder, which earlier
+    attacks fill). The commit is read from the WASM itself: file dates and commit dates can be wrong
+    after a checkout, a rebase or an amend, the embedded commit cannot.
+    """
+    root = Path(root).resolve()
+    head = git_head(root)
+    if head is None:
+        return "no commit is checked out here, so source_commit would be null"
+    spec = ["."]
+    try:
+        spec.append(f":(exclude){proof_dir(root).resolve().relative_to(root).as_posix()}")
+    except ValueError:
+        pass
+    dirty = ask_git(root, "status", "--porcelain", "--untracked-files=normal", "--", *spec)
+    if dirty is None:
+        return "git status failed, so a clean tree cannot be confirmed"
+    if dirty:
+        return f"the working tree has uncommitted changes ({dirty.splitlines()[0].strip()}), so source_commit would not describe the build"
+    built = wasm_commit(wasm)
+    if built is None:
+        return "the vault WASM carries no source commit, so it was not built by `cargo near build reproducible-wasm`"
+    if built != head:
+        return f"the vault WASM was built at {built[:12]} but HEAD is {head[:12]}"
+    return None
+
+
+def record_source_commit(proof_path, proof, root):
+    """Rewrites the proof with `source_commit`, in the format the Rust writer uses (sorted keys, 2 spaces)."""
+    proof["source_commit"] = git_head(root)
+    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def registry_entry(root, name):
@@ -69,6 +141,11 @@ def run(name, root=ROOT, cargo=("cargo",)):
         return fail(f"{name}: wasm not built ({', '.join(missing)}); run `make wasm`")
     if stale:
         return fail(f"{name}: wasm older than its sources ({', '.join(stale)}); run `make wasm`")
+    if proof_dir(root).resolve() == (root / "proofs" / "attack" / "reproducible").resolve():
+        directory, file = WASM[0]
+        problem = provenance_problem(root, root / "contracts" / directory / "target" / "near" / f"{file}.wasm")
+        if problem:
+            return fail(f"{name}: {problem}; committed proofs come from `make attack-proofs` on a clean, committed checkout")
 
     try:
         binary = test_binary(name, root)
@@ -97,6 +174,11 @@ def run(name, root=ROOT, cargo=("cargo",)):
             return fail(f"{name}: proof expects {proof['expected_codes']}, registry {expected}")
     except (OSError, ValueError, KeyError, TypeError, StopIteration) as err:
         return fail(f"{name}: no usable proof at {proof_path} (cargo exit {code}): {err!r}")
+
+    try:
+        record_source_commit(proof_path, proof, root)
+    except OSError as err:
+        return fail(f"{name}: cannot record source_commit in {proof_path}: {err!r}")
 
     stray = [code for code in observed if code not in expected]
     if verdict == "breached" or stray:

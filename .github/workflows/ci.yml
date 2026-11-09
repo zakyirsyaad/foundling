@@ -186,7 +186,7 @@ jobs:
       - name: Test
         run: python3 -m unittest tests.test_attack_lab
       - name: Test the sandbox attack runner and the make targets
-        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make tests.test_attack_batch2 tests.test_attack_batch3
+        run: python3 -m unittest tests.test_attack_sandbox tests.test_attack_make tests.test_attack_batch2 tests.test_attack_proofs tests.test_attack_batch3
 
   keeper:
     name: Keeper bot
