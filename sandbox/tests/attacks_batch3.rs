@@ -1014,6 +1014,20 @@ async fn advance_race() -> anyhow::Result<()> {
         .transact_async()
         .await?;
     wait_for_stage(&masked, "Swapping").await?;
+    // The swap lands at Ref while its answer hangs. Take this vault's own output from Ref before the
+    // donation, so the check below does not lean on part B's number.
+    let mut landed_output = 0;
+    for _ in 0..150 {
+        landed_output = rhea_holds(&masked).await?.1;
+        if landed_output > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    anyhow::ensure!(
+        landed_output > 0,
+        "the swap never landed at Ref for the third vault, so there is no output to measure"
+    );
     donate_at_rhea(&masked, 1_000_000).await?;
     wait_seconds(&masked, STUCK_AFTER + 1).await?;
     let masked_rescue = masked
@@ -1037,7 +1051,7 @@ async fn advance_race() -> anyhow::Result<()> {
             && executed_events == 0
             && stage(&masked).await? == json!("Idle")
             && (usdc_post, wnear_post) == (usdc_pre, wnear_pre)
-            && (ref_usdc, ref_wnear) == (0, amount_out)
+            && (ref_usdc, ref_wnear) == (0, landed_output)
             && rhea_ledger(&masked).await? == (0, 0)
             && wallet_of(&masked, &masked.usdc, &masked.vault_id).await? == usdc_post
             && wallet_of(&masked, &masked.wnear, &masked.vault_id).await? == wnear_post,
@@ -1046,7 +1060,7 @@ async fn advance_race() -> anyhow::Result<()> {
                "book_before": {"usdc": usdc_pre.to_string(), "wnear": wnear_pre.to_string()},
                "book_after": {"usdc": usdc_post.to_string(), "wnear": wnear_post.to_string()},
                "ref_holds": {"usdc": ref_usdc.to_string(), "wnear": ref_wnear.to_string()},
-               "amount_out": amount_out.to_string()}),
+               "swap_output_at_ref_before_the_donation": landed_output.to_string()}),
     );
     run.note(
         "DONATION_AFTER_THE_SWAP",
