@@ -11,7 +11,8 @@ harness call), which is 2 and never a pass or a fail of the attack.
 After a verdict, run() adds `source_commit` to the proof: the commit the repository was at, so the
 vault_wasm_sha256 in a committed proof can be rebuilt from it. It is null outside a repository, but
 when the proof dir is proofs/attack/reproducible (the committed ones, make attack-proofs) a missing commit,
-a dirty tree, or a commit made after the vault WASM was built is exit 2 before anything runs.
+a dirty tree, or a vault WASM that was not built at HEAD (the commit is read from the WASM's own
+metadata) is exit 2 before anything runs.
 """
 import json
 import os
@@ -31,56 +32,63 @@ WASM = [
 ]
 
 
+def ask_git(root, *args):
+    """stdout of `git -C root args`, or None when git is missing or the command fails."""
+    try:
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    except OSError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
 def git_head(root):
     """The commit checked out in `root` itself, or None (not a repository, no commit, or a folder inside another repository)."""
     root = Path(root).resolve()
-
-    def ask(*args):
-        try:
-            done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-        except OSError:
-            return None
-        return done.stdout.strip() if done.returncode == 0 else None
-
-    top, head = ask("rev-parse", "--show-toplevel"), ask("rev-parse", "HEAD")
+    top, head = ask_git(root, "rev-parse", "--show-toplevel"), ask_git(root, "rev-parse", "HEAD")
     if top is None or Path(top).resolve() != root or head is None or not re.fullmatch(r"[0-9a-f]{40}", head):
         return None
     return head
 
 
+SNAPSHOT = re.compile(rb'"source_code_snapshot":"git\+[^"?]*\?rev=([0-9a-f]{40})"')
+
+
+def wasm_commit(wasm):
+    """The commit `cargo near build` recorded inside the WASM (NEP-330 contract metadata), or None."""
+    try:
+        found = SNAPSHOT.search(Path(wasm).read_bytes())
+    except OSError:
+        return None
+    return found.group(1).decode() if found else None
+
+
 def provenance_problem(root, wasm):
     """Why the commit checked out in `root` cannot stand for the build under test, or None.
 
-    The reproducible build embeds the commit it was made at, so a proof is only worth keeping when
-    HEAD is that commit: a clean tree (apart from the proof folder, which earlier attacks fill) and no
-    commit made after the WASM was built.
+    The reproducible build embeds the commit it was made at, so a committed proof is only worth keeping
+    when HEAD is exactly that commit and the tree is clean (apart from the proof folder, which earlier
+    attacks fill). The commit is read from the WASM itself: file dates and commit dates can be wrong
+    after a checkout, a rebase or an amend, the embedded commit cannot.
     """
     root = Path(root).resolve()
-    if git_head(root) is None:
+    head = git_head(root)
+    if head is None:
         return "no commit is checked out here, so source_commit would be null"
-
-    def ask(*args):
-        try:
-            done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-        except OSError:
-            return None
-        return done.stdout.strip() if done.returncode == 0 else None
-
     spec = ["."]
     try:
         spec.append(f":(exclude){proof_dir(root).resolve().relative_to(root).as_posix()}")
     except ValueError:
         pass
-    dirty = ask("status", "--porcelain", "--untracked-files=normal", "--", *spec)
+    dirty = ask_git(root, "status", "--porcelain", "--untracked-files=normal", "--", *spec)
     if dirty is None:
         return "git status failed, so a clean tree cannot be confirmed"
     if dirty:
         return f"the working tree has uncommitted changes ({dirty.splitlines()[0].strip()}), so source_commit would not describe the build"
-    stamp = ask("log", "-1", "--format=%ct")
-    if stamp is None or not stamp.isdigit():
-        return "the date of HEAD is unreadable"
-    if int(stamp) > wasm.stat().st_mtime:
-        return "HEAD is newer than the vault WASM, so the WASM was built at an earlier commit"
+    built = wasm_commit(wasm)
+    if built is None:
+        return "the vault WASM carries no source commit, so it was not built by `cargo near build reproducible-wasm`"
+    if built != head:
+        return f"the vault WASM was built at {built[:12]} but HEAD is {head[:12]}"
     return None
 
 
