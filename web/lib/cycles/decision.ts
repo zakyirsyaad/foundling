@@ -15,7 +15,9 @@ const U128 = z.string().transform((s, ctx) => {
     return z.NEVER;
   }
 });
-const SECONDS = z.number().int().nonnegative();
+/** Unix seconds up to the last second of year 9999, so `Date#toISOString` can always format them. */
+const MAX_UNIX_SECONDS = 253_402_300_799;
+const SECONDS = z.number().int().nonnegative().max(MAX_UNIX_SECONDS);
 
 const DecisionV1 = z.object({
   action: z.enum(["none", "buy_risk", "sell_risk"]),
@@ -59,7 +61,8 @@ export function parseDecision(raw: string | null): PublishedDecision | null {
     commitment: d.commitment,
     inputsDigest: d.inputs_digest,
     obs: { aiFlag: d.obs.ai_flag, aiConf: d.obs.ai_conf, pa: d.obs.pa, pb: d.obs.pb, ta: d.obs.ta, tb: d.obs.tb },
-    aiRef: d.ai_ref ? { chatId: d.ai_ref.chat_id, model: d.ai_ref.m ?? null, respSigHash: d.ai_ref.resp_sig_hash } : null,
+    // A silent advisor still publishes `ai_ref`, as `AiRef::default()`: empty strings and no `m`.
+    aiRef: d.ai_ref && d.ai_ref.chat_id !== "" ? { chatId: d.ai_ref.chat_id, model: d.ai_ref.m ?? null, respSigHash: d.ai_ref.resp_sig_hash } : null,
   };
 }
 
@@ -129,9 +132,12 @@ function lead(d: PublishedDecision, word: CycleWord, code: string | undefined): 
       return holdLead(d);
     case "Executed":
       if (side === "buy") return "The price rule called for a buy, the AI tripwire was clear, and every limit held.";
-      return d.obs.aiFlag === AI_CLEAR
-        ? "The price rule called for a sell, and every limit held."
-        : "The price rule called for a sell. A flag cannot stop a sell, so the trade ran.";
+      if (side === "sell") {
+        return d.obs.aiFlag === AI_CLEAR
+          ? "The price rule called for a sell, and every limit held."
+          : "The price rule called for a sell. A flag cannot stop a sell, so the trade ran.";
+      }
+      return "The cycle executed, but its published decision asked for no trade.";
     case "Rejected":
       return `The strategy asked to ${side}, and the contract refused it: ${code ?? "no code"}.`;
     case "Reversed":

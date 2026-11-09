@@ -78,6 +78,18 @@ test("a refused trade names the contract's code in the reason", () => {
   expect(screen.getByRole("heading", { name: "Why it was refused" })).toBeInTheDocument();
   expect(screen.getByText("Contract: refused, OVER_CAP")).toBeInTheDocument();
 });
+test("the limit check reads the refusal that ended the cycle, not a retried PRICE_UNAVAILABLE", () => {
+  const retried: CycleRow = { ...row(39n, "rejected", "PRICE_WIDE"), events: [{ name: "cycle_started" }, { name: "decision" }, { name: "rejected", code: "PRICE_UNAVAILABLE" }, { name: "rejected", code: "PRICE_WIDE" }] };
+  render(<CycleDetail row={retried} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.getByText("Rejected by the contract: PRICE_WIDE.")).toBeInTheDocument();
+});
+test("a silent advisor's empty ai_ref shows no signed answer", () => {
+  const silent = HELD_DECISION.replace('"ai_flag":1', '"ai_flag":2').replace(/"ai_ref":\{[^}]*\}/, '"ai_ref":{"chat_id":"","resp_sig_hash":""}');
+  render(<CycleDetail row={row(26n, "hold", "NO_DECISION")} proof={null} decision={silent} revealAfter={0n} chainTime={1n} network="mainnet" vaultId="v.near" />);
+  expect(screen.getByText("Silent · no valid answer")).toBeInTheDocument();
+  expect(screen.queryByText("Signed answer")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copy NEAR AI chat id" })).toBeNull();
+});
 test("on mainnet the recorded inputs carry no rehearsal note", () => {
   render(<CycleDetail row={row(25n, "hold", "NO_DECISION")} proof={null} decision={HELD_DECISION} revealAfter={0n} chainTime={1n} network="mainnet" vaultId="v.near" />);
   expect(screen.queryByText(/rehearsal build/)).toBeNull();

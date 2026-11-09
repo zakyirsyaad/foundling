@@ -2,10 +2,13 @@ import { decisionFacts, explainDecision, parseDecision } from "@/lib/cycles/deci
 
 import { HELD_DECISION as HELD } from "../fixtures/decision";
 
-type Changes = { regime?: string; action?: string; amount_in?: string; ai_flag?: number; ai_conf?: number; ai_ref?: object | null };
+/** What `AiRef::default()` serializes to when the advisor is silent: `m` is skipped, the strings are empty. */
+const SILENT_REF = { chat_id: "", resp_sig_hash: "" };
+
+type Changes = { regime?: string; action?: string; amount_in?: string; ai_flag?: number; ai_conf?: number; ai_ref?: object | null; obs?: object };
 function decision(c: Changes) {
   const base = JSON.parse(HELD);
-  const obs = { ...base.obs, ...(c.ai_flag === undefined ? {} : { ai_flag: c.ai_flag }), ...(c.ai_conf === undefined ? {} : { ai_conf: c.ai_conf }) };
+  const obs = { ...base.obs, ...c.obs, ...(c.ai_flag === undefined ? {} : { ai_flag: c.ai_flag }), ...(c.ai_conf === undefined ? {} : { ai_conf: c.ai_conf }) };
   const next = { ...base, ...c, obs };
   delete next.ai_flag;
   delete next.ai_conf;
@@ -24,7 +27,11 @@ describe("parseDecision", () => {
     expect(d.commitment).toBe("70502c3606c1e7057162565089f18f2305490724c3e19b51411a6a4516326295");
   });
 
-  test("a silent advisor publishes no ai_ref, and that still parses", () => {
+  test("a silent advisor publishes ai_ref with empty strings and no m (AiRef::default), which reads as no signed answer", () => {
+    expect(decision({ ai_flag: 2, ai_ref: SILENT_REF }).aiRef).toBeNull();
+  });
+
+  test("a decision without ai_ref at all also reads as no signed answer", () => {
     expect(decision({ ai_flag: 2, ai_ref: null }).aiRef).toBeNull();
   });
 
@@ -35,6 +42,8 @@ describe("parseDecision", () => {
     ["an unknown regime", HELD.replace('"regime":"risk_on"', '"regime":"panic"')],
     ["a price that is not a decimal string", HELD.replace('"pa":"363561001"', '"pa":363561001')],
     ["no obs", JSON.stringify({ ...JSON.parse(HELD), obs: undefined })],
+    ["a price string that is not a U128", HELD.replace('"pa":"363561001"', '"pa":"-1"')],
+    ["a source time past any calendar date", HELD.replace('"ta":1794167946', '"ta":9000000000000')],
   ])("returns null for %s", (_, raw) => {
     expect(parseDecision(raw)).toBeNull();
   });
@@ -52,7 +61,7 @@ describe("explainDecision", () => {
   });
 
   test("a buy with no valid AI answer is held as well", () => {
-    const r = explainDecision(decision({ ai_flag: 2, ai_ref: null }), "Hold");
+    const r = explainDecision(decision({ ai_flag: 2, ai_ref: SILENT_REF }), "Hold");
     expect(r.lead).toBe("The price rule called for a buy, but the AI gave no valid answer, so the buy was held.");
     expect(r.steps[1]).toEqual({ text: "AI tripwire: silent, no valid answer", mark: "stop" });
   });
@@ -113,6 +122,16 @@ describe("explainDecision", () => {
     expect(r.title).toBe("How it was decided");
     expect(r.steps[2]).toEqual({ text: "Contract: in progress", mark: "wait" });
   });
+
+  test("a failed or aborted cycle says so in the contract step", () => {
+    expect(explainDecision(decision({ action: "buy_risk", amount_in: "1", ai_flag: 0 }), "Aborted").steps[2]).toEqual({ text: "Contract: cycle aborted", mark: "stop" });
+    expect(explainDecision(decision({ action: "buy_risk", amount_in: "1", ai_flag: 0 }), "Failed").steps[2]).toEqual({ text: "Contract: cycle failed", mark: "stop" });
+  });
+
+  test("an executed cycle whose decision asked for no trade does not invent a sell", () => {
+    const r = explainDecision(parseDecision(HELD)!, "Executed");
+    expect(r.lead).toBe("The cycle executed, but its published decision asked for no trade.");
+  });
 });
 
 describe("decisionFacts", () => {
@@ -129,9 +148,13 @@ describe("decisionFacts", () => {
   });
 
   test("a silent advisor has no model and says so", () => {
-    const f = decisionFacts(decision({ ai_flag: 2, ai_ref: null }));
+    const f = decisionFacts(decision({ ai_flag: 2, ai_ref: SILENT_REF }));
     expect(f.flag).toBe("Silent · no valid answer");
     expect(f.model).toBeNull();
+  });
+
+  test("a zero second price has no gap to show", () => {
+    expect(decisionFacts(decision({ obs: { pb: "0" } })).gap).toBe("–");
   });
 
   test("a model index outside the list is shown as a number, not a guess", () => {

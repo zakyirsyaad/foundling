@@ -10,7 +10,7 @@ import { DecisionCard, InputsCard, WhyCard } from "@/features/cycles/DecisionCar
 import { Mark } from "@/features/cycles/Mark";
 import { decisionFacts, explainDecision, parseDecision } from "@/lib/cycles/decision";
 import type { CycleRow, ProofResult } from "@/lib/history/client";
-import { cycleWord, eventMark } from "@/lib/cycles/outcome";
+import { type CycleWord, cycleWord, eventMark } from "@/lib/cycles/outcome";
 import { proofWord, replayWord } from "@/lib/proof/tally";
 
 /** Shell-safe, like TRIGGER_TX: a `<…>` placeholder would be read as a redirect. */
@@ -19,6 +19,13 @@ const COMMIT_PLACEHOLDER = "VERIFIER_COMMIT";
 /** Pinned to the verifier's commit: a newer verifier can replay a sealed rule differently and fail a good proof. */
 function verifyCommand(network: Network, vaultId: string, tx: string | undefined, commit: string | null): string {
   return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
+}
+
+/** Everything the decision cards need, or null when nothing was published or it is not Decision v1. */
+function decisionView(raw: string | null, word: CycleWord, rejectCode: string | undefined) {
+  const parsed = parseDecision(raw);
+  if (!parsed || raw === null) return null;
+  return { raw, parsed, reason: explainDecision(parsed, word, rejectCode), facts: decisionFacts(parsed) };
 }
 
 function TallyLine({ name, t }: { name: string; t: ProofResult["verifier"] }) {
@@ -34,12 +41,10 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
   // A proof result, when there is one, wins over the list row: null there means "not run".
   const verifier = proof ? proof.verifier : row.verifier;
   const obs = proof ? proof.obsRecheck : row.obsRecheck;
-  const limitEvent = row.events.find((e) => e.name === "rejected" || e.name === "executed");
+  // The latest limit outcome: a PRICE_UNAVAILABLE rejection is retried, so a later one is what the cycle ended on.
+  const limitEvent = [...row.events].reverse().find((e) => e.name === "rejected" || e.name === "executed");
   const word = cycleWord(row.events);
-  const parsed = parseDecision(decision);
-  const rejectCode = [...row.events].reverse().find((e) => e.name === "rejected")?.code;
-  const reason = parsed ? explainDecision(parsed, word, rejectCode) : null;
-  const facts = parsed ? decisionFacts(parsed) : null;
+  const view = decisionView(decision, word, limitEvent?.name === "rejected" ? limitEvent.code : undefined);
   return (
     <article className="grid gap-6">
       <nav aria-label="Breadcrumb" className="fm-small">
@@ -53,7 +58,7 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
       </header>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="grid gap-6">
-          {reason ? <WhyCard reason={reason} /> : null}
+          {view ? <WhyCard reason={view.reason} /> : null}
           <Card id="timeline" title="Timeline">
             <ol className="grid gap-3 p-5">
               {row.events.map((e, i) => (
@@ -77,10 +82,10 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
         </div>
         <div className="grid gap-6">
           <ProofCard row={row} proof={proof} verifier={verifier} obs={obs} revealAfter={revealAfter} chainTime={chainTime} network={network} vaultId={vaultId} />
-          {parsed && facts && decision ? (
+          {view ? (
             <>
-              <DecisionCard decision={parsed} facts={facts} raw={decision} />
-              <InputsCard facts={facts} network={network} />
+              <DecisionCard decision={view.parsed} facts={view.facts} raw={view.raw} />
+              <InputsCard facts={view.facts} network={network} />
             </>
           ) : (
             <Card id="decision" title="Decision">
