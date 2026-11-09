@@ -24,6 +24,15 @@ test("with the API down the list comes from published_decision, labelled Partial
   await expect(page.locator("tr[data-nonce='41']")).toContainText('{"action":"buy","nonce":41}');
   await expect(page.locator("tr[data-nonce='40']")).toContainText("No decision to verify");
 });
+test("/app/cycles/25 says why it held, from the published decision, without JavaScript", async ({ page, request }) => {
+  await useScenario(request, "normal");
+  await page.goto("/app/cycles/25");
+  await expect(page.getByRole("heading", { name: "Why it held" })).toBeVisible();
+  await expect(page.getByText("The price rule called for a buy, and the AI tripwire held it back.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "How the decision was reached" })).toContainText("AI tripwire: flagged, confidence 70");
+  await expect(page.locator("#inputs + dl")).toContainText("3.6356 USD per NEAR · 19:59:06 UTC");
+});
+
 test("/app/cycles/41 shows the timeline, the proof and the replay status", async ({ page, request }) => {
   await useScenario(request, "normal");
   await page.goto("/app/cycles/41");
