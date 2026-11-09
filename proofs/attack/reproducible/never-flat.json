@@ -1,0 +1,183 @@
+{
+  "attack": "never-flat",
+  "expected_codes": [],
+  "findings": [],
+  "ledger_after": {
+    "book": {
+      "usdc": "24977498",
+      "wnear": "5000000000000000000000"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "25005631836097",
+    "wallet_usdc": "24977498",
+    "wallet_wnear": "5000000000000000000000",
+    "window_usdc": "2000000",
+    "window_wnear": "439444444444444444444444"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "18000000",
+      "wnear": "444444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "23000000",
+    "wallet_wnear": "444444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "LEDGER",
+      "note": "ledger_after differs from ledger_before by the sells and the mint; each step asserts what it claims"
+    }
+  ],
+  "observed_codes": [],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "100000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "500000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": true,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "dust_wnear": "10000000000000000000000",
+        "queued": "5000000",
+        "wnear_book": "444444444444444444444444"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: the vault holds wNEAR and a new depositor's USDC is queued"
+    },
+    {
+      "detail": {
+        "pending": "5000000",
+        "shares": "0"
+      },
+      "held": true,
+      "observed": null,
+      "step": "a cycle while the vault holds wNEAR does not mint the queue"
+    },
+    {
+      "detail": {
+        "dust_wnear": "10000000000000000000000",
+        "sells": [
+          {
+            "amount_in": "100000000000000000000000",
+            "book_after": "344444444444444444444444",
+            "book_before": "444444444444444444444444"
+          },
+          {
+            "amount_in": "100000000000000000000000",
+            "book_after": "244444444444444444444444",
+            "book_before": "344444444444444444444444"
+          },
+          {
+            "amount_in": "100000000000000000000000",
+            "book_after": "144444444444444444444444",
+            "book_before": "244444444444444444444444"
+          },
+          {
+            "amount_in": "72222222222222222222222",
+            "book_after": "72222222222222222222222",
+            "book_before": "144444444444444444444444"
+          },
+          {
+            "amount_in": "67222222222222222222222",
+            "book_after": "5000000000000000000000",
+            "book_before": "72222222222222222222222"
+          }
+        ],
+        "wnear_book": "5000000000000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "capped sells bring the wNEAR book to or under the dust line"
+    },
+    {
+      "detail": {
+        "new_shares": "5005631836097",
+        "usdc_book_gain": "5000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the next cycle, with the vault flat, mints the queued deposit"
+    },
+    {
+      "detail": {
+        "book_after": "24977498",
+        "book_before": "19977498",
+        "shares_after": "25005631836097",
+        "shares_before": "20000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the mint's own yardstick: the USDC book per share did not fall"
+    },
+    {
+      "detail": {
+        "bound": "22501",
+        "change": "-4505",
+        "claim_after": "19995493",
+        "claim_before": "19999998",
+        "dust_line_value": "45000",
+        "dust_value_held": "22500"
+      },
+      "held": true,
+      "observed": null,
+      "step": "valuing the wNEAR dust at the anchor price, the holders before lose at most the dust's worth"
+    },
+    {
+      "detail": {
+        "bound": "22501",
+        "deposited": "5000000",
+        "dust_line_value": "45000",
+        "dust_value_held": "22500",
+        "gain": "4504",
+        "value": "5004504"
+      },
+      "held": true,
+      "observed": null,
+      "step": "valuing the wNEAR dust at the anchor price, the new depositor gains at most the dust's worth over the deposit"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

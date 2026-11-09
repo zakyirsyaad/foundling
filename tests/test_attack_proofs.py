@@ -267,5 +267,35 @@ class SourceDirtyTest(unittest.TestCase):
         self.assertIsNone(self.recorded()["source_dirty"])
 
 
+
+COMMITTED = ROOT / "proofs" / "attack" / "reproducible"
+
+
+class CommittedProofFilesTest(unittest.TestCase):
+    """The proofs in the repository (the evidence claims.json and the website point at) are traceable:
+    each names the commit its reproducible vault build came from, built from a clean tree, and they all
+    come from one build. They are written by `make attack-proofs`, which refuses anything else."""
+
+    def setUp(self):
+        self.proofs = {path.name: json.loads(path.read_text()) for path in sorted(COMMITTED.glob("*.json"))}
+
+    def test_there_are_committed_proofs(self):
+        self.assertTrue(self.proofs, "proofs/attack/reproducible/ is empty")
+
+    def test_each_names_a_full_source_commit_from_a_clean_tree(self):
+        for name, proof in self.proofs.items():
+            with self.subTest(proof=name):
+                self.assertRegex(proof.get("source_commit") or "", HEX40)
+                self.assertIs(proof.get("source_dirty"), False)
+
+    def test_they_all_come_from_one_build(self):
+        builds = {(proof.get("source_commit"), proof.get("vault_wasm_sha256")) for proof in self.proofs.values()}
+        self.assertEqual(len(builds), 1, f"several builds: {sorted(builds)}")
+
+    def test_every_registry_attack_has_one(self):
+        registry = json.loads((ROOT / "tools" / "attack-registry.json").read_text())["attacks"]
+        self.assertEqual(set(self.proofs), {f"{attack['name']}.json" for attack in registry})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,304 @@
+{
+  "attack": "kill-agent",
+  "expected_codes": [
+    "NOT_KEEPER"
+  ],
+  "findings": [
+    {
+      "finding": "The vault binds the keeper role to an account id, not to a key. After the keeper account is deleted, whoever controls the id's parent (anyone, for a top-level id) can create it again. Measured with OutLayer alive: the new keeper started a cycle and executed the strategy's own decision (the 1 USDC buy the mock OutLayer returned, inside the caps). The vault's USDC wallet and book fell by exactly that amount, every receipt of the execution ran on a registered account, no other wallet on either token changed, and spending stayed within ops_budget. Not measured: a trade other than the strategy's (Decision v1 has no field to name one). Mitigation: keeper ids under a parent the lead controls, and rotation through schedule_keeper_change.",
+      "id": "KEEPER_ID_REUSE"
+    }
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "0",
+    "wallet_usdc": "0",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "18000000",
+      "wnear": "444444444444444444444444"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "18000000",
+    "wallet_wnear": "444444444444444444444444",
+    "window_usdc": "2000000",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "S4",
+      "note": "'foundling redeem' after the kill is the redeem call above; the CLI wrapper is not part of the sandbox"
+    },
+    {
+      "code": "LEDGER",
+      "note": "ledger_after differs from ledger_before because the redeems pay out; every refused call asserts the state unchanged in its own step"
+    }
+  ],
+  "observed_codes": [
+    "NOT_KEEPER"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "book": {
+          "usdc": "18000000",
+          "wnear": "444444444444444444444444"
+        },
+        "shares": "20000000000000"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: alice holds shares of a vault with USDC and wNEAR, and the agent has run"
+    },
+    {
+      "detail": {
+        "cycle_failed": "REQUEST_FAILED",
+        "nonce": 3
+      },
+      "held": true,
+      "observed": null,
+      "step": "OutLayer paused: a cycle ends without a trade and the vault is Idle again"
+    },
+    {
+      "detail": {
+        "accounts_outside_the_registered_set": [],
+        "decision_amount_in": "1000000",
+        "nonce": 4,
+        "ops_within_budget": true,
+        "other_wallets_unchanged": true,
+        "swap_amount_in": "1000000",
+        "vault_usdc_book_drop": "1000000",
+        "vault_usdc_wallet_drop": "1000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the keeper id created again by its parent, with OutLayer alive: it runs a cycle and executes the strategy's decision, nothing else"
+    },
+    {
+      "detail": {
+        "outlayer": "outlayer.test.near",
+        "ready_nonce": 5,
+        "stage": "DecisionReady"
+      },
+      "held": null,
+      "observed": null,
+      "step": "OutLayer deleted from the chain, with a decision ready and the keeper still alive"
+    },
+    {
+      "detail": {
+        "book_drop": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "expected": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "failure": null,
+        "of_which_in_wallet": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "paid": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "shares": "5000000000000",
+        "shares_burned": "5000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "redeem while a decision waits and OutLayer no longer exists"
+    },
+    {
+      "detail": {
+        "event": "EXPIRED"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the unexecuted decision expires and anyone returns the vault to Idle"
+    },
+    {
+      "detail": {
+        "cycle_failed": "REQUEST_FAILED"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the keeper starts a cycle with OutLayer gone: it fails and the vault is Idle again with no trade"
+    },
+    {
+      "detail": {
+        "keeper": "keeper.test.near",
+        "last_nonce": 6
+      },
+      "held": null,
+      "observed": null,
+      "step": "the keeper deleted from the chain too"
+    },
+    {
+      "detail": {
+        "book_drop": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "expected": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "failure": null,
+        "of_which_in_wallet": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "paid": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666666"
+        },
+        "shares": "5000000000000",
+        "shares_burned": "5000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "redeem while Idle with neither keeper nor OutLayer"
+    },
+    {
+      "detail": {
+        "last_nonce": 6,
+        "not_refused": [],
+        "refused_with": "NOT_KEEPER"
+      },
+      "held": true,
+      "observed": null,
+      "step": "every other account tries trigger_cycle right after the keeper is gone"
+    },
+    {
+      "detail": {
+        "last_nonce": 6,
+        "not_refused": [],
+        "refused_with": "NOT_KEEPER"
+      },
+      "held": true,
+      "observed": null,
+      "step": "every other account tries trigger_cycle after a full epoch of silence, the keeper is gone"
+    },
+    {
+      "detail": {
+        "cycle_failed": "REQUEST_FAILED",
+        "id": "keeper.test.near",
+        "nonce_after": 7,
+        "nonce_before": 6,
+        "ops_within_budget": true,
+        "refused": null,
+        "triggered": true
+      },
+      "held": true,
+      "observed": null,
+      "step": "the keeper id created again by its parent starts a cycle: one run fee inside ops_budget, no trade"
+    },
+    {
+      "detail": {
+        "book_drop": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "expected": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "failure": null,
+        "of_which_in_wallet": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "paid": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "shares": "5000000000000",
+        "shares_burned": "5000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "redeem after freeze, still without agent or keeper"
+    },
+    {
+      "detail": {
+        "book_drop": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "expected": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "failure": null,
+        "of_which_in_wallet": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "paid": {
+          "usdc": "4250000",
+          "wnear": "166666666666666666666667"
+        },
+        "shares": "5000000000000",
+        "shares_burned": "5000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the rest redeems in full"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}

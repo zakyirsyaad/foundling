@@ -1,0 +1,127 @@
+{
+  "attack": "setup-spam",
+  "expected_codes": [
+    "NEAR_RESERVE"
+  ],
+  "findings": [],
+  "ledger_after": {
+    "vault_near": "9987499999999999999999999"
+  },
+  "ledger_before": {
+    "vault_near": "10000000000000000000000000"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "NEAR_RESERVE"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 1800,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 21600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "refusal_texts": [
+    "Ref storage first",
+    "setup already started"
+  ],
+  "result": "PASS",
+  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "calls": 110,
+        "completed_per_target": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "refused": 106,
+        "targets": [
+          "Usdc",
+          "Wnear",
+          "Rhea",
+          "RheaTokens"
+        ]
+      },
+      "held": true,
+      "observed": null,
+      "step": "100 setup_storage calls from 25 accounts at once, then 10 more for RheaTokens: each target is registered exactly once"
+    },
+    {
+      "detail": {
+        "margin": "1000000000000000000000",
+        "paid": "12500000000000000000001",
+        "registrations": "12500000000000000000001"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the NEAR the vault paid is the four registrations and not more"
+    },
+    {
+      "detail": {
+        "near_reserve": "6268740000000000000000000",
+        "room": "5000000000000000000000"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup, part B: a second vault whose policy leaves room for two token registrations and not for Ref's storage deposit"
+    },
+    {
+      "detail": {
+        "completed_per_target": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "rhea_calls": 25,
+        "rhea_refused_near_reserve": 25
+      },
+      "held": true,
+      "observed": "NEAR_RESERVE",
+      "step": "with room for two token registrations only, Ref's storage deposit is refused with NEAR_RESERVE every time"
+    },
+    {
+      "detail": {
+        "balance_after": "9997500000000000000000000",
+        "balance_before": "10000000000000000000000000",
+        "floor": "9995000000000000000000000",
+        "near_reserve": "6268740000000000000000000",
+        "stake": "3726260000000000000000000"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the vault's NEAR never fell under stake + near_reserve"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "verdict": "held"
+}
