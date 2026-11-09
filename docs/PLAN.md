@@ -31,7 +31,7 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | 2 | Uji testnet selesai: callback OutLayer (SP1a, sudah lulus), rahasia terikat hash (SP2, sudah lulus), panggilan NEAR AI dari worker (SP1b, sumber harga publik sudah lulus dari worker), rute Ref (SP8, sudah lulus) | Lead, partner siapkan harness | 3 Nov |
 | 3 | Vault dasar lulus tes di sandbox atau testnet: deposit, redeem, cap, freeze (sudah lulus di testnet) | Lead | 4 Nov |
 | 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` (sudah lulus di testnet lewat skrip; bot keeper belum) | Lead, bot dari partner | 6 Nov |
-| 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), deposit publik (sudah di-merge, PR #29), Attack Lab lulus, soak semalam lulus, kontrak beku; vault final di mainnet (keputusan lead 2026-11-03) | Lead, Partner | 9 Nov |
+| 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), deposit publik (sudah di-merge, PR #29), Attack Lab lulus, soak semalam lulus (soak 2 jam diterima lead 2026-11-09: vault uji `adv2`, 24 siklus `Hold(NO_DECISION)`, 0 panggilan gagal; vault kosong dan tripwire AI menahan beli karena berita peretasan Binance), kontrak beku; vault final di mainnet (keputusan lead 2026-11-03) | Lead, Partner | 9 Nov |
 | 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di mainnet, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
 | 7 | `reveal` (kontraknya sudah lulus di testnet) dan replay lulus di mainnet, `verify.py` lulus | Lead, Partner | 12 Nov |
 | 8 | LICENSE, video, README, post X (wajib tag @NEARProtocol dan #NEARHackathon), repo publik, submit oleh lead | Partner, Lead | 13 Nov |
