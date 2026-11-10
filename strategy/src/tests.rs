@@ -365,7 +365,9 @@ fn a_normal_build_refuses_a_secret_with_rehearsal_prices() {
 fn secret_on_chain(chain: &str) -> String {
     let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
     secret["chain"] = json!(chain);
-    secret["rehearsal_obs"] = serde_json::to_value(obs(431_000_000, 431_000_000)).unwrap();
+    // A rehearsal reads the whole reading from the secret, the advisor's risk included.
+    secret["rehearsal_obs"] =
+        serde_json::to_value(advised(431_000_000, 431_000_000, 0, 90)).unwrap();
     secret.to_string()
 }
 
