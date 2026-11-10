@@ -22,10 +22,13 @@ pub const MAX_PERCENT: u8 = 100;
 #[cfg(feature = "rehearsal")]
 const REHEARSAL_CHAIN: &str = "testnet";
 
+/// The advisor answered; under the AI Risk Manager its score is in `obs.ai_risk`.
 pub const AI_CLEAR: u8 = 0;
+/// A raised tripwire flag. Only Decisions from vaults born before the AI Risk Manager carry
+/// it; the advisor no longer produces it, and `decide_tripwire` still reads it for replay.
 pub const AI_FLAGGED: u8 = 1;
-/// The advisor gave no valid answer. Like a raised flag it blocks a buy, and like one it
-/// cannot stop a sell: an answer that a headline can break must not hold a stop-loss.
+/// The advisor gave no valid answer. It blocks a buy and cannot stop a sell: an answer that a
+/// headline can break must not hold a stop-loss. A silent advisor never sells protectively.
 pub const AI_SILENT: u8 = 2;
 
 pub mod advisor;
@@ -130,8 +133,6 @@ impl Params {
         )
     }
 
-    /// The secret cannot be changed once its owner's keys are gone, so a bad set is
-    /// refused here and the vault ends the cycle.
     pub fn risk_limits(&self) -> Option<RiskLimits> {
         Some(RiskLimits {
             veto_at: self.ai_veto_at?,
@@ -156,6 +157,8 @@ impl Params {
             && limits.veto_at <= limits.exit_at
     }
 
+    /// The secret cannot be changed once its owner's keys are gone, so a bad set is
+    /// refused here and the vault ends the cycle.
     fn is_sound(&self) -> bool {
         self.risk_limits_are_sound()
             && self.risk_off_below < self.risk_on_above
@@ -334,12 +337,7 @@ fn decide_managed(params: &Params, limits: RiskLimits, input: &Input, obs: &Obs)
     let risk = obs.ai_risk.filter(|_| obs.ai_flag == AI_CLEAR);
     let severe = risk.is_some_and(|risk| risk >= limits.exit_at) && obs.ai_conf >= limits.exit_conf;
     if severe && sources_agree(obs, input.now, params.source_dev_bps) {
-        return trade(
-            regime,
-            Action::SellRisk,
-            params.sell_wnear.min(sizing::sell_room(input)),
-            obs.pb,
-        );
+        return trade(regime, Action::SellRisk, sell_size(params, input), obs.pb);
     }
     match (regime, risk) {
         (Regime::RiskOn, Some(risk)) if risk < limits.veto_at => {
@@ -351,14 +349,15 @@ fn decide_managed(params: &Params, limits: RiskLimits, input: &Input, obs: &Obs)
                 obs.pb,
             )
         }
-        (Regime::RiskOff, _) => trade(
-            regime,
-            Action::SellRisk,
-            params.sell_wnear.min(sizing::sell_room(input)),
-            obs.pb,
-        ),
+        (Regime::RiskOff, _) => trade(regime, Action::SellRisk, sell_size(params, input), obs.pb),
         _ => hold(regime, obs.pb),
     }
+}
+
+/// One size for every sell, protective or from the price rule: the sealed size, inside the
+/// vault's limits.
+fn sell_size(params: &Params, input: &Input) -> u128 {
+    params.sell_wnear.min(sizing::sell_room(input))
 }
 
 /// `buy_usdc · (100 − risk) / 100`, rounded down, without overflowing a large `buy_usdc`.

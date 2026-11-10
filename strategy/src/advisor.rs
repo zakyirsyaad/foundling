@@ -51,7 +51,7 @@ pub struct Advice {
     pub ai_ref: AiRef,
 }
 
-/// What a run saw: `ai_ref` points at the signed reply that `obs` carries the flag of.
+/// What a run saw: `ai_ref` points at the signed reply whose risk and confidence `obs` carries.
 #[derive(Debug, PartialEq)]
 pub struct Observed {
     pub obs: Obs,
