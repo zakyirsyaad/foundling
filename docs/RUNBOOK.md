@@ -205,3 +205,37 @@ docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}"
 | `api.kraken.com` dari worker | | |
 | RAM total terpakai (`free -m`) | | |
 | Puncak RAM worker (`docker stats`) | | |
+
+## 10. Biner vault final (kontrak beku)
+
+Kontrak dibekukan pada 2026-11-10, setelah SP1a lulus di mainnet. Vault final memakai biner ini dan tidak ada yang lain:
+
+| | |
+| --- | --- |
+| Commit | `8234c1490116320070803c7277efcc98823f8ab1` |
+| Build | `cargo near build reproducible-wasm` di image `sourcescan/cargo-near:0.22.0-rust-1.97.1` |
+| sha256 | `9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` |
+| Ukuran | 371.194 byte, 25 impor, lulus `tools/allowlist.txt` |
+| Bukti | CI run `42651364837`: hash sama di ubuntu-22.04 dan ubuntu-24.04; 15 bukti Attack Lab di `proofs/attack/reproducible/` memakai hash ini |
+
+**Kenapa commit-nya dipatok.** Build reproducible menyematkan commit sumber ke metadata NEP-330 di dalam WASM. Build dari commit yang lebih baru menghasilkan hash lain walaupun `contracts/vault` tidak berubah (contoh: `main` di `5f60601` menghasilkan `82c3878c…`). Jadi deploy hanya dari biner commit `8234c14`.
+
+**Mengambil biner.** Artefak CI berlaku sampai 2026-11-23:
+
+```bash
+gh run download 42651364837 -R zakyirsyaad/foundling -n foundling-vault-reproducible-ubuntu-24.04 -D final-vault
+shasum -a 256 final-vault/foundling_vault.wasm
+python3 tools/wasm_imports.py final-vault/foundling_vault.wasm tools/allowlist.txt
+```
+
+Hash harus `9ab6b6d6…` dan audit impor harus `LULUS`. Siapa pun bisa membangun ulang dengan Docker: `git checkout 8234c14 && cd contracts/vault && cargo near build reproducible-wasm`.
+
+**Sesudah deploy.** `code_hash` akun vault adalah sha256 biner dalam base58. Cocokkan:
+
+```bash
+python3 -c "import sys; a='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; n=0
+for c in sys.argv[1]: n=n*58+a.index(c)
+print(n.to_bytes(32,'big').hex())" <CODE_HASH_DARI_VIEW_ACCOUNT>
+```
+
+**Aturan beku.** Tidak ada perubahan di `contracts/vault` sampai 18 Nov. Perubahan apa pun menuntut Attack Lab diulang dan pembekuan baru. Strategi tidak ikut beku: hash-nya disegel di vault lewat `agent.wasm_hash` saat `init`.
