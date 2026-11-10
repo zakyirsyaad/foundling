@@ -22,6 +22,13 @@ afterAll(async () => {
 const bin = (n: string) => join(__dirname, "bin", n);
 const tools: ToolPaths = { python: "/bin/sh", fetchProof: bin("fetch_proof.sh"), recheckObs: bin("recheck_obs.sh"), verify: bin("foundling-verify.sh"), rpcUrls: ["https://archival.test"], timeoutMs: 2000 };
 const m12 = fixture("m12");
+/**
+ * Fixed clocks for the backoff tests, relative to the real clock: a seeded proof's `next_attempt_at`
+ * defaults to the database's `now()`, so a fake clock in the past would leave it never due.
+ */
+const HOUR = 3_600_000;
+const T0 = new Date((Math.floor(Date.now() / (24 * HOUR)) + 1) * 24 * HOUR);
+const at = (hours: number) => new Date(T0.getTime() + hours * HOUR);
 let logFile = "";
 
 function rpcWithReveal(revealed: boolean) {
@@ -86,7 +93,7 @@ test("recheck exit 1 records the failure and is final", async () => {
 
 test("a source that stays down backs off and is recorded as skip after 24 hours", async () => {
   process.env.FAKE_RECHECK = "down";
-  let now = new Date("2026-11-10T00:00:00Z");
+  let now = at(0);
   const clock = () => now;
   await processOne(deps({ now: clock }));
   let r = await row();
@@ -100,7 +107,7 @@ test("a source that stays down backs off and is recorded as skip after 24 hours"
   expect(r.attempts).toBe(2);
   expect(r.next_attempt_at.getTime() - now.getTime()).toBe(15 * 60_000);
 
-  now = new Date(Date.parse("2026-11-10T00:00:00Z") + GIVE_UP_AFTER_MS);
+  now = new Date(at(0).getTime() + GIVE_UP_AFTER_MS);
   await processOne(deps({ now: clock }));
   expect(await row()).toMatchObject({ obs_recheck: { pass: 0, skip: 1, fail: 0 }, obs_state: "done" });
   expect(calls().filter((c) => c.startsWith("fetch"))).toHaveLength(1);
@@ -108,7 +115,7 @@ test("a source that stays down backs off and is recorded as skip after 24 hours"
 
 test("a fetch that cannot read its sources backs off, then fails to build after 24 hours", async () => {
   process.env.FAKE_FETCH = "down";
-  let now = new Date("2026-11-10T00:00:00Z");
+  let now = at(0);
   await processOne(deps({ now: () => now }));
   expect(await row()).toMatchObject({ bundle: null, verifier_state: "queued", attempts: 1, last_error: expect.stringMatching(/exit 2/) });
   now = new Date(now.getTime() + GIVE_UP_AFTER_MS);
@@ -125,7 +132,7 @@ test("a bundle that is not JSON is retried, not a crash", async () => {
 
 test("a verifier without SUMMARY is failed_to_build after 24 hours", async () => {
   process.env.FAKE_VERIFY = "nosummary";
-  let now = new Date("2026-11-10T00:00:00Z");
+  let now = at(0);
   await processOne(deps({ now: () => now }));
   expect((await row()).verifier_state).toBe("queued");
   now = new Date(now.getTime() + GIVE_UP_AFTER_MS);
@@ -195,10 +202,10 @@ async function addReveal() {
 }
 
 test("a verifier that fails after the reveal is retried with backoff, then gives the replay up as skip", async () => {
-  let now = new Date("2026-11-10T00:00:00Z");
+  let now = at(0);
   await processOne(deps({ now: () => now }));
   await addReveal();
-  now = new Date("2026-11-12T00:00:00Z");
+  now = at(48);
   process.env.FAKE_VERIFY = "nosummary";
   await processOne(deps({ rpc: rpcWithReveal(true), now: () => now }));
   let r = await row();
@@ -212,10 +219,10 @@ test("a verifier that fails after the reveal is retried with backoff, then gives
 });
 
 test("an empty revealed view backs off instead of spinning", async () => {
-  let now = new Date("2026-11-10T00:00:00Z");
+  let now = at(0);
   await processOne(deps({ now: () => now }));
   await addReveal();
-  now = new Date("2026-11-12T00:00:00Z");
+  now = at(48);
   await processOne(deps({ rpc: rpcWithReveal(false), now: () => now }));
   const r = await row();
   expect(r.next_attempt_at.getTime()).toBeGreaterThan(now.getTime());
@@ -225,7 +232,7 @@ test("an empty revealed view backs off instead of spinning", async () => {
 test("a thrown error is a problem with backoff, not a stuck head of the queue", async () => {
   await addReveal();
   const down = { transactions: async () => { throw new Error("fastnear down"); } };
-  const now = new Date("2026-11-10T00:00:00Z");
+  const now = at(0);
   await expect(processOne(deps({ fastnear: down, rpc: rpcWithReveal(true), now: () => now }))).resolves.toBe(true);
   const r = await row();
   expect(r).toMatchObject({ attempts: 1, last_error: expect.stringMatching(/fastnear down/) });
