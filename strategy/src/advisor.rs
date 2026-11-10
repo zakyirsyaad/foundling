@@ -1,20 +1,25 @@
-//! The NEAR AI tripwire. It reads public headlines and answers with one flag that can only
-//! brake: a raised flag blocks a buy, and it cannot start or size anything. Whatever goes
-//! wrong here leaves the advisor silent, and a silent advisor blocks a buy the way a raised
-//! flag does. Neither can stop a sell.
+//! The NEAR AI Risk Manager's advisor (SPEC §3.2). It reads public headlines and the market,
+//! and answers with a risk score, a confidence and a one-sentence reason. The rule in
+//! `decide` lets that score only lower exposure: scale a buy down, veto it, or sell to USDC
+//! on a severe and confident risk. Whatever goes wrong here leaves the advisor silent, and a
+//! silent advisor blocks a buy and never sells.
 
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::sources::{observe_market, Call};
-use crate::{from_hex, hash_fields, to_hex, AiRef, Obs, Secret, AI_CLEAR, AI_FLAGGED};
+use crate::sources::{observe_market, parse_decimal, Call};
+use crate::{from_hex, hash_fields, to_hex, AiRef, Obs, Secret, AI_CLEAR, MAX_PERCENT};
 
 /// General crypto news: The Block first, Cointelegraph if that feed is down.
 const FEEDS: [(&str, &str); 2] = [
     ("www.theblock.co", "/rss.xml"),
     ("cointelegraph.com", "/rss"),
 ];
+/// Market context for the AI Risk Manager. Not a rule input, so not in `obs`.
+const TICKER_HOST: &str = "api.kraken.com";
+const TICKER_PATH: &str = "/0/public/Ticker?pair=NEARUSD";
+const TICKER_PAIR: &str = "NEARUSD";
 const CHAT_HOST: &str = "cloud-api.near.ai";
 const CHAT_PATH: &str = "/v1/chat/completions";
 /// Both run inside NEAR's own TEE tier. The list of models changes, and a sealed vault
@@ -27,14 +32,21 @@ pub const MODELS: [&str; 2] = ["z-ai/glm-5.3-flash", "Qwen/Qwen3.8-27B"];
 const MAX_OUTPUT_TOKENS: u32 = 256;
 pub const MAX_TITLES: usize = 20;
 pub const MAX_TITLE_CHARS: usize = 160;
-const MAX_CONFIDENCE: u8 = 100;
+/// A reason longer than this is cut; it has to fit the Decision's size target (SPEC §3.2).
+pub const MAX_NOTE_CHARS: usize = 120;
+/// Characters a note keeps; anything else becomes a space, so a note never needs a JSON
+/// escape and can never carry markup.
+const NOTE_PUNCTUATION: &str = " .,:;%()/'-";
+/// Prices in `obs` carry eight decimals; the market line shows four.
+const PRICE_ONE: u128 = 100_000_000;
+const SHOWN_DECIMALS: u128 = 10_000;
 const MAX_CHAT_ID_BYTES: usize = 64;
 const FINISHED: &str = "stop";
 const REQUEST_TAG: &[u8] = b"foundling/v1/request-tag";
 
 #[derive(Debug, PartialEq)]
 pub struct Advice {
-    pub ai_flag: u8,
+    pub ai_risk: u8,
     pub ai_conf: u8,
     pub ai_ref: AiRef,
 }
@@ -76,8 +88,23 @@ struct Message {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Answer {
-    risk_flag: bool,
+    risk: u8,
     confidence: u8,
+    note: String,
+}
+
+#[derive(Deserialize)]
+struct TickerReply {
+    error: Vec<String>,
+    result: std::collections::HashMap<String, Ticker>,
+}
+
+/// `o` opens today (00:00 UTC); `h` and `l` are `[today, last 24 hours]`.
+#[derive(Deserialize)]
+struct Ticker {
+    o: String,
+    h: [String; 2],
+    l: [String; 2],
 }
 
 /// Prices first: a market that cannot be read ends the run without spending credit.
@@ -89,15 +116,16 @@ pub fn observe(
     let obs = observe_market(&mut send)?;
     let advice = secret.ai_key.as_deref().and_then(|key| {
         let tag = request_tag(&from_hex(&secret.salt)?, nonce);
-        ask(&secret.params.prompt, &tag, key, &mut send)
+        ask(&secret.params.prompt, &tag, key, &obs, &mut send)
     });
     let Some(advice) = advice else {
         return Some(obs.into());
     };
     Some(Observed {
         obs: Obs {
-            ai_flag: advice.ai_flag,
+            ai_flag: AI_CLEAR,
             ai_conf: advice.ai_conf,
+            ai_risk: Some(advice.ai_risk),
             ..obs
         },
         ai_ref: advice.ai_ref,
@@ -116,6 +144,7 @@ fn ask(
     prompt: &str,
     tag: &str,
     key: &str,
+    market: &Obs,
     send: &mut impl FnMut(&Call) -> Option<Vec<u8>>,
 ) -> Option<Advice> {
     let titles = FEEDS.iter().find_map(|&(host, path)| {
@@ -127,7 +156,18 @@ fn ask(
         })?;
         read_titles(&feed)
     })?;
-    let headlines = format!("{}\n\nref:{tag}", titles.join("\n"));
+    let ticker = send(&Call {
+        host: TICKER_HOST,
+        path: TICKER_PATH,
+        body: None,
+        headers: Vec::new(),
+    })
+    .and_then(|reply| read_ticker(&reply));
+    let headlines = format!(
+        "{}\n\n{}\n\nref:{tag}",
+        titles.join("\n"),
+        market_line(market, ticker)
+    );
     let (asked, reply) = MODELS.iter().enumerate().find_map(|(index, model)| {
         let reply = send(&Call {
             host: CHAT_HOST,
@@ -176,6 +216,60 @@ fn keep_reasoning_short(model: &str, body: &mut serde_json::Value) {
     }
 }
 
+/// Today's open, the 24-hour high and the 24-hour low, eight decimals like `obs`.
+pub fn read_ticker(reply: &[u8]) -> Option<(u128, u128, u128)> {
+    let reply: TickerReply = serde_json::from_slice(reply).ok()?;
+    if !reply.error.is_empty() {
+        return None;
+    }
+    let ticker = reply.result.get(TICKER_PAIR)?;
+    Some((
+        parse_decimal(&ticker.o)?,
+        parse_decimal(&ticker.h[1])?,
+        parse_decimal(&ticker.l[1])?,
+    ))
+}
+
+/// What the advisor is told about the market: the two prices the rule reads, then the day
+/// from Kraken's ticker when it answered.
+pub fn market_line(market: &Obs, ticker: Option<(u128, u128, u128)>) -> String {
+    let mut line = format!(
+        "Market: NEAR/USD Rhea pool {}, Kraken {}",
+        price_text(market.pa),
+        price_text(market.pb)
+    );
+    if let Some((open, high, low)) = ticker {
+        line.push_str(&format!(
+            ", today's open {}, 24h high {}, 24h low {}",
+            price_text(open),
+            price_text(high),
+            price_text(low)
+        ));
+    }
+    line
+}
+
+fn price_text(price: u128) -> String {
+    let fraction = price % PRICE_ONE / (PRICE_ONE / SHOWN_DECIMALS);
+    format!("{}.{fraction:04}", price / PRICE_ONE)
+}
+
+/// The reason as published: safe characters only, at most `MAX_NOTE_CHARS`, trimmed.
+pub fn clean_note(raw: &str) -> String {
+    let kept: String = raw
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || NOTE_PUNCTUATION.contains(character) {
+                character
+            } else {
+                ' '
+            }
+        })
+        .take(MAX_NOTE_CHARS)
+        .collect();
+    kept.trim().to_string()
+}
+
 /// The headlines of a feed. Only the items count: the channel's own title is no news.
 pub fn read_titles(feed: &[u8]) -> Option<Vec<String>> {
     let feed = std::str::from_utf8(feed).ok()?;
@@ -222,20 +316,18 @@ pub fn read_advice(reply: &[u8], asked: usize) -> Option<Advice> {
         return None;
     }
     let answer: Answer = serde_json::from_str(unfenced(&choice.message.content)?).ok()?;
-    if answer.confidence > MAX_CONFIDENCE {
+    if answer.risk > MAX_PERCENT || answer.confidence > MAX_PERCENT {
         return None;
     }
+    let note = clean_note(&answer.note);
     Some(Advice {
-        ai_flag: if answer.risk_flag {
-            AI_FLAGGED
-        } else {
-            AI_CLEAR
-        },
+        ai_risk: answer.risk,
         ai_conf: answer.confidence,
         ai_ref: AiRef {
             chat_id: chat.id,
             resp_sig_hash: to_hex(&Sha256::digest(reply)),
             m: u8::try_from(asked).ok(),
+            note: (!note.is_empty()).then_some(note),
         },
     })
 }

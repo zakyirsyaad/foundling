@@ -7,13 +7,17 @@ const VAULT: &str = "vault.owner.near";
 const INPUT: &str = include_str!("../fixtures/input.json");
 // Computed with Python hashlib, independently of this crate.
 const KNOWN_COMMITMENT: &str = "8838dc3c07993aa1f1488bbe99b5c55aafcc86de7445eaf35639f1dd21a4c2f4";
+/// The same, for `secret_json()`'s params with the AI Risk Manager's three thresholds.
+const KNOWN_MANAGED_COMMITMENT: &str =
+    "372b6882d12f9457949cb8c2b11fd3316c6ac40a636f177c585cbcbd69c81fc6";
 const KNOWN_DIGEST: &str = "cc4937204b11b6ebf27d23913e8916cd3dac12c715f5a32abce503b9604ea41d";
 const USDC: u128 = 1_000_000;
 const WNEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const HIGH: u128 = 450_000_000;
 const LOW: u128 = 390_000_000;
-/// A full-cap sell with every field at its longest is 742 bytes; the vault's hard limit is 1024.
-const DECISION_TARGET_BYTES: usize = 768;
+/// A full-cap sell with every field at its longest, a 100 risk and a full note is under this;
+/// the vault's hard limit is 1024 (SPEC §3.2, Decision v1).
+const DECISION_TARGET_BYTES: usize = 896;
 const PROMPT: &str = "Classify the headlines.";
 const TIME_OF_OBS: u64 = 12;
 const MAX_ACCOUNT_BYTES: usize = 64;
@@ -29,6 +33,20 @@ fn params() -> Params {
         buy_usdc: 1_000,
         sell_wnear: 2_000,
         prompt: PROMPT.into(),
+        ai_veto_at: None,
+        ai_exit_at: None,
+        ai_exit_conf: None,
+    }
+}
+
+/// The same params with the AI Risk Manager on: veto a buy at risk 50, sell at 80 with
+/// confidence 70.
+fn managed() -> Params {
+    Params {
+        ai_veto_at: Some(50),
+        ai_exit_at: Some(80),
+        ai_exit_conf: Some(70),
+        ..params()
     }
 }
 
@@ -86,6 +104,16 @@ fn obs(pa: u128, pb: u128) -> Obs {
         tb: 12,
         ai_flag: 0,
         ai_conf: 0,
+        ai_risk: None,
+    }
+}
+
+/// An answered advisor's reading.
+fn advised(pa: u128, pb: u128, risk: u8, conf: u8) -> Obs {
+    Obs {
+        ai_conf: conf,
+        ai_risk: Some(risk),
+        ..obs(pa, pb)
     }
 }
 
@@ -109,6 +137,9 @@ fn secret_json() -> String {
             "buy_usdc": "1000",
             "sell_wnear": "2000",
             "prompt": PROMPT,
+            "ai_veto_at": "50",
+            "ai_exit_at": "80",
+            "ai_exit_conf": "70",
         },
     })
     .to_string()
@@ -119,6 +150,7 @@ fn fresh_obs(price: u128) -> Obs {
     Obs {
         ta: FIXTURE_NOW,
         tb: FIXTURE_NOW,
+        ai_risk: Some(0),
         ..obs(price, price)
     }
 }
@@ -625,6 +657,7 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
         tb: 1_793_541_547,
         ai_flag: AI_SILENT,
         ai_conf: 0,
+        ai_risk: None,
     };
     let longest_vault = "v".repeat(MAX_ACCOUNT_BYTES);
     let input_data = INPUT.replace(
@@ -642,6 +675,7 @@ fn a_decision_with_market_prices_stays_under_the_target_size() {
             chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
             resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
             m: Some(1),
+            note: None,
         },
     };
 
@@ -679,11 +713,13 @@ fn the_largest_decision_stays_under_the_target_size() {
             tb: FIXTURE_NOW,
             ai_flag: AI_CLEAR,
             ai_conf: 100,
+            ai_risk: Some(100),
         },
         ai_ref: AiRef {
             chat_id: "c".repeat(MAX_CHAT_ID_BYTES),
             resp_sig_hash: "d".repeat(HASH_HEX_BYTES),
             m: Some(1),
+            note: Some("n".repeat(advisor::MAX_NOTE_CHARS)),
         },
     };
 
@@ -768,7 +804,7 @@ fn a_run_answers_for_its_own_cycle() {
     assert_eq!(decision.chain, "testnet");
     assert_eq!(decision.wasm_hash, "bb");
     assert_eq!(decision.action, Action::BuyRisk);
-    assert_eq!(decision.commitment, KNOWN_COMMITMENT);
+    assert_eq!(decision.commitment, KNOWN_MANAGED_COMMITMENT);
     let expected = inputs_digest(INPUT, &fresh_obs(431_000_000), "");
     assert_eq!(decision.inputs_digest, expected);
 }
@@ -795,6 +831,7 @@ fn the_reference_of_a_reading_reaches_the_decision() {
             chat_id: "chat".into(),
             resp_sig_hash: "abc".into(),
             m: Some(0),
+            note: Some("Quiet news.".into()),
         },
     };
     let expected = inputs_digest(INPUT, &reading.obs, "abc");
@@ -825,14 +862,14 @@ fn secret_with_key(key: &str) -> String {
 
 fn answers_with_secret(secret: &str) -> bool {
     let decision = respond(INPUT, Some(secret), observed(431_000_000)).unwrap();
-    decision.commitment == KNOWN_COMMITMENT
+    decision.commitment == KNOWN_MANAGED_COMMITMENT
 }
 
 /// A prompt whose published params come to exactly `size` bytes.
 fn prompt_for_params_of(size: usize) -> String {
     let empty = Params {
         prompt: String::new(),
-        ..params()
+        ..managed()
     };
     "p".repeat(size - empty.canonical().len())
 }
@@ -841,7 +878,7 @@ fn prompt_for_params_of(size: usize) -> String {
 fn a_secret_without_a_key_still_answers() {
     let decision = respond(INPUT, Some(&secret_json()), observed(431_000_000)).unwrap();
 
-    assert_eq!(decision.commitment, KNOWN_COMMITMENT);
+    assert_eq!(decision.commitment, KNOWN_MANAGED_COMMITMENT);
 }
 
 #[test]
@@ -1016,7 +1053,7 @@ fn no_observation_holds_but_still_proves_the_secret() {
 
     assert_eq!(decision.action, Action::None);
     assert_eq!(decision.regime, Regime::Undetermined);
-    assert_eq!(decision.commitment, KNOWN_COMMITMENT);
+    assert_eq!(decision.commitment, KNOWN_MANAGED_COMMITMENT);
 }
 
 #[test]
@@ -1039,4 +1076,279 @@ fn input_of_another_version_is_refused() {
 #[test]
 fn broken_input_is_refused() {
     assert_eq!(respond("not json", None, |_, _| None), Err(BadInput));
+}
+
+// AI Risk Manager (SPEC §3.2): veto at 50, sell at 80 with confidence 70.
+
+#[test]
+fn a_low_risk_scales_a_buy_down() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 30, 90),
+    );
+
+    assert_eq!(verdict.action, Action::BuyRisk);
+    assert_eq!(verdict.amount_in, 700);
+}
+
+#[test]
+fn a_zero_risk_buys_the_full_size() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 0, 90),
+    );
+
+    assert_eq!(verdict.amount_in, 1_000);
+}
+
+#[test]
+fn a_risk_just_under_the_veto_still_buys_a_little() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 49, 90),
+    );
+
+    assert_eq!((verdict.action, verdict.amount_in), (Action::BuyRisk, 510));
+}
+
+#[test]
+fn a_risk_at_the_veto_holds_the_buy() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 50, 90),
+    );
+
+    assert_eq!(verdict.regime, Regime::RiskOn);
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_scaled_buy_never_passes_the_room() {
+    let mut input = input();
+    input.usdc_book = 300;
+
+    let verdict = decide(
+        &managed(),
+        &input,
+        &advised(431_000_000, 431_000_000, 10, 90),
+    );
+
+    assert!(verdict.amount_in <= 300, "{}", verdict.amount_in);
+}
+
+#[test]
+fn a_scaled_buy_of_a_huge_size_does_not_overflow() {
+    assert_eq!(
+        scaled_buy(u128::MAX, 1),
+        u128::MAX / 100 * 99 + u128::MAX % 100 * 99 / 100
+    );
+    assert_eq!(scaled_buy(u128::MAX, 0), u128::MAX);
+    assert_eq!(scaled_buy(1_000, 100), 0);
+}
+
+#[test]
+fn a_severe_confident_risk_sells_while_the_price_says_buy() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 85, 75),
+    );
+
+    assert_eq!(verdict.regime, Regime::RiskOn);
+    assert_eq!(verdict.action, Action::SellRisk);
+    assert_eq!(verdict.amount_in, 500);
+}
+
+#[test]
+fn a_severe_confident_risk_sells_between_the_thresholds() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(410_000_000, 410_000_000, 80, 70),
+    );
+
+    assert_eq!(verdict.regime, Regime::Undetermined);
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn a_severe_risk_without_confidence_does_not_sell() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 95, 69),
+    );
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_protective_sell_needs_the_sources_to_agree() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(300_000_000, 431_000_000, 95, 95),
+    );
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_protective_sell_needs_fresh_sources() {
+    let mut input = input_at(TIME_OF_OBS + MAX_SOURCE_AGE_SECONDS + 1);
+    input.wnear_book = 500;
+
+    let verdict = decide(
+        &managed(),
+        &input,
+        &advised(431_000_000, 431_000_000, 95, 95),
+    );
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_protective_sell_with_no_wnear_holds() {
+    let mut input = input();
+    input.wnear_book = 0;
+
+    let verdict = decide(
+        &managed(),
+        &input,
+        &advised(431_000_000, 431_000_000, 95, 95),
+    );
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_silent_advisor_never_sells_protectively() {
+    let silent = Obs {
+        ai_flag: AI_SILENT,
+        ai_conf: 100,
+        ai_risk: Some(100),
+        ..obs(431_000_000, 431_000_000)
+    };
+
+    let verdict = decide(&managed(), &input(), &silent);
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn an_answered_advisor_without_a_risk_never_buys() {
+    let verdict = decide(&managed(), &input(), &obs(431_000_000, 431_000_000));
+
+    assert_eq!(verdict.action, Action::None);
+}
+
+#[test]
+fn a_low_risk_cannot_stop_a_price_sell() {
+    let verdict = decide(
+        &managed(),
+        &input(),
+        &advised(390_000_000, 390_000_000, 0, 100),
+    );
+
+    assert_eq!(verdict.regime, Regime::RiskOff);
+    assert_eq!(verdict.action, Action::SellRisk);
+}
+
+#[test]
+fn an_unknown_flag_holds_even_with_a_severe_risk() {
+    let odd = Obs {
+        ai_flag: 3,
+        ..advised(431_000_000, 431_000_000, 100, 100)
+    };
+
+    assert_eq!(decide(&managed(), &input(), &odd).action, Action::None);
+}
+
+#[test]
+fn old_params_keep_the_tripwire_rule() {
+    let verdict = decide(
+        &params(),
+        &input(),
+        &advised(431_000_000, 431_000_000, 95, 95),
+    );
+
+    assert_eq!(verdict.action, Action::BuyRisk);
+    assert_eq!(verdict.amount_in, 1_000);
+}
+
+#[test]
+fn canonical_params_with_the_risk_manager_are_fixed_text() {
+    // Checked against Python: the managed commitment above is computed from these bytes.
+    let expected = r#"{"ai_exit_at":"80","ai_exit_conf":"70","ai_veto_at":"50","buy_usdc":"1000","prompt":"Classify the headlines.","risk_off_below":"400000000","risk_on_above":"420000000","sell_wnear":"2000","source_dev_bps":"100"}"#;
+
+    assert_eq!(managed().canonical(), expected);
+    assert_eq!(serde_json::from_str::<Params>(expected).unwrap(), managed());
+}
+
+#[test]
+fn canonical_obs_with_a_risk_are_fixed_text() {
+    let expected = r#"{"ai_conf":75,"ai_flag":0,"ai_risk":85,"pa":"430000000","pb":"431000000","ta":11,"tb":12}"#;
+
+    assert_eq!(
+        advised(430_000_000, 431_000_000, 85, 75).canonical(),
+        expected
+    );
+}
+
+#[test]
+fn a_decision_made_before_the_risk_manager_still_reads() {
+    let old = r#"{"pa":"1","pb":"1","ta":1,"tb":1,"ai_flag":1,"ai_conf":70}"#;
+
+    let obs: Obs = serde_json::from_str(old).unwrap();
+
+    assert_eq!(obs.ai_risk, None);
+    assert!(!obs.canonical().contains("ai_risk"));
+}
+
+#[test]
+fn a_secret_without_the_risk_manager_is_refused() {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    for field in ["ai_veto_at", "ai_exit_at", "ai_exit_conf"] {
+        secret["params"].as_object_mut().unwrap().remove(field);
+    }
+
+    let decision = respond(INPUT, Some(&secret.to_string()), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, "");
+}
+
+#[test]
+fn a_secret_with_only_some_risk_thresholds_is_refused() {
+    let mut secret: serde_json::Value = serde_json::from_str(&secret_json()).unwrap();
+    secret["params"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ai_exit_conf");
+
+    let decision = respond(INPUT, Some(&secret.to_string()), observed(431_000_000)).unwrap();
+
+    assert_eq!(decision.commitment, "");
+}
+
+#[test]
+fn risk_thresholds_out_of_range_are_refused() {
+    refuses_param("ai_veto_at", "0");
+    refuses_param("ai_exit_at", "0");
+    refuses_param("ai_veto_at", "101");
+    refuses_param("ai_exit_conf", "101");
+    refuses_param("ai_exit_at", "40");
+    refuses_param("ai_veto_at", "x");
+}
+
+#[test]
+fn an_exit_at_the_veto_is_allowed() {
+    let secret = secret_with_param("ai_exit_at", "50");
+
+    let decision = respond(INPUT, Some(&secret), observed(431_000_000)).unwrap();
+
+    assert_ne!(decision.commitment, "");
 }

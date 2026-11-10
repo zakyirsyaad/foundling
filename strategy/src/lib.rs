@@ -17,6 +17,8 @@ const MAX_PARAMS_BYTES: usize = 8 * 1024;
 const MAX_KEY_BYTES: usize = 256;
 /// Older than this, a source counts as dead. A quiet market can go two minutes without a trade.
 const MAX_SOURCE_AGE_SECONDS: u64 = 300;
+/// The top of the AI Risk Manager's `risk` and `confidence` scales.
+pub const MAX_PERCENT: u8 = 100;
 #[cfg(feature = "rehearsal")]
 const REHEARSAL_CHAIN: &str = "testnet";
 
@@ -32,6 +34,24 @@ pub mod sources;
 
 pub use advisor::Observed;
 pub use sizing::Limits;
+
+/// An optional percentage (0 to 100) as a decimal string, like every number in `Params`.
+pub(crate) mod opt_percent {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(value) => serializer.serialize_str(&value.to_string()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u8>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|text| text.parse().map_err(serde::de::Error::custom))
+            .transpose()
+    }
+}
 
 /// u128 as a decimal string, the only safe form for JSON readers.
 pub(crate) mod decimal {
@@ -63,6 +83,23 @@ pub struct Params {
     pub sell_wnear: u128,
     /// Sealed with the numbers: a prompt compiled into a public WASM would be no secret.
     pub prompt: String,
+    /// The AI Risk Manager's thresholds (SPEC §3.2), all three or none. Params without them
+    /// are from vaults born before it: replay runs their earlier tripwire rule, and the
+    /// binary refuses them as a new secret.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_percent")]
+    pub ai_veto_at: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_percent")]
+    pub ai_exit_at: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_percent")]
+    pub ai_exit_conf: Option<u8>,
+}
+
+/// When the AI Risk Manager vetoes a buy, and when it sells to USDC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RiskLimits {
+    pub veto_at: u8,
+    pub exit_at: u8,
+    pub exit_conf: u8,
 }
 
 // Canonical forms are fixed text, not serde output: any crate in a build can switch on
@@ -72,8 +109,18 @@ pub struct Params {
 // where that escaping is byte for byte Python's `json.dumps`.
 impl Params {
     pub fn canonical(&self) -> String {
+        // Keys stay sorted, and the `ai_*` keys sort first; params without them keep the
+        // exact bytes they were committed with.
+        let ai: String = [
+            ("ai_exit_at", self.ai_exit_at),
+            ("ai_exit_conf", self.ai_exit_conf),
+            ("ai_veto_at", self.ai_veto_at),
+        ]
+        .iter()
+        .filter_map(|(key, value)| value.map(|value| format!(r#""{key}":"{value}","#)))
+        .collect();
         format!(
-            r#"{{"buy_usdc":"{}","prompt":{},"risk_off_below":"{}","risk_on_above":"{}","sell_wnear":"{}","source_dev_bps":"{}"}}"#,
+            r#"{{{ai}"buy_usdc":"{}","prompt":{},"risk_off_below":"{}","risk_on_above":"{}","sell_wnear":"{}","source_dev_bps":"{}"}}"#,
             self.buy_usdc,
             serde_json::Value::from(self.prompt.as_str()),
             self.risk_off_below,
@@ -85,8 +132,33 @@ impl Params {
 
     /// The secret cannot be changed once its owner's keys are gone, so a bad set is
     /// refused here and the vault ends the cycle.
+    pub fn risk_limits(&self) -> Option<RiskLimits> {
+        Some(RiskLimits {
+            veto_at: self.ai_veto_at?,
+            exit_at: self.ai_exit_at?,
+            exit_conf: self.ai_exit_conf?,
+        })
+    }
+
+    /// All three thresholds or none; a veto at 0 would never buy and an exit at 0 would
+    /// always sell, and an exit below the veto would sell on a risk too small to stop a buy.
+    fn risk_limits_are_sound(&self) -> bool {
+        let given = [self.ai_veto_at, self.ai_exit_at, self.ai_exit_conf];
+        if given.iter().all(Option::is_none) {
+            return true;
+        }
+        let Some(limits) = self.risk_limits() else {
+            return false;
+        };
+        (1..=MAX_PERCENT).contains(&limits.veto_at)
+            && (1..=MAX_PERCENT).contains(&limits.exit_at)
+            && limits.exit_conf <= MAX_PERCENT
+            && limits.veto_at <= limits.exit_at
+    }
+
     fn is_sound(&self) -> bool {
-        self.risk_off_below < self.risk_on_above
+        self.risk_limits_are_sound()
+            && self.risk_off_below < self.risk_on_above
             && self.buy_usdc > 0
             && self.sell_wnear > 0
             && (1..=BPS).contains(&self.source_dev_bps)
@@ -135,6 +207,10 @@ pub struct Obs {
     pub tb: u64,
     pub ai_flag: u8,
     pub ai_conf: u8,
+    /// The AI Risk Manager's score, 0 to 100; absent while the advisor is silent and in
+    /// Decisions made before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_risk: Option<u8>,
 }
 
 impl Obs {
@@ -147,12 +223,18 @@ impl Obs {
             tb: 0,
             ai_flag: AI_SILENT,
             ai_conf: 0,
+            ai_risk: None,
         }
     }
 
+    /// Decisions made before the AI Risk Manager have no `ai_risk`, and keep their digest.
     pub fn canonical(&self) -> String {
+        let risk = self
+            .ai_risk
+            .map(|risk| format!(r#""ai_risk":{risk},"#))
+            .unwrap_or_default();
         format!(
-            r#"{{"ai_conf":{},"ai_flag":{},"pa":"{}","pb":"{}","ta":{},"tb":{}}}"#,
+            r#"{{"ai_conf":{},"ai_flag":{},{risk}"pa":"{}","pb":"{}","ta":{},"tb":{}}}"#,
             self.ai_conf, self.ai_flag, self.pa, self.pb, self.ta, self.tb,
         )
     }
@@ -207,6 +289,10 @@ pub struct AiRef {
     /// names and its signature endpoint asks for. Absent while the advisor is silent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub m: Option<u8>,
+    /// The AI Risk Manager's one-sentence reason, cleaned to safe ASCII
+    /// (`advisor::clean_note`). The rule never reads it; `resp_sig_hash` covers the raw text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -234,6 +320,69 @@ pub struct BadInput;
 /// A failure of any input is a hold, never a sell: otherwise whoever can make the two
 /// sources disagree could force churn that burns slippage every window.
 pub fn decide(params: &Params, input: &Input, obs: &Obs) -> Verdict {
+    match params.risk_limits() {
+        Some(limits) => decide_managed(params, limits, input, obs),
+        None => decide_tripwire(params, input, obs),
+    }
+}
+
+/// The AI Risk Manager (SPEC §3.2). The AI can only lower exposure: it scales a buy down,
+/// vetoes it, or sells to USDC on a severe and confident risk. It never starts or enlarges a
+/// buy, and a silent advisor never sells.
+fn decide_managed(params: &Params, limits: RiskLimits, input: &Input, obs: &Obs) -> Verdict {
+    let regime = regime_of(params, input.now, obs);
+    let risk = obs.ai_risk.filter(|_| obs.ai_flag == AI_CLEAR);
+    let severe = risk.is_some_and(|risk| risk >= limits.exit_at) && obs.ai_conf >= limits.exit_conf;
+    if severe && sources_agree(obs, input.now, params.source_dev_bps) {
+        return trade(
+            regime,
+            Action::SellRisk,
+            params.sell_wnear.min(sizing::sell_room(input)),
+            obs.pb,
+        );
+    }
+    match (regime, risk) {
+        (Regime::RiskOn, Some(risk)) if risk < limits.veto_at => {
+            let wanted = scaled_buy(params.buy_usdc, risk);
+            trade(
+                regime,
+                Action::BuyRisk,
+                wanted.min(sizing::buy_room(input, obs.pb)),
+                obs.pb,
+            )
+        }
+        (Regime::RiskOff, _) => trade(
+            regime,
+            Action::SellRisk,
+            params.sell_wnear.min(sizing::sell_room(input)),
+            obs.pb,
+        ),
+        _ => hold(regime, obs.pb),
+    }
+}
+
+/// `buy_usdc · (100 − risk) / 100`, rounded down, without overflowing a large `buy_usdc`.
+fn scaled_buy(buy_usdc: u128, risk: u8) -> u128 {
+    let kept = u128::from(MAX_PERCENT.saturating_sub(risk));
+    let whole = u128::from(MAX_PERCENT);
+    buy_usdc / whole * kept + buy_usdc % whole * kept / whole
+}
+
+fn trade(regime: Regime, action: Action, amount_in: u128, ref_price: u128) -> Verdict {
+    if amount_in == 0 {
+        return hold(regime, ref_price);
+    }
+    Verdict {
+        regime,
+        action,
+        amount_in,
+        ref_price,
+    }
+}
+
+/// The rule of vaults born before the AI Risk Manager, kept so their decisions replay: a
+/// buy needs `ai_flag` clear, and nothing else from the AI counts.
+fn decide_tripwire(params: &Params, input: &Input, obs: &Obs) -> Verdict {
     let regime = regime_of(params, input.now, obs);
     let (action, wanted, room) = match regime {
         Regime::RiskOn if obs.ai_flag == AI_CLEAR => (
@@ -351,7 +500,11 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
 
 fn open_secret(raw: &str) -> Option<(Secret, Vec<u8>)> {
     let secret: Secret = serde_json::from_str(raw).ok()?;
-    if !secret.params.is_sound() || !secret.ai_key.as_deref().is_none_or(is_sendable_key) {
+    // This binary asks the advisor for a risk score, which only the AI Risk Manager reads.
+    if !secret.params.is_sound()
+        || secret.params.risk_limits().is_none()
+        || !secret.ai_key.as_deref().is_none_or(is_sendable_key)
+    {
         return None;
     }
     let salt = from_hex(&secret.salt).filter(|salt| salt.len() == SALT_BYTES)?;
