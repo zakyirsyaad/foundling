@@ -51,8 +51,6 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
         persistPending(session(), { path, hashes });
         dispatch({ type: "sent", hashes });
         dispatch({ type: "settled", partial: out.some((o) => o.refunded) ? "refunded" : partial?.() });
-        // Settled: nothing is left to resume, so a later reload starts clean.
-        takePending(session(), path);
       } catch (err) {
         takePending(session(), window.location.pathname);
         if (err instanceof WalletCancelled) dispatch({ type: "cancelled" });
