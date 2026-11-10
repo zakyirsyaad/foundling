@@ -2,7 +2,7 @@
 
 Dokumen ini dan `docs/SPEC.md` adalah sumber kebenaran proyek. Rencana ada di sini, detail produk ada di SPEC.
 
-Tim: lead dan partner. Partner membantu lead. Tenggat submit 15 Nov 06:59 WIB, target kirim 13 Nov.
+Tim: lead dan partner. Partner membantu lead. Tenggat submit 15 Nov 06:59 WIB, target kirim 14 Nov (digeser dari 13 Nov oleh AI Risk Manager, keputusan lead 2026-11-11).
 
 ## Pembagian per fitur
 
@@ -32,9 +32,9 @@ Pemilik fitur menulis kode dan tesnya sendiri.
 | 3 | Vault dasar lulus tes di sandbox atau testnet: deposit, redeem, cap, freeze (sudah lulus di testnet) | Lead | 4 Nov |
 | 4 | `selftest` dan satu siklus penuh di testnet pada vault latihan, lalu `redeem` (sudah lulus di testnet lewat skrip; bot keeper belum) | Lead, bot dari partner | 6 Nov |
 | 5 | Jalur macet dan pulih selesai (sudah lulus di testnet lewat Ref mock), deposit publik (sudah di-merge, PR #29), Attack Lab lulus (15 dari 15 PASS, PR #71), soak semalam lulus (soak 2 jam diterima lead 2026-11-09: vault uji `adv2`, 24 siklus `Hold(NO_DECISION)`, 0 panggilan gagal; vault kosong dan tripwire AI menahan beli karena berita peretasan Binance), kontrak beku (2026-11-10, setelah SP1a lulus di mainnet: biner vault `9ab6b6d6…` dari commit `8234c14`, RUNBOOK §10); vault final di mainnet (keputusan lead 2026-11-03) | Lead, Partner | 9 Nov |
-| 6 | Cadangan kunci diuji; vault final lahir tanpa kunci di mainnet, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 11 Nov |
-| 7 | `reveal` (kontraknya sudah lulus di testnet) dan replay lulus di mainnet, `verify.py` lulus | Lead, Partner | 12 Nov |
-| 8 | LICENSE, video, README, post X (wajib tag @NEARProtocol dan #NEARHackathon), repo publik, submit oleh lead | Partner, Lead | 13 Nov |
+| 6 | AI Risk Manager (SPEC §3.2) lulus tes strategi dan satu latihan di vault testnet; `verify.py` me-replay aturan baru; cadangan kunci diuji; vault final lahir tanpa kunci di mainnet, satu siklus dan satu `redeem`; partner mendemokan `freeze` | Lead, Partner | 12 Nov |
+| 7 | `reveal` (kontraknya sudah lulus di testnet) dan replay lulus di mainnet, `verify.py` lulus | Lead, Partner | 13 Nov |
+| 8 | LICENSE, video, README, post X (wajib tag @NEARProtocol dan #NEARHackathon), repo publik, submit oleh lead | Partner, Lead | 14 Nov |
 
 Bot keeper, halaman bukti, dan kredit NEAR AI dijaga hidup sampai penjurian selesai 18 Nov. Bila bot berjalan di Mac, Mac harus tersambung listrik.
 

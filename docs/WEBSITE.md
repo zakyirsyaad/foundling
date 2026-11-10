@@ -416,14 +416,14 @@ Satu alert dari luar VPS memantau heartbeat worker dan saldo keeper, karena 16 s
 | W5 | Lead dan partner menyelesaikan deposit, batal, `redeem`, klaim, dan `advance` lewat website | 8 Nov |
 | W6 | Antrean bukti berjalan: bundel disimpan, `pass`, `skip`, `fail` tampil, dan verifikasi ulang setelah `reveal` lulus uji | 9 Nov |
 | W7 | Deposit dari chain lain lulus di E2E dengan respons asli dari SP4 untuk setiap chain asal, dan tes kontrak API lulus terhadap kuotasi `dry: true` sungguhan | 10 Nov |
-| W8 | Tampilan final, responsif, aksesibel, semua state ada, dan review keamanan selesai | 12 Nov |
+| W8 | Tampilan final, responsif, aksesibel, semua state ada, review keamanan selesai, dan kartu siklus menampilkan skor dan alasan AI Risk Manager | 13 Nov |
 | W9 | Website publik membaca vault final di mainnet, alert dan runbook siap | VPS 11 Nov, website 12 Nov |
 
 **SP4.** SP4 tidak butuh vault atau website, jadi dijalankan sebagai skrip terpisah segera setelah testnet selesai, sebelum vault final, atas persetujuan lead. Isinya deposit USDC Base ke akun NEAR dan satu kurang bayar di bawah `minAmountIn` yang dikembalikan, sekitar US$5 ditambah gas. Responsnya disimpan sebagai fixture W7. W7 bisa dibangun lebih dulu dengan respons tiruan, tapi baru selesai setelah fixture SP4 ada. Arbitrum dan Ethereum masing-masing butuh satu deposit kecil sekitar 1 sampai 2 USDC ditambah gas, dan gas Ethereum bisa beberapa dolar. Keduanya juga atas persetujuan lead, per chain. Chain yang belum lulus tidak tampil.
 
 Pekerjaan chain di PLAN didahulukan bila bentrok, dan target kontrak beku tidak bergeser.
 
-Target ditarik mundur dari tanggal di PLAN: kontrak beku 9 Nov, vault final 11 Nov, `reveal` 12 Nov, kirim 13 Nov. W2 dan W3 lebih dulu karena W5 dan W6 butuh vault uji yang hidup. W7 jatuh di antara kontrak beku dan vault final, sesuai SP4 di atas. Worker sudah hidup di VPS sebelum siklus pertama vault final (§5), jadi bagian VPS di W9 jatuh pada hari vault final lahir. Target ini adalah tenggat per milestone, bukan jadwal harian.
+Target ditarik mundur dari tanggal di PLAN: kontrak beku 10 Nov, vault final 12 Nov, `reveal` 13 Nov, kirim 14 Nov (digeser oleh AI Risk Manager, keputusan lead 2026-11-11). W2 dan W3 lebih dulu karena W5 dan W6 butuh vault uji yang hidup. W7 jatuh di antara kontrak beku dan vault final, sesuai SP4 di atas. Worker sudah hidup di VPS sebelum siklus pertama vault final (§5), jadi bagian VPS di W9 jatuh pada hari vault final lahir. Target ini adalah tenggat per milestone, bukan jadwal harian.
 
 **Lantai aman.** `/proof` statis dari W1 adalah pengganti halaman bukti yang pindah dari partner, jadi proyek tidak pernah sampai submit tanpa halaman bukti.
 
