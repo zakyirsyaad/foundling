@@ -13,7 +13,7 @@ vi.mock("@/config", async () => {
 const { wallet, extra, api } = vi.hoisted(() => ({
   wallet: { account: "alice.near" as string | null },
   extra: {} as Record<string, unknown>,
-  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, submitted: [] as string[] },
+  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, submitted: [] as string[], submitFails: false },
 }));
 vi.mock("@/lib/wallet/WalletProvider", () => ({ useWallet: () => ({ wallet: null, account: wallet.account }) }));
 
@@ -28,7 +28,7 @@ vi.mock("@/lib/crosschain/client", () => ({
     tokens: async () => (api.down ? Promise.reject(new Error("down")) : [{ assetId: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", contractAddress: "0x8335" }]),
     quote: async (req: Record<string, unknown>) => (await import("../mock-server/oneclick")).quote({ extra }, req),
     status: async () => (api.status ? { status: api.status.status, raw: api.status } : "not-found"),
-    submit: async (h: string) => void api.submitted.push(h),
+    submit: async (h: string) => (api.submitFails ? Promise.reject(new Error("1Click is down")) : void api.submitted.push(h)),
   }),
 }));
 
@@ -43,6 +43,7 @@ beforeEach(() => {
   api.down = false;
   api.status = null;
   api.submitted = [];
+  api.submitFails = false;
   wallet.account = "alice.near";
   window.localStorage.clear();
 });
@@ -241,4 +242,48 @@ test("the prepare step states the NEAR the registrations need", async () => {
   await renderCard({ ...pos, balances: { ...pos.balances, near: 0n } });
   await fillAndQuote();
   expect(await screen.findByTestId("near-need")).toHaveTextContent(/more NEAR/);
+});
+
+async function toAddress() {
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  await screen.findByTestId("deposit-address");
+  return user;
+}
+const stored = () => JSON.parse(window.localStorage.getItem("foundling.swaps.v1:mainnet:foundling-vault.near") ?? "[]") as { txHashes: string[] }[];
+
+test("an amount 1Click reports in a form this page cannot read does not break the card", async () => {
+  await toAddress();
+  api.status = { status: "SUCCESS", swapDetails: { amountOut: "4.9998" } };
+  expect(await screen.findByText(/could not read the amount that arrived/, {}, { timeout: 4000 })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Deposit / })).toBeNull();
+});
+test("a refunded amount that cannot be read is left out, not a crash", async () => {
+  await toAddress();
+  api.status = { status: "REFUNDED", swapDetails: { refundedAmount: "abc" } };
+  expect(await screen.findByText(/refunded the swap to/, {}, { timeout: 4000 })).not.toHaveTextContent("abc");
+});
+test("a tx hash 1Click does not take says so", async () => {
+  const user = await toAddress();
+  api.submitFails = true;
+  await user.type(screen.getByLabelText(/Origin tx hash/), "0xtx");
+  await user.click(screen.getByRole("button", { name: "Submit tx hash" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("1Click did not take the tx hash: 1Click is down");
+  expect(stored()[0]?.txHashes).toEqual([]);
+});
+test("a second tx hash is kept next to the first", async () => {
+  const user = await toAddress();
+  const field = screen.getByLabelText(/Origin tx hash/);
+  await user.type(field, "0xone");
+  await user.click(screen.getByRole("button", { name: "Submit tx hash" }));
+  await user.clear(field);
+  await user.type(field, "0xtwo");
+  await user.click(screen.getByRole("button", { name: "Submit tx hash" }));
+  await waitFor(() => expect(stored()[0]?.txHashes).toEqual(["0xone", "0xtwo"]));
+});
+test("the live swap alone shows no earlier-swaps list", async () => {
+  await toAddress();
+  expect(screen.queryByRole("list", { name: "Earlier swaps" })).toBeNull();
 });

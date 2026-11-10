@@ -35,3 +35,11 @@ test("submit sends the tx hash and deposit address; tokens returns the list", as
   expect(calls[0]).toEqual({ url: "https://1c.example/v0/deposit/submit", body: { txHash: "0xhash", depositAddress: "0xdeposit" } });
   expect(await c.tokens()).toEqual([{ assetId: "a" }]);
 });
+test("only status reads a 404 as an answer; tokens, quote and submit fail", async () => {
+  const { f } = fake(() => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }));
+  const c = createOneClick("https://1c.example", f);
+  await expect(c.tokens()).rejects.toEqual(new OneClickUnavailable("Not Found"));
+  await expect(c.quote({} as never)).rejects.toBeInstanceOf(OneClickUnavailable);
+  await expect(c.submit("0xh", "0xd")).rejects.toBeInstanceOf(OneClickUnavailable);
+  expect(await c.status("0xd")).toBe("not-found");
+});
