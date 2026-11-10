@@ -2,7 +2,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::advisor::{
-    observe, read_advice, read_titles, Advice, MAX_TITLES, MAX_TITLE_CHARS, MODELS,
+    clean_note, market_line, observe, read_advice, read_ticker, read_titles, Advice,
+    MAX_NOTE_CHARS, MAX_TITLES, MAX_TITLE_CHARS, MODELS,
 };
 use super::sources::Call;
 use super::*;
@@ -40,7 +41,7 @@ fn advice_of(reply: &[u8]) -> Option<Advice> {
 }
 
 fn answer_of(content: &str) -> Option<(u8, u8)> {
-    advice_of(&chat_reply(content)).map(|advice| (advice.ai_flag, advice.ai_conf))
+    advice_of(&chat_reply(content)).map(|advice| (advice.ai_risk, advice.ai_conf))
 }
 
 fn secret(ai_key: Option<&str>) -> Secret {
@@ -55,6 +56,9 @@ fn secret(ai_key: Option<&str>) -> Secret {
             buy_usdc: 1_000,
             sell_wnear: 2_000,
             prompt: PROMPT.into(),
+            ai_veto_at: Some(50),
+            ai_exit_at: Some(80),
+            ai_exit_conf: Some(70),
         },
         ai_key: ai_key.map(Into::into),
         #[cfg(feature = "rehearsal")]
@@ -101,7 +105,7 @@ fn world(broken: &'static [&'static str]) -> impl FnMut(&Call) -> Option<Vec<u8>
                 Some(reply_from(
                     model,
                     CHAT_ID,
-                    r#"{"risk_flag":true,"confidence":80}"#,
+                    r#"{"risk":85,"confidence":80,"note":"Exploit reported."}"#,
                     "stop",
                 ))
             }
@@ -197,26 +201,26 @@ fn the_length_of_a_title_is_capped() {
 }
 
 #[test]
-fn a_clear_answer_gives_a_clear_flag() {
+fn a_low_risk_answer_is_read() {
     assert_eq!(
-        answer_of(r#"{"risk_flag":false,"confidence":90}"#),
-        Some((AI_CLEAR, 90))
+        answer_of(r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#),
+        Some((10, 90))
     );
 }
 
 #[test]
-fn a_raised_flag_gives_a_raised_flag() {
+fn a_high_risk_answer_is_read() {
     assert_eq!(
-        answer_of(r#"{"risk_flag":true,"confidence":70}"#),
-        Some((AI_FLAGGED, 70))
+        answer_of(r#"{"risk":85,"confidence":70,"note":"Exploit reported."}"#),
+        Some((85, 70))
     );
 }
 
 #[test]
 fn spaces_around_the_answer_are_fine() {
     assert_eq!(
-        answer_of(" {\"risk_flag\":false,\"confidence\":1}\n"),
-        Some((AI_CLEAR, 1))
+        answer_of(" {\"risk\":10,\"confidence\":1,\"note\":\"Quiet news.\"}\n"),
+        Some((10, 1))
     );
 }
 
@@ -230,23 +234,25 @@ fn prose_is_not_an_answer() {
 #[test]
 fn an_answer_in_a_json_fence_is_an_answer() {
     assert_eq!(
-        answer_of("```json\n{\"risk_flag\":false,\"confidence\":90}\n```"),
-        Some((AI_CLEAR, 90))
+        answer_of("```json\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\"}\n```"),
+        Some((10, 90))
     );
 }
 
 #[test]
 fn an_answer_in_a_bare_fence_is_an_answer() {
     assert_eq!(
-        answer_of(" ```\n{\"risk_flag\":true,\"confidence\":55}\n```\n"),
-        Some((AI_FLAGGED, 55))
+        answer_of(" ```\n{\"risk\":85,\"confidence\":55,\"note\":\"Exploit reported.\"}\n```\n"),
+        Some((85, 55))
     );
 }
 
 #[test]
 fn text_around_a_fence_is_not_an_answer() {
     assert_eq!(
-        answer_of("Here it is:\n```json\n{\"risk_flag\":false,\"confidence\":90}\n```"),
+        answer_of(
+            "Here it is:\n```json\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\"}\n```"
+        ),
         None
     );
 }
@@ -254,7 +260,7 @@ fn text_around_a_fence_is_not_an_answer() {
 #[test]
 fn a_fence_that_is_never_closed_is_not_an_answer() {
     assert_eq!(
-        answer_of("```json\n{\"risk_flag\":false,\"confidence\":90}"),
+        answer_of("```json\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\"}"),
         None
     );
 }
@@ -262,7 +268,7 @@ fn a_fence_that_is_never_closed_is_not_an_answer() {
 #[test]
 fn a_fence_for_another_language_is_not_an_answer() {
     assert_eq!(
-        answer_of("```python\n{\"risk_flag\":false,\"confidence\":90}\n```"),
+        answer_of("```python\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\"}\n```"),
         None
     );
 }
@@ -270,7 +276,9 @@ fn a_fence_for_another_language_is_not_an_answer() {
 #[test]
 fn a_fenced_answer_with_extra_fields_is_not_an_answer() {
     assert_eq!(
-        answer_of("```json\n{\"risk_flag\":false,\"confidence\":90,\"why\":\"x\"}\n```"),
+        answer_of(
+            "```json\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\",\"why\":\"x\"}\n```"
+        ),
         None
     );
 }
@@ -278,7 +286,9 @@ fn a_fenced_answer_with_extra_fields_is_not_an_answer() {
 #[test]
 fn two_fences_are_not_an_answer() {
     assert_eq!(
-        answer_of("```json\n```json\n{\"risk_flag\":false,\"confidence\":90}\n```\n```"),
+        answer_of(
+            "```json\n```json\n{\"risk\":10,\"confidence\":90,\"note\":\"Quiet news.\"}\n```\n```"
+        ),
         None
     );
 }
@@ -286,40 +296,81 @@ fn two_fences_are_not_an_answer() {
 #[test]
 fn an_answer_with_extra_fields_is_not_an_answer() {
     assert_eq!(
-        answer_of(r#"{"risk_flag":false,"confidence":90,"action":"buy"}"#),
+        answer_of(r#"{"risk":10,"confidence":90,"note":"Quiet news.","action":"buy"}"#),
         None
     );
 }
 
 #[test]
-fn an_answer_without_a_flag_is_not_an_answer() {
-    assert_eq!(answer_of(r#"{"confidence":90}"#), None);
+fn an_answer_without_a_risk_is_not_an_answer() {
+    assert_eq!(answer_of(r#"{"confidence":90,"note":"x"}"#), None);
+}
+
+#[test]
+fn an_answer_without_a_note_is_not_an_answer() {
+    assert_eq!(answer_of(r#"{"risk":10,"confidence":90}"#), None);
+}
+
+#[test]
+fn the_old_flag_answer_is_not_an_answer() {
+    assert_eq!(answer_of(r#"{"risk_flag":false,"confidence":90}"#), None);
+}
+
+#[test]
+fn a_risk_past_a_hundred_is_not_an_answer() {
+    assert_eq!(
+        answer_of(r#"{"risk":101,"confidence":90,"note":"x"}"#),
+        None
+    );
 }
 
 #[test]
 fn a_confidence_past_a_hundred_is_not_an_answer() {
-    assert_eq!(answer_of(r#"{"risk_flag":false,"confidence":101}"#), None);
-}
-
-#[test]
-fn a_confidence_outside_the_type_is_not_an_answer() {
-    assert_eq!(answer_of(r#"{"risk_flag":false,"confidence":0.9}"#), None);
-    assert_eq!(answer_of(r#"{"risk_flag":false,"confidence":-1}"#), None);
     assert_eq!(
-        answer_of(r#"{"risk_flag":false,"confidence":"high"}"#),
+        answer_of(r#"{"risk":10,"confidence":101,"note":"Quiet news."}"#),
         None
     );
 }
 
 #[test]
-fn a_flag_that_is_not_a_boolean_is_not_an_answer() {
-    assert_eq!(answer_of(r#"{"risk_flag":"false","confidence":90}"#), None);
-    assert_eq!(answer_of(r#"{"risk_flag":0,"confidence":90}"#), None);
+fn a_confidence_outside_the_type_is_not_an_answer() {
+    assert_eq!(
+        answer_of(r#"{"risk":10,"confidence":0.9,"note":"Quiet news."}"#),
+        None
+    );
+    assert_eq!(
+        answer_of(r#"{"risk":10,"confidence":-1,"note":"Quiet news."}"#),
+        None
+    );
+    assert_eq!(
+        answer_of(r#"{"risk":10,"confidence":"high","note":"Quiet news."}"#),
+        None
+    );
+}
+
+#[test]
+fn a_risk_that_is_not_a_whole_number_is_not_an_answer() {
+    assert_eq!(
+        answer_of(r#"{"risk":"10","confidence":90,"note":"x"}"#),
+        None
+    );
+    assert_eq!(
+        answer_of(r#"{"risk":true,"confidence":90,"note":"x"}"#),
+        None
+    );
+    assert_eq!(
+        answer_of(r#"{"risk":10.5,"confidence":90,"note":"x"}"#),
+        None
+    );
 }
 
 #[test]
 fn a_cut_off_answer_is_not_an_answer() {
-    let reply = reply_with(CHAT_ID, r#"{"risk_flag":false,"confidence":90}"#, "length");
+    let reply = reply_with(
+        CHAT_ID,
+        r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#,
+        "length",
+    );
 
     assert!(advice_of(&reply).is_none());
 }
@@ -333,7 +384,7 @@ fn a_reply_without_a_choice_is_not_an_answer() {
 
 #[test]
 fn a_reply_with_two_choices_is_not_an_answer() {
-    let choice = json!({"finish_reason": "stop", "message": {"content": r#"{"risk_flag":false,"confidence":90}"#}});
+    let choice = json!({"finish_reason": "stop", "message": {"content": r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#}});
     let reply = json!({"id": CHAT_ID, "choices": [choice, choice]}).to_string();
 
     assert!(advice_of(reply.as_bytes()).is_none());
@@ -348,7 +399,7 @@ fn an_api_error_is_not_an_answer() {
 fn a_chat_id_that_could_swell_the_decision_is_refused() {
     let reply = reply_with(
         &"a".repeat(65),
-        r#"{"risk_flag":false,"confidence":90}"#,
+        r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#,
         "stop",
     );
 
@@ -357,21 +408,29 @@ fn a_chat_id_that_could_swell_the_decision_is_refused() {
 
 #[test]
 fn a_chat_id_with_odd_characters_is_refused() {
-    let reply = reply_with("chat\"id", r#"{"risk_flag":false,"confidence":90}"#, "stop");
+    let reply = reply_with(
+        "chat\"id",
+        r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#,
+        "stop",
+    );
 
     assert!(advice_of(&reply).is_none());
 }
 
 #[test]
 fn an_empty_chat_id_is_refused() {
-    let reply = reply_with("", r#"{"risk_flag":false,"confidence":90}"#, "stop");
+    let reply = reply_with(
+        "",
+        r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#,
+        "stop",
+    );
 
     assert!(advice_of(&reply).is_none());
 }
 
 #[test]
 fn the_reference_points_at_the_signed_reply() {
-    let reply = chat_reply(r#"{"risk_flag":false,"confidence":90}"#);
+    let reply = chat_reply(r#"{"risk":10,"confidence":90,"note":"Quiet news."}"#);
     let expected: String = Sha256::digest(&reply)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -387,7 +446,8 @@ fn the_reference_points_at_the_signed_reply() {
 fn the_advice_lands_in_the_reading() {
     let reading = observe(&secret(Some(KEY)), NONCE, world(&[])).unwrap();
 
-    assert_eq!(reading.obs.ai_flag, AI_FLAGGED);
+    assert_eq!(reading.obs.ai_flag, AI_CLEAR);
+    assert_eq!(reading.obs.ai_risk, Some(85));
     assert_eq!(reading.obs.ai_conf, 80);
     assert_eq!(reading.ai_ref.chat_id, CHAT_ID);
     assert_eq!(reading.obs.pb, 390_000_000);
@@ -437,7 +497,7 @@ fn the_second_model_answers_when_the_first_is_gone() {
 
     let reading = observe(&secret(Some(KEY)), NONCE, world(&FIRST)).unwrap();
 
-    assert_eq!(reading.obs.ai_flag, AI_FLAGGED);
+    assert_eq!(reading.obs.ai_risk, Some(85));
 }
 
 #[test]
@@ -488,14 +548,14 @@ fn the_sealed_prompt_is_the_system_message() {
 }
 
 #[test]
-fn the_headlines_are_the_user_message() {
+fn the_headlines_and_the_market_are_the_user_message() {
     let (_, body) = chat_call_of(KEY);
 
     assert_eq!(body["messages"][1]["role"], "user");
     assert_eq!(
         body["messages"][1]["content"],
         format!(
-            "First headline\nSecond headline\n\nref:{}",
+            "First headline\nSecond headline\n\nMarket: NEAR/USD Rhea pool 3.9000, Kraken 3.9000\n\nref:{}",
             tag_of(SALT_HEX, NONCE)
         )
     );
@@ -658,59 +718,26 @@ fn cdata_with_space_around_it_is_unwrapped() {
 }
 
 #[test]
-fn a_flag_from_the_advisor_blocks_a_buy_at_the_end() {
-    let mut flagged = Obs {
+fn a_risk_from_the_advisor_vetoes_a_buy_at_the_end() {
+    let mut reading = Obs {
         pa: 430_000_000,
         pb: 430_000_000,
         ta: 1,
         tb: 1,
         ai_flag: AI_CLEAR,
         ai_conf: 90,
+        ai_risk: Some(10),
     };
     let params = secret(None).params;
     let input = Input {
         now: 1,
         ..serde_json::from_str(include_str!("../fixtures/input.json")).unwrap()
     };
-    assert_eq!(decide(&params, &input, &flagged).action, Action::BuyRisk);
+    assert_eq!(decide(&params, &input, &reading).action, Action::BuyRisk);
 
-    flagged.ai_flag = AI_FLAGGED;
+    reading.ai_risk = Some(60);
 
-    assert_eq!(decide(&params, &input, &flagged).action, Action::None);
-}
-
-#[test]
-fn a_reply_from_another_model_is_not_an_answer() {
-    let reply = reply_from(
-        MODELS[1],
-        CHAT_ID,
-        r#"{"risk_flag":false,"confidence":90}"#,
-        "stop",
-    );
-
-    assert!(read_advice(&reply, 0).is_none());
-}
-
-#[test]
-fn a_reply_that_names_no_model_is_not_an_answer() {
-    let reply = json!({"id": CHAT_ID, "choices": [{"index": 0, "finish_reason": "stop",
-        "message": {"role": "assistant", "content": r#"{"risk_flag":false,"confidence":90}"#}}]})
-    .to_string()
-    .into_bytes();
-
-    assert!(advice_of(&reply).is_none());
-}
-
-#[test]
-fn the_reference_names_the_model_that_answered() {
-    let reply = reply_from(
-        MODELS[1],
-        CHAT_ID,
-        r#"{"risk_flag":false,"confidence":90}"#,
-        "stop",
-    );
-
-    assert_eq!(read_advice(&reply, 1).unwrap().ai_ref.m, Some(1));
+    assert_eq!(decide(&params, &input, &reading).action, Action::None);
 }
 
 #[test]
@@ -736,14 +763,143 @@ fn a_silent_advisor_names_no_model() {
 const LIVE_REPLY: &str = r#"{"id":"96c4d660c8c24433aafa9eac77b20286","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"risk_flag\": true, \"confidence\": 70}"},"finish_reason":"stop","logprobs":null,"matched_stop":154827}],"model":"z-ai/glm-5.3-flash","created":1793981881,"usage":{"prompt_tokens":496,"total_tokens":510,"completion_tokens":14,"prompt_tokens_details":null,"reasoning_tokens":1,"completion_tokens_details":{"reasoning_tokens":1}}}"#;
 
 #[test]
-fn the_reply_seen_live_reads_as_an_answer() {
-    let advice = advice_of(LIVE_REPLY.as_bytes()).unwrap();
+fn the_reply_seen_live_in_the_old_format_is_not_an_answer() {
+    assert!(advice_of(LIVE_REPLY.as_bytes()).is_none());
+}
 
-    assert_eq!((advice.ai_flag, advice.ai_conf), (AI_FLAGGED, 70));
+#[test]
+fn the_live_reply_shape_with_a_risk_answer_reads_as_an_answer() {
+    let reply = LIVE_REPLY.replace(
+        r#"{\"risk_flag\": true, \"confidence\": 70}"#,
+        r#"{\"risk\": 72, \"confidence\": 70, \"note\": \"Exploit on a NEAR DEX.\"}"#,
+    );
+
+    let advice = advice_of(reply.as_bytes()).unwrap();
+
+    assert_eq!((advice.ai_risk, advice.ai_conf), (72, 70));
+    assert_eq!(
+        advice.ai_ref.note.as_deref(),
+        Some("Exploit on a NEAR DEX.")
+    );
     assert_eq!(advice.ai_ref.chat_id, "96c4d660c8c24433aafa9eac77b20286");
     assert_eq!(
         advice.ai_ref.resp_sig_hash,
-        "865729cb2e02965750d82714848f2498a44062623b3f957d1cdaaf239127b030"
+        to_hex(&Sha256::digest(reply.as_bytes()))
     );
     assert_eq!(advice.ai_ref.m, Some(0));
+}
+
+#[test]
+fn a_note_keeps_only_safe_characters() {
+    assert_eq!(
+        clean_note("Rhea \"exploit\" <b>now</b>\n; 40% (est.)"),
+        "Rhea  exploit   b now /b  ; 40% (est.)"
+    );
+}
+
+#[test]
+fn a_note_is_cut_to_its_limit() {
+    let long = "a".repeat(MAX_NOTE_CHARS + 30);
+
+    assert_eq!(clean_note(&long).len(), MAX_NOTE_CHARS);
+}
+
+#[test]
+fn a_note_of_only_unsafe_characters_is_no_note() {
+    let reply = chat_reply(r#"{"risk":10,"confidence":90,"note":"\u00e9\u00e9"}"#);
+
+    assert_eq!(advice_of(&reply).unwrap().ai_ref.note, None);
+}
+
+#[test]
+fn the_risk_and_the_note_land_in_the_reading() {
+    let reading = observe(&secret(Some(KEY)), NONCE, world(&[])).unwrap();
+
+    assert_eq!(reading.obs.ai_flag, AI_CLEAR);
+    assert_eq!(reading.obs.ai_risk, Some(85));
+    assert_eq!(reading.obs.ai_conf, 80);
+    assert_eq!(reading.ai_ref.note.as_deref(), Some("Exploit reported."));
+}
+
+#[test]
+fn a_silent_advisor_records_no_risk() {
+    let reading = observe(&secret(None), NONCE, world(&[])).unwrap();
+
+    assert_eq!(reading.obs.ai_risk, None);
+    assert_eq!(reading.ai_ref.note, None);
+}
+
+const TICKER: &str = r#"{"error":[],"result":{"NEARUSD":{"a":["3.64","1","1"],"b":["3.63","1","1"],"c":["3.64","1"],"v":["1","1"],"p":["3.6","3.6"],"t":[1,1],"l":["3.55","3.50"],"h":["3.85","3.90"],"o":"3.80"}}}"#;
+
+#[test]
+fn the_ticker_gives_the_open_and_the_day_range() {
+    assert_eq!(
+        read_ticker(TICKER.as_bytes()),
+        Some((380_000_000, 390_000_000, 350_000_000))
+    );
+}
+
+#[test]
+fn a_ticker_with_an_error_is_no_ticker() {
+    assert_eq!(
+        read_ticker(br#"{"error":["EQuery:Unknown asset pair"],"result":{}}"#),
+        None
+    );
+    assert_eq!(read_ticker(b"not json"), None);
+}
+
+#[test]
+fn the_market_line_shows_both_prices_and_the_day() {
+    let market = Obs {
+        pa: 363_561_001,
+        pb: 364_506_841,
+        ta: 1,
+        tb: 1,
+        ai_flag: AI_SILENT,
+        ai_conf: 0,
+        ai_risk: None,
+    };
+
+    assert_eq!(
+        market_line(&market, Some((380_000_000, 390_000_000, 350_000_000))),
+        "Market: NEAR/USD Rhea pool 3.6356, Kraken 3.6450, today's open 3.8000, 24h high 3.9000, 24h low 3.5000"
+    );
+    assert_eq!(
+        market_line(&market, None),
+        "Market: NEAR/USD Rhea pool 3.6356, Kraken 3.6450"
+    );
+}
+
+fn user_message_with(ticker: Option<&'static str>) -> String {
+    let mut inner = world(&[]);
+    let mut message = String::new();
+    observe(&secret(Some(KEY)), NONCE, |call: &Call| {
+        if call.path.starts_with("/0/public/Ticker") {
+            return ticker.map(|reply| reply.as_bytes().to_vec());
+        }
+        if call.host == CHAT_HOST {
+            let body: serde_json::Value =
+                serde_json::from_str(call.body.as_deref().unwrap()).unwrap();
+            message = body["messages"][1]["content"].as_str().unwrap().to_string();
+        }
+        inner(call)
+    });
+    message
+}
+
+#[test]
+fn the_advisor_is_told_the_market_and_the_day() {
+    let message = user_message_with(Some(TICKER));
+
+    assert!(message.contains("\n\nMarket: NEAR/USD Rhea pool 3.9000, Kraken 3.9000, today's open 3.8000, 24h high 3.9000, 24h low 3.5000\n\nref:"), "{message}");
+}
+
+#[test]
+fn a_ticker_that_fails_only_drops_the_day() {
+    let message = user_message_with(None);
+
+    assert!(
+        message.contains("\n\nMarket: NEAR/USD Rhea pool 3.9000, Kraken 3.9000\n\nref:"),
+        "{message}"
+    );
 }

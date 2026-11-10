@@ -92,6 +92,7 @@ pub fn observe_market(mut send: impl FnMut(&Call) -> Option<Vec<u8>>) -> Option<
         tb,
         ai_flag: AI_SILENT,
         ai_conf: 0,
+        ai_risk: None,
     })
 }
 
