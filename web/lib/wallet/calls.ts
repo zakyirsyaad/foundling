@@ -51,14 +51,19 @@ export interface BuildCtx {
   storageMin: { vault: bigint; usdc: bigint; wnear: bigint };
 }
 
+/** Prepaid gas for a call: its minimum (or the default) plus the margin, capped at the protocol limit. */
+export function gasFor(name: CallName): bigint {
+  const tgas = Math.min((CALLS[name].minGasTgas ?? DEFAULT_GAS_TGAS) + GAS_MARGIN_TGAS, MAX_GAS_TGAS);
+  return BigInt(tgas) * TGAS;
+}
+
 /** Builds one call from the table. Refuses when the pinned token ids differ from what the vault reports. */
 export function buildTx(name: CallName, args: object, ctx: BuildCtx): WalletTx {
   const spec = CALLS[name];
   if (ctx.assets.usdc !== ctx.config.usdc) throw new Error(`USDC mismatch: the vault uses ${ctx.assets.usdc}, this site pins ${ctx.config.usdc}`);
   if (ctx.assets.wnear !== ctx.config.wnear) throw new Error(`wNEAR mismatch: the vault uses ${ctx.assets.wnear}, this site pins ${ctx.config.wnear}`);
   const receiverId = spec.receiver === "vault" ? ctx.config.vaultId : spec.receiver === "usdc" ? ctx.config.usdc : ctx.config.wnear;
-  const tgas = Math.min((spec.minGasTgas ?? DEFAULT_GAS_TGAS) + GAS_MARGIN_TGAS, MAX_GAS_TGAS);
   const deposit = spec.deposit === "one_yocto" ? 1n : spec.deposit === "none" ? 0n : ctx.storageMin[spec.receiver];
   const fullArgs = name === "deposit" ? { receiver_id: ctx.config.vaultId, amount: (args as { amount: string }).amount, msg: "deposit" } : args;
-  return { receiverId, methodName: spec.method, args: fullArgs, gas: BigInt(tgas) * TGAS, deposit };
+  return { receiverId, methodName: spec.method, args: fullArgs, gas: gasFor(name), deposit };
 }

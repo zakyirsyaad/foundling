@@ -13,7 +13,7 @@ import { isEvmAddress } from "@/lib/crosschain/evm";
 import { flowReducer, initialFlow } from "@/lib/crosschain/flow";
 import { quoteProblems } from "@/lib/crosschain/signature";
 import { type StoredSwap, blockingSwap } from "@/lib/crosschain/store";
-import { formatUnits, parseUnits } from "@/lib/format/units";
+import { formatUnits, parseU128, parseUnits } from "@/lib/format/units";
 import { STATUS } from "@/lib/status/table";
 import type { Step } from "@/lib/wallet/useTx";
 import { useWallet } from "@/lib/wallet/WalletProvider";
@@ -27,7 +27,19 @@ const USDC_DECIMALS = 6;
 const WRONG_TOKEN: Record<ChainId, string> = { base: "USDbC is not the token asked for.", arb: "USDC.e is not the token asked for.", eth: "" };
 type Quote = OneClickQuoteResponse & { quote: Record<string, string | undefined> };
 
-const usdc = (v: string | undefined) => (v ? `${formatUnits(BigInt(v), USDC_DECIMALS, 6)} USDC` : "—");
+/** A base-unit amount from a 1Click answer, or null when it is missing or not a whole-number string. */
+function readAmount(v: unknown): bigint | null {
+  try {
+    return parseU128(v);
+  } catch {
+    return null;
+  }
+}
+
+const usdc = (v: string | undefined) => {
+  const n = readAmount(v);
+  return n === null ? "—" : `${formatUnits(n, USDC_DECIMALS, 6)} USDC`;
+};
 
 function download(name: string, data: unknown) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -105,6 +117,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   }
 
   const live = x.live;
+  const liveChain = live ? x.oc.chains.find((c) => c.id === live.swap.chainId) : undefined;
+  const earlier = x.swaps.filter((w) => w.recipient === account && w.depositAddress !== live?.swap.depositAddress);
   const raw = (x.status?.raw ?? {}) as { swapDetails?: { amountOut?: string; refundedAmount?: string; refundReason?: string; depositedAmount?: string } };
   const st = x.status?.status;
   const finalStatus: StoredSwap["final"] = st === "SUCCESS" || st === "REFUNDED" || st === "FAILED" ? st : null;
@@ -196,7 +210,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
             <>
               <p>Send USDC on <strong>{config.oneClick?.chains.find((c) => c.id === live.swap.chainId)?.label}</strong> to</p>
               <p className="mono break-all text-[15px]" data-testid="deposit-address">{live.swap.depositAddress}</p>
-              <p className="mono text-[13px]">Token {x.tokens?.find((t) => t.assetId === chain.originAsset)?.contractAddress ?? chain.originAsset} · send {usdc((live.signed as Quote).quote.amountIn)} · at least {usdc((live.signed as Quote).quote.minAmountIn)}</p>
+              <p className="mono text-[13px]">Token {x.tokens?.find((t) => t.assetId === liveChain?.originAsset)?.contractAddress ?? liveChain?.originAsset} · send {usdc((live.signed as Quote).quote.amountIn)} · at least {usdc((live.signed as Quote).quote.minAmountIn)}</p>
               <p className="text-[13px]" data-testid="send-before">Send before {new Date(live.swap.deadlineMs - x.margin).toLocaleTimeString()} · {Math.max(0, Math.floor((x.rem - x.margin) / 60_000))} min left</p>
               {WRONG_TOKEN[live.swap.chainId] ? <p className="text-[13px]">{WRONG_TOKEN[live.swap.chainId]}</p> : null}
             </>
@@ -217,11 +231,14 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
           )}
           <label className="grid gap-1"><span className="fm-label">Origin tx hash (optional, speeds things up)</span><input value={txHash} onChange={(e) => setTxHash(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2" /></label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!txHash} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(() => {
-              const swap = { ...live.swap, txHashes: [txHash] };
-              x.save(swap);
-              x.setLive({ ...live, swap });
-            })}>Submit tx hash</button>
+            <button type="button" disabled={!txHash} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(
+              () => {
+                const swap = { ...live.swap, txHashes: live.swap.txHashes.includes(txHash) ? live.swap.txHashes : [...live.swap.txHashes, txHash] };
+                x.save(swap);
+                x.setLive({ ...live, swap });
+              },
+              (err: unknown) => dispatch({ type: "problem", message: `1Click did not take the tx hash: ${err instanceof Error ? err.message : String(err)}` }),
+            )}>Submit tx hash</button>
             <button type="button" className="rounded-md border border-input px-3 py-1.5" onClick={() => download(`1click-quote-${live.swap.depositAddress}.json`, live.signed)}>Download the signed quote</button>
           </div>
         </div>
@@ -237,7 +254,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
       {flow.step === "wait" && live ? (
         st === "SUCCESS" ? (
           (() => {
-            const out = BigInt(raw.swapDetails?.amountOut ?? "0");
+            const out = readAmount(raw.swapDetails?.amountOut ?? "0");
+            if (out === null) return <p>1Click says the swap succeeded, but this page could not read the amount that arrived. Check the USDC in your NEAR account before you deposit it.</p>;
             const d = depositAmount(out, p?.balances.usdc ?? 0n, remainingCap, s.policy.minDeposit);
             if (account !== live.swap.recipient) return <p>Connect <span className="mono">{live.swap.recipient}</span> to deposit the USDC that arrived.</p>;
             if (d.belowMin) return <p>{usdc(out.toString())} arrived in your NEAR account. That is below the minimum deposit, so it stays there.</p>;
@@ -249,7 +267,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
             );
           })()
         ) : st === "REFUNDED" ? (
-          <p>1Click refunded the swap to <span className="mono">{live.request.refundTo}</span>{raw.swapDetails?.refundedAmount ? `: ${usdc(raw.swapDetails.refundedAmount)}` : ""}{raw.swapDetails?.refundReason ? ` (${raw.swapDetails.refundReason})` : ""}.</p>
+          <p>1Click refunded the swap to <span className="mono">{live.request.refundTo}</span>{readAmount(raw.swapDetails?.refundedAmount) !== null ? `: ${usdc(raw.swapDetails?.refundedAmount)}` : ""}{raw.swapDetails?.refundReason ? ` (${raw.swapDetails.refundReason})` : ""}.</p>
         ) : st === "FAILED" ? (
           <p>The swap failed. No refund is promised here. Contact 1Click support with your origin tx hash and the signed quote you downloaded.</p>
         ) : (
@@ -265,9 +283,9 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
           {lookupResult ? <span data-testid="lookup-result">{lookupResult}</span> : null}
         </div>
       </details>
-      {x.swaps.filter((w) => w.recipient === account && w !== live?.swap).length ? (
+      {earlier.length ? (
         <ul className="grid gap-1 text-[13px]" aria-label="Earlier swaps">
-          {x.swaps.filter((w) => w.recipient === account && w.depositAddress !== live?.swap.depositAddress).map((w) => (
+          {earlier.map((w) => (
             <li key={`${w.depositAddress}-${w.createdAtMs}`} className="mono">{w.chainId} · {w.final ?? "in progress"} · {w.txHashes[0] ?? "no tx hash yet"}</li>
           ))}
         </ul>

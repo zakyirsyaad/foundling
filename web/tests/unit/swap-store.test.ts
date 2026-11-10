@@ -65,3 +65,11 @@ test("blocked or broken storage falls back to memory", () => {
   expect(createSwapStore(junk, key).list()).toEqual([]);
   expect(createSwapStore(null, key).list()).toEqual([]);
 });
+test("an entry the schema rejects does not take the other swaps with it", () => {
+  const storage = fakeStorage();
+  storage.setItem(key, JSON.stringify([swap("0xA"), { ...swap("0xB"), chainId: "sol" }]));
+  const store = createSwapStore(storage, key, () => 0);
+  expect(store.list().map((s) => s.depositAddress)).toEqual(["0xA"]);
+  store.prune();
+  expect(store.list().map((s) => s.depositAddress)).toEqual(["0xA"]);
+});

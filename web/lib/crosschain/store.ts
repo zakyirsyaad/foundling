@@ -43,8 +43,13 @@ export function createSwapStore(storage: Storage | null, key: string, now: () =>
     try {
       const raw = storage?.getItem(key);
       if (raw == null) return memory;
-      const parsed = z.array(swapSchema).safeParse(JSON.parse(raw));
-      return parsed.success ? parsed.data : [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      // Entry by entry: one record this build cannot read must not drop the swaps it can.
+      return parsed.flatMap((entry) => {
+        const one = swapSchema.safeParse(entry);
+        return one.success ? [one.data] : [];
+      });
     } catch {
       return memory;
     }

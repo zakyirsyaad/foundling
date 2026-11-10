@@ -1,11 +1,9 @@
 import type { Position, VaultSnapshot } from "@/lib/chain/types";
 import { navUsdc } from "@/lib/chain/vault";
-import { CALLS, type CallName, DEFAULT_GAS_TGAS, GAS_MARGIN_TGAS, type WalletTx } from "@/lib/wallet/calls";
+import { type WalletTx, gasFor } from "@/lib/wallet/calls";
 import { vaultNearOk } from "./near";
 
 export type GateReason = "unreadable" | "frozen" | "halted" | "not-ready" | "low-vault-near" | "closed-allowlist";
-
-const TGAS = 10n ** 12n;
 
 /** Whether the deposit form may render, with every reason it may not (WEBSITE §3 Deposit step 2–3). */
 export function depositGate(s: VaultSnapshot, p: Position | null, unreadable: boolean): { open: boolean; reasons: GateReason[] } {
@@ -25,16 +23,12 @@ export function nearShortfallFor(txs: readonly WalletTx[], nearBalance: bigint, 
   return need > nearBalance ? need - nearBalance : 0n;
 }
 
-function gasOf(name: CallName): bigint {
-  return BigInt((CALLS[name].minGasTgas ?? DEFAULT_GAS_TGAS) + GAS_MARGIN_TGAS) * TGAS;
-}
-
 /** The numbers shown next to the Deposit button (WEBSITE §3, "Sebelum tombol Deposit"). */
 export function depositChecks(amount: bigint, s: VaultSnapshot, p: Position, gasPrice: bigint) {
   const needsRegistration = !p.registered.vault;
   const txs: WalletTx[] = [
-    ...(needsRegistration ? [{ receiverId: s.vaultId, methodName: "storage_deposit", args: {}, gas: gasOf("register_vault"), deposit: s.storageMin }] : []),
-    { receiverId: s.assets.usdc, methodName: "ft_transfer_call", args: {}, gas: gasOf("deposit"), deposit: 1n },
+    ...(needsRegistration ? [{ receiverId: s.vaultId, methodName: "storage_deposit", args: {}, gas: gasFor("register_vault"), deposit: s.storageMin }] : []),
+    { receiverId: s.assets.usdc, methodName: "ft_transfer_call", args: {}, gas: gasFor("deposit"), deposit: 1n },
   ];
   const remainingUserCap = s.policy.perUserCap > p.netDeposit ? s.policy.perUserCap - p.netDeposit : 0n;
   const nav = navUsdc(s.book, s.price, s.assets) ?? s.book.usdc;

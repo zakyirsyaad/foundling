@@ -102,7 +102,10 @@ export function useOneClickSwap(unreadable: boolean) {
         client.status(String(w.depositAddress)).then(
           (r) => {
             if (!alive || r === "not-found") return;
-            if (r.status === "SUCCESS" || r.status === "REFUNDED" || r.status === "FAILED") save({ ...w, final: r.status });
+            if (r.status !== "SUCCESS" && r.status !== "REFUNDED" && r.status !== "FAILED") return;
+            // Re-read: another tab may have added a tx hash or a "not sent" since this poll started.
+            const fresh = store.list().find((x) => x.depositAddress === w.depositAddress) ?? w;
+            save({ ...fresh, final: r.status });
           },
           () => {},
         ),
@@ -113,7 +116,7 @@ export function useOneClickSwap(unreadable: boolean) {
       alive = false;
       clearInterval(t);
     };
-  }, [client, swaps, save, live?.swap.depositAddress]);
+  }, [client, swaps, save, store, live?.swap.depositAddress]);
 
   // The clock, and re-anchoring after the tab was hidden (performance.now can stop while asleep).
   useEffect(() => {

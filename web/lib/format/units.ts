@@ -2,10 +2,10 @@ const U128_MAX = 2n ** 128n - 1n;
 const DECIMAL = /^\d+$/;
 const AMOUNT = /^(\d+)(?:\.(\d+))?$/;
 
-/** Formats a base-unit amount with `decimals` places, rounded down, trailing zeros dropped. */
 /** Native NEAR, counted in yoctoNEAR. */
 export const NEAR_DECIMALS = 24;
 
+/** Formats a base-unit amount with `decimals` places, rounded down, trailing zeros dropped. */
 export function formatUnits(value: bigint, decimals: number, maxFraction: number = decimals): string {
   const negative = value < 0n;
   const abs = negative ? -value : value;
