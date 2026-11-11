@@ -856,3 +856,75 @@ async fn bad_route() -> anyhow::Result<()> {
 
     run.finish(&env, before, ledger(&env).await?)
 }
+
+/// SPEC 3.2, "Tuas serangan yang diterima": a false headline that gets the advisor to answer a
+/// high `risk` can trigger a protective sell, but the cost is bounded to at most one sell per
+/// `cooldown`. The advisor runs off-chain in NEAR AI's TEE and is out of this harness's reach;
+/// the attack staged here is the `SellRisk` decision a poisoned advisor would cause, fed to the
+/// vault through the mock OutLayer as fast as a repeated fake headline could ask. How large a
+/// single sell may be (`cap_wnear`, `cap_sell_bps`) is `deflated-sell`'s claim; this one is the
+/// repeat.
+#[tokio::test]
+async fn headline_injection() -> anyhow::Result<()> {
+    let env = attack_env(testnet_timing()).await?;
+    let mut run = Run::new("headline-injection", &["COOLDOWN", "OVER_BOOK"]);
+    let before = settle_deposit(&env).await?;
+
+    let funded = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
+    anyhow::ensure!(
+        funded.started,
+        "setup failed: a buy within cap should fund the wNEAR book: {funded:?}"
+    );
+    run.context(
+        "setup: a buy within cap puts wNEAR in the book, for the headline to target",
+        json!({"nonce": funded.nonce}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let book_wnear: u128 = ledger(&env).await?["book"]["wnear"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("book has no wnear"))?
+        .parse()?;
+    anyhow::ensure!(
+        book_wnear > 0,
+        "setup failed: no wNEAR in the book to attack"
+    );
+
+    // The forged headline's first sell: a real sell lands, same as any other cycle would.
+    let sold = decide(&env, template("sell_risk", book_wnear)).await?;
+    let after_sell = ledger(&env).await?;
+    run.step(
+        "a poisoned advisor's first protective sell, for the whole book",
+        sold.started && sold.rejected.is_none() && after_sell["book"]["wnear"] == "0",
+        sold.rejected.as_deref(),
+        json!({"nonce": sold.nonce, "amount_in": book_wnear.to_string()}),
+    );
+
+    // The same fake headline, asked again before the cooldown that one sell just spent. No
+    // second Decision is even staged: trigger_cycle itself refuses the cycle outright.
+    env.set_next(json!({"Decision": {"template": template("sell_risk", book_wnear)}}))
+        .await?;
+    let again = env.trigger_cycle().await?;
+    let refused = refused_text(&again);
+    run.step(
+        "the same headline, repeated inside the cooldown the first sell just spent",
+        refusal(refused.as_deref(), &["COOLDOWN"]).is_some() && ledger(&env).await? == after_sell,
+        refusal(refused.as_deref(), &["COOLDOWN"]),
+        json!({"seen_as": "panic of trigger_cycle, not a Rejected event"}),
+    );
+
+    // Past the cooldown, the identical headline is heard again, but the book it was feeding on
+    // is already empty: the sell it bought itself has nothing left to repeat.
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let nothing_left = decide(&env, template("sell_risk", book_wnear)).await?;
+    run.step(
+        "past the cooldown, the same amount finds an empty book",
+        !nothing_left.started
+            && nothing_left.rejected.as_deref() == Some("OVER_BOOK")
+            && ledger(&env).await? == after_sell,
+        nothing_left.rejected.as_deref(),
+        json!({"nonce": nothing_left.nonce}),
+    );
+
+    run.finish(&env, before, ledger(&env).await?)
+}

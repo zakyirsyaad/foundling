@@ -45,6 +45,15 @@
       "test_binary": "attacks_batch1"
     },
     {
+      "name": "headline-injection",
+      "expected": "Satu `SellRisk` lolos, dibatasi buku wNEAR; pengulangan `SellRisk` dalam `cooldown` yang sama ditolak `COOLDOWN` sebelum sampai ke OutLayer; sesudah `cooldown`, jumlah yang sama menemukan buku kosong, `Rejected(OVER_BOOK)`",
+      "codes": [
+        "COOLDOWN",
+        "OVER_BOOK"
+      ],
+      "test_binary": "attacks_batch1"
+    },
+    {
       "name": "kill-agent",
       "expected": "Tidak ada siklus baru dari akun selain id keeper; `redeem` in-kind tetap berhasil",
       "codes": [

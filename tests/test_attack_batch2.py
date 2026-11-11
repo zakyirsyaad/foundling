@@ -14,7 +14,7 @@ sys.path.insert(0, str(ATTACKS))
 
 import _sandbox  # noqa: E402
 
-BATCH1 = ["over-cap", "drip", "replay", "bad-route", "stale-price"]
+BATCH1 = ["over-cap", "drip", "replay", "bad-route", "stale-price", "headline-injection"]
 BATCH2 = ["kill-agent", "governor-loosen", "double-redeem", "forged-caller", "freeze-race"]
 WASM = [
     ("vault", "foundling_vault"),
