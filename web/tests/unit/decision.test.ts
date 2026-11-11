@@ -5,13 +5,14 @@ import { HELD_DECISION as HELD } from "../fixtures/decision";
 /** What `AiRef::default()` serializes to when the advisor is silent: `m` is skipped, the strings are empty. */
 const SILENT_REF = { chat_id: "", resp_sig_hash: "" };
 
-type Changes = { regime?: string; action?: string; amount_in?: string; ai_flag?: number; ai_conf?: number; ai_ref?: object | null; obs?: object };
+type Changes = { regime?: string; action?: string; amount_in?: string; ai_flag?: number; ai_conf?: number; ai_risk?: number; ai_ref?: object | null; obs?: object };
 function decision(c: Changes) {
   const base = JSON.parse(HELD);
-  const obs = { ...base.obs, ...c.obs, ...(c.ai_flag === undefined ? {} : { ai_flag: c.ai_flag }), ...(c.ai_conf === undefined ? {} : { ai_conf: c.ai_conf }) };
+  const obs = { ...base.obs, ...c.obs, ...(c.ai_flag === undefined ? {} : { ai_flag: c.ai_flag }), ...(c.ai_conf === undefined ? {} : { ai_conf: c.ai_conf }), ...(c.ai_risk === undefined ? {} : { ai_risk: c.ai_risk }) };
   const next = { ...base, ...c, obs };
   delete next.ai_flag;
   delete next.ai_conf;
+  delete next.ai_risk;
   if (c.ai_ref === null) delete next.ai_ref;
   return parseDecision(JSON.stringify(next))!;
 }
@@ -22,8 +23,8 @@ describe("parseDecision", () => {
     expect(d.action).toBe("none");
     expect(d.regime).toBe("risk_on");
     expect(d.amountIn).toBe(0n);
-    expect(d.obs).toEqual({ aiFlag: 1, aiConf: 70, pa: 363561001n, pb: 364506841n, ta: 1794167946, tb: 1794167934 });
-    expect(d.aiRef).toEqual({ chatId: "dbf0db6ea9de4058b636bbbbe3254026", model: 0, respSigHash: "7a4fb7cb9cf223a19f770368299525178be9a78f2af7e224b3e0a82151969754" });
+    expect(d.obs).toEqual({ aiFlag: 1, aiConf: 70, aiRisk: null, pa: 363561001n, pb: 364506841n, ta: 1794167946, tb: 1794167934 });
+    expect(d.aiRef).toEqual({ chatId: "dbf0db6ea9de4058b636bbbbe3254026", model: 0, respSigHash: "7a4fb7cb9cf223a19f770368299525178be9a78f2af7e224b3e0a82151969754", note: null });
     expect(d.commitment).toBe("70502c3606c1e7057162565089f18f2305490724c3e19b51411a6a4516326295");
   });
 
@@ -159,5 +160,74 @@ describe("decisionFacts", () => {
 
   test("a model index outside the list is shown as a number, not a guess", () => {
     expect(decisionFacts(decision({ ai_ref: { chat_id: "a", m: 7, resp_sig_hash: "b" } })).model).toBe("Model 7");
+  });
+});
+
+/** An AI Risk Manager decision (SPEC §3.2): the advisor answered (flag 0) with a risk score and a reason. */
+const NOTE = "Exploit reported on a NEAR DEX.";
+const managed = (c: Changes) => decision({ ai_flag: 0, ai_conf: 75, ai_ref: { chat_id: "chat", m: 0, resp_sig_hash: "abc", note: NOTE }, ...c });
+
+describe("AI Risk Manager decisions", () => {
+  test("parse reads the risk and the reason", () => {
+    const d = managed({ ai_risk: 85 });
+    expect(d.obs.aiRisk).toBe(85);
+    expect(d.aiRef?.note).toBe(NOTE);
+    expect(d.managed).toBe(true);
+  });
+
+  test("an old decision has no risk and is not managed", () => {
+    const d = parseDecision(HELD)!;
+    expect(d.obs.aiRisk).toBeNull();
+    expect(d.aiRef?.note).toBeNull();
+    expect(d.managed).toBe(false);
+  });
+
+  test("a risk outside 0 to 100 is not Decision v1", () => {
+    expect(parseDecision(HELD.replace('"ai_flag":1', '"ai_flag":0,"ai_risk":101'))).toBeNull();
+  });
+
+  test("a protective sell says the AI moved the vault to USDC", () => {
+    const r = explainDecision(managed({ action: "sell_risk", amount_in: "4", ai_risk: 85 }), "Executed");
+    expect(r.title).toBe("Why it moved to USDC");
+    expect(r.lead).toBe("The AI risk manager rated the risk 85 of 100 with confidence 75 and moved part of the vault to USDC. The price rule alone would not have sold.");
+    expect(r.steps).toEqual([
+      { text: "Price rule: risk on, buy", mark: "wait" },
+      { text: "AI risk manager: risk 85, sold to USDC", mark: "stop" },
+      { text: "Contract: limits held, the trade ran", mark: "done" },
+    ]);
+    expect(r.managed).toBe(true);
+  });
+
+  test("a buy at some risk is scaled down", () => {
+    const r = explainDecision(managed({ action: "buy_risk", amount_in: "700", ai_risk: 30 }), "Executed");
+    expect(r.lead).toBe("The price rule called for a buy, and the AI risk manager rated the risk 30 of 100, so the buy ran at 70% of its sealed size.");
+    expect(r.steps[1]).toEqual({ text: "AI risk manager: risk 30, buy scaled to 70%", mark: "done" });
+  });
+
+  test("a buy at no risk runs at full size", () => {
+    const r = explainDecision(managed({ action: "buy_risk", amount_in: "1000", ai_risk: 0 }), "Executed");
+    expect(r.lead).toBe("The price rule called for a buy, and the AI risk manager rated the risk 0 of 100, so the buy ran at full size.");
+    expect(r.steps[1]).toEqual({ text: "AI risk manager: risk 0, full size", mark: "done" });
+  });
+
+  test("a held buy names the risk without guessing the sealed veto", () => {
+    const r = explainDecision(managed({ ai_risk: 60 }), "Hold");
+    expect(r.lead).toBe("The price rule called for a buy, and the AI risk manager rated the risk 60 of 100. The buy was held: vetoed, or no room was left within the limits.");
+    expect(r.steps[1]).toEqual({ text: "AI risk manager: risk 60, buy held", mark: "stop" });
+  });
+
+  test("a price sell is not the AI's doing", () => {
+    const r = explainDecision(managed({ regime: "risk_off", action: "sell_risk", amount_in: "4", ai_risk: 20 }), "Executed");
+    expect(r.lead).toBe("The price rule called for a sell, and every limit held.");
+    expect(r.steps[1]).toEqual({ text: "AI risk manager: risk 20, does not apply to sells", mark: "wait" });
+  });
+
+  test("a refused protective sell names the code", () => {
+    const r = explainDecision(managed({ action: "sell_risk", amount_in: "4", ai_risk: 90 }), "Rejected", "OVER_CAP");
+    expect(r.lead).toBe("The AI risk manager asked to move part of the vault to USDC, and the contract refused it: OVER_CAP.");
+  });
+
+  test("the facts show the risk and the confidence", () => {
+    expect(decisionFacts(managed({ ai_risk: 85 })).flag).toBe("Risk 85 · confidence 75");
   });
 });

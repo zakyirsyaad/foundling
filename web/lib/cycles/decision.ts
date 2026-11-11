@@ -18,6 +18,10 @@ const U128 = z.string().transform((s, ctx) => {
 /** Unix seconds up to the last second of year 9999, so `Date#toISOString` can always format them. */
 const MAX_UNIX_SECONDS = 253_402_300_799;
 const SECONDS = z.number().int().nonnegative().max(MAX_UNIX_SECONDS);
+/** The AI Risk Manager's 0–100 scale (SPEC §3.2). */
+const PERCENT = z.number().int().min(0).max(100);
+/** `strategy/src/advisor.rs` cuts the reason at 120 characters; anything longer did not come from it. */
+const MAX_NOTE_CHARS = 120;
 
 const DecisionV1 = z.object({
   action: z.enum(["none", "buy_risk", "sell_risk"]),
@@ -25,8 +29,8 @@ const DecisionV1 = z.object({
   amount_in: U128,
   commitment: z.string(),
   inputs_digest: z.string(),
-  obs: z.object({ ai_flag: z.number().int().nonnegative(), ai_conf: z.number().int().nonnegative(), pa: U128, pb: U128, ta: SECONDS, tb: SECONDS }),
-  ai_ref: z.object({ chat_id: z.string(), m: z.number().int().nonnegative().optional(), resp_sig_hash: z.string() }).optional(),
+  obs: z.object({ ai_flag: z.number().int().nonnegative(), ai_conf: z.number().int().nonnegative(), ai_risk: PERCENT.optional(), pa: U128, pb: U128, ta: SECONDS, tb: SECONDS }),
+  ai_ref: z.object({ chat_id: z.string(), m: z.number().int().nonnegative().optional(), resp_sig_hash: z.string(), note: z.string().max(MAX_NOTE_CHARS).optional() }).optional(),
 });
 
 export type Action = z.infer<typeof DecisionV1>["action"];
@@ -38,8 +42,10 @@ export interface PublishedDecision {
   amountIn: bigint;
   commitment: string;
   inputsDigest: string;
-  obs: { aiFlag: number; aiConf: number; pa: bigint; pb: bigint; ta: number; tb: number };
-  aiRef: { chatId: string; model: number | null; respSigHash: string } | null;
+  obs: { aiFlag: number; aiConf: number; aiRisk: number | null; pa: bigint; pb: bigint; ta: number; tb: number };
+  aiRef: { chatId: string; model: number | null; respSigHash: string; note: string | null } | null;
+  /** Made under the AI Risk Manager: the advisor answered with a risk score. Older vaults ran the tripwire. */
+  managed: boolean;
 }
 
 /** The parsed decision, or null when nothing was published or the text is not Decision v1. */
@@ -60,9 +66,10 @@ export function parseDecision(raw: string | null): PublishedDecision | null {
     amountIn: d.amount_in,
     commitment: d.commitment,
     inputsDigest: d.inputs_digest,
-    obs: { aiFlag: d.obs.ai_flag, aiConf: d.obs.ai_conf, pa: d.obs.pa, pb: d.obs.pb, ta: d.obs.ta, tb: d.obs.tb },
+    obs: { aiFlag: d.obs.ai_flag, aiConf: d.obs.ai_conf, aiRisk: d.obs.ai_risk ?? null, pa: d.obs.pa, pb: d.obs.pb, ta: d.obs.ta, tb: d.obs.tb },
     // A silent advisor still publishes `ai_ref`, as `AiRef::default()`: empty strings and no `m`.
-    aiRef: d.ai_ref && d.ai_ref.chat_id !== "" ? { chatId: d.ai_ref.chat_id, model: d.ai_ref.m ?? null, respSigHash: d.ai_ref.resp_sig_hash } : null,
+    aiRef: d.ai_ref && d.ai_ref.chat_id !== "" ? { chatId: d.ai_ref.chat_id, model: d.ai_ref.m ?? null, respSigHash: d.ai_ref.resp_sig_hash, note: d.ai_ref.note ?? null } : null,
+    managed: d.obs.ai_risk !== undefined && d.obs.ai_flag === AI_CLEAR,
   };
 }
 
@@ -75,7 +82,7 @@ const AI_SILENT = 2;
 const MODELS = ["GLM-5.3 Flash", "Qwen3.8-27B"] as const;
 
 export interface DecisionStep { text: string; mark: EventMark }
-export interface DecisionReason { title: string; lead: string; steps: [DecisionStep, DecisionStep, DecisionStep] }
+export interface DecisionReason { title: string; lead: string; steps: [DecisionStep, DecisionStep, DecisionStep]; managed: boolean }
 
 const SIDE: Record<Action, "buy" | "sell" | null> = { none: null, buy_risk: "buy", sell_risk: "sell" };
 
@@ -149,12 +156,43 @@ function lead(d: PublishedDecision, word: CycleWord, code: string | undefined): 
 
 const TITLE: Partial<Record<CycleWord, string>> = { Hold: "Why it held", Executed: "Why it traded", Rejected: "Why it was refused" };
 
-/** Three steps read from the decision, in the order the code runs them: `regime_of`, the AI gate, the contract. */
+/** A sell the price rule did not call for: only the AI Risk Manager's protective sell makes one. */
+function isProtectiveSell(d: PublishedDecision): boolean {
+  return d.managed && d.action === "sell_risk" && d.regime !== "risk_off";
+}
+
+/** `decide_managed` in `strategy/src/lib.rs`. The sealed veto and exit thresholds are unknown until reveal, so a held buy is not attributed to one. */
+function managedAiStep(d: PublishedDecision, risk: number): DecisionStep {
+  if (isProtectiveSell(d)) return { text: `AI risk manager: risk ${risk}, sold to USDC`, mark: "stop" };
+  if (d.regime === "risk_off") return { text: `AI risk manager: risk ${risk}, does not apply to sells`, mark: "wait" };
+  if (d.regime === "undetermined") return { text: `AI risk manager: risk ${risk}, nothing to act on`, mark: "wait" };
+  if (d.action === "buy_risk") return risk === 0 ? { text: "AI risk manager: risk 0, full size", mark: "done" } : { text: `AI risk manager: risk ${risk}, buy scaled to ${100 - risk}%`, mark: "done" };
+  return { text: `AI risk manager: risk ${risk}, buy held`, mark: "stop" };
+}
+
+function managedLead(d: PublishedDecision, risk: number, word: CycleWord, code: string | undefined): string | null {
+  if (isProtectiveSell(d)) {
+    if (word === "Executed") return `The AI risk manager rated the risk ${risk} of 100 with confidence ${d.obs.aiConf} and moved part of the vault to USDC. The price rule alone would not have sold.`;
+    if (word === "Rejected") return `The AI risk manager asked to move part of the vault to USDC, and the contract refused it: ${code ?? "no code"}.`;
+    return null;
+  }
+  if (d.regime !== "risk_on") return null;
+  const rated = `The price rule called for a buy, and the AI risk manager rated the risk ${risk} of 100`;
+  if (word === "Executed" && d.action === "buy_risk") return risk === 0 ? `${rated}, so the buy ran at full size.` : `${rated}, so the buy ran at ${100 - risk}% of its sealed size.`;
+  if (word === "Hold") return `${rated}. The buy was held: vetoed, or no room was left within the limits.`;
+  return null;
+}
+
+/** Three steps read from the decision, in the order the code runs them: `regime_of`, the AI, the contract. */
 export function explainDecision(d: PublishedDecision, word: CycleWord, code?: string): DecisionReason {
+  const risk = d.managed ? d.obs.aiRisk : null;
+  const rule = ruleStep(d.regime);
   return {
-    title: TITLE[word] ?? "How it was decided",
-    lead: lead(d, word, code),
-    steps: [ruleStep(d.regime), aiStep(d.regime, d.obs.aiFlag, d.obs.aiConf), contractStep(word, code)],
+    title: risk !== null && isProtectiveSell(d) && word === "Executed" ? "Why it moved to USDC" : (TITLE[word] ?? "How it was decided"),
+    lead: (risk !== null ? managedLead(d, risk, word, code) : null) ?? lead(d, word, code),
+    // A protective sell is not what the price rule asked for, so the rule step is not marked done.
+    steps: [risk !== null && isProtectiveSell(d) ? { ...rule, mark: "wait" } : rule, risk !== null ? managedAiStep(d, risk) : aiStep(d.regime, d.obs.aiFlag, d.obs.aiConf), contractStep(word, code)],
+    managed: d.managed,
   };
 }
 
@@ -174,7 +212,8 @@ function gapPercent(pa: bigint, pb: bigint): string {
   return `${formatUnits(hundredths, 2)}%`;
 }
 
-function flagText(flag: number, conf: number): string {
+function flagText(flag: number, conf: number, risk: number | null): string {
+  if (flag === AI_CLEAR && risk !== null) return `Risk ${risk} · confidence ${conf}`;
   if (flag === AI_CLEAR) return `Clear · confidence ${conf}`;
   if (flag === AI_FLAGGED) return `Flagged · confidence ${conf}`;
   if (flag === AI_SILENT) return "Silent · no valid answer";
@@ -192,7 +231,7 @@ export function decisionFacts(d: PublishedDecision): DecisionFacts {
     timeA: utcTime(d.obs.ta),
     timeB: utcTime(d.obs.tb),
     gap: gapPercent(d.obs.pa, d.obs.pb),
-    flag: flagText(d.obs.aiFlag, d.obs.aiConf),
+    flag: flagText(d.obs.aiFlag, d.obs.aiConf, d.obs.aiRisk),
     model: m === null ? null : (MODELS[m] ?? `Model ${m}`),
   };
 }

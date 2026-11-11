@@ -30,7 +30,12 @@ export function WhyCard({ reason }: { reason: DecisionReason }) {
             </li>
           ))}
         </ol>
-        <p className="fm-small">The AI reads public crypto headlines and can only hold back a buy. It cannot start a trade or stop a sell. The thresholds and the prompt stay sealed until reveal; after that, anyone can replay this decision.</p>
+        <p className="fm-small">
+          {reason.managed
+            ? "The AI risk manager reads public crypto headlines and the market, and can only lower exposure: it shrinks or holds back a buy, or moves part of the vault to USDC on a severe risk. It cannot start a buy or stop a sell the price rule calls for."
+            : "The AI reads public crypto headlines and can only hold back a buy. It cannot start a trade or stop a sell."}{" "}
+          The thresholds and the prompt stay sealed until reveal; after that, anyone can replay this decision.
+        </p>
       </div>
     </Card>
   );
@@ -45,8 +50,15 @@ export function DecisionCard({ decision, facts, raw }: { decision: PublishedDeci
           <dd>{actionText(decision)}</dd>
           <dt>Price rule</dt>
           <dd>{RULE[decision.regime]}</dd>
-          <dt>NEAR AI risk flag</dt>
+          <dt>{decision.managed ? "NEAR AI risk" : "NEAR AI risk flag"}</dt>
           <dd>{facts.flag}</dd>
+          {decision.aiRef?.note ? (
+            <>
+              <dt>AI reason</dt>
+              {/* Cleaned to safe ASCII by the strategy, and rendered as text. */}
+              <dd>{decision.aiRef.note}</dd>
+            </>
+          ) : null}
           {facts.model ? (
             <>
               <dt>Model</dt>

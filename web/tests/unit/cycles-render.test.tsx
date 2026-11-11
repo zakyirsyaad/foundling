@@ -144,3 +144,17 @@ test("an older page the API cannot read says so and links back to the newest, no
   expect(screen.getByRole("link", { name: "Newest cycles" })).toHaveAttribute("href", "/app/cycles?filter=hold");
   expect(screen.queryByRole("table")).toBeNull();
 });
+
+const MANAGED_SELL = HELD_DECISION.replace('"action":"none"', '"action":"sell_risk"').replace('"amount_in":"0"', '"amount_in":"4000000000000000000000000"').replace('"ai_flag":1', '"ai_flag":0,"ai_risk":85').replace('"m":0', '"m":0,"note":"Exploit reported on a NEAR DEX."');
+test("a protective sell shows the AI's risk, its reason and what it may do", () => {
+  render(<CycleDetail row={row(30n, "executed")} proof={null} decision={MANAGED_SELL} revealAfter={0n} chainTime={1n} network="mainnet" vaultId="v.near" />);
+  expect(screen.getByRole("heading", { name: "Why it moved to USDC" })).toBeInTheDocument();
+  expect(screen.getByText("Risk 85 · confidence 70")).toBeInTheDocument();
+  expect(screen.getByText("Exploit reported on a NEAR DEX.")).toBeInTheDocument();
+  expect(screen.getByText(/can only lower exposure/)).toBeInTheDocument();
+});
+test("an old tripwire decision keeps its own description of the AI", () => {
+  render(<CycleDetail row={row(25n, "hold", "NO_DECISION")} proof={null} decision={HELD_DECISION} revealAfter={0n} chainTime={1n} network="mainnet" vaultId="v.near" />);
+  expect(screen.getByText(/can only hold back a buy/)).toBeInTheDocument();
+  expect(screen.queryByText("AI reason")).toBeNull();
+});
