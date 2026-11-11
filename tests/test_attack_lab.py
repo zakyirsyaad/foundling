@@ -23,6 +23,7 @@ CORE_ATTACKS = [
     "replay",
     "bad-route",
     "stale-price",
+    "headline-injection",
     "kill-agent",
     "governor-loosen",
     "double-redeem",
