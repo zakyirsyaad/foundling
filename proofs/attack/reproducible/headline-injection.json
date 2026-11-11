@@ -1,0 +1,114 @@
+{
+  "attack": "headline-injection",
+  "expected_codes": [
+    "COOLDOWN",
+    "OVER_BOOK"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "19999999",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "19999999",
+    "wallet_wnear": "0",
+    "window_usdc": "2000000",
+    "window_wnear": "444444444444444444444444"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [],
+  "observed_codes": [
+    "COOLDOWN",
+    "OVER_BOOK"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "result": "PASS",
+  "source_commit": "f600983e54b4eb99dc1a73662e9d90b06a2701ee",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a buy within cap puts wNEAR in the book, for the headline to target"
+    },
+    {
+      "detail": {
+        "amount_in": "444444444444444444444444",
+        "nonce": 3
+      },
+      "held": true,
+      "observed": null,
+      "step": "a poisoned advisor's first protective sell, for the whole book"
+    },
+    {
+      "detail": {
+        "seen_as": "panic of trigger_cycle, not a Rejected event"
+      },
+      "held": true,
+      "observed": "COOLDOWN",
+      "step": "the same headline, repeated inside the cooldown the first sell just spent"
+    },
+    {
+      "detail": {
+        "nonce": 4
+      },
+      "held": true,
+      "observed": "OVER_BOOK",
+      "step": "past the cooldown, the same amount finds an empty book"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "2f9fd7f3a29996364eabd95d83ba0f16092700053b289a44e6becf28c4afa9be",
+  "verdict": "held"
+}
