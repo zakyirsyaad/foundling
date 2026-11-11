@@ -8,7 +8,9 @@
 //! replaces this split with one fixture that passes everything.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use foundling_strategy::{commitment, decide, inputs_digest, Action, Input, Params, Regime};
+use foundling_strategy::{
+    commitment, decide, inputs_digest, Action, Decision, Input, Params, Regime,
+};
 use foundling_verify::check;
 use foundling_verify::hex::decode;
 use foundling_verify::proof::Proof;
@@ -87,7 +89,7 @@ fn risk_managed(
         );
     }
     let input: Input = serde_json::from_str(&cycle.input_data).unwrap();
-    let mut decision: foundling_strategy::Decision = serde_json::from_str(&cycle.decision).unwrap();
+    let mut decision: Decision = serde_json::from_str(&cycle.decision).unwrap();
     decision.obs.ai_conf = ai_conf;
     decision.obs.ai_risk = Some(ai_risk);
     let verdict = decide(&params, &input, &decision.obs);
@@ -339,12 +341,14 @@ fn collateral_past_its_life_fails_the_quote() {
 }
 
 #[test]
-fn a_severe_risk_replays_a_protective_sell_in_any_regime() {
-    // risk 90 >= exit_at 80, conf 90 >= exit_conf 70: severe, regardless of veto_at. The
-    // fixture's own regime is risk_on (SPEC §3.2 rule 1 fires "pada rezim apa pun").
+fn a_severe_risk_replays_a_protective_sell() {
+    // risk 90 >= exit_at 80, conf 90 >= exit_conf 70: severe, regardless of veto_at. This
+    // runs in the fixture's own regime, risk_on; that the same sell fires in risk_off and
+    // undetermined too (SPEC §3.2 rule 1, "pada rezim apa pun") is `strategy`'s to prove
+    // (`a_severe_confident_risk_sells_while_the_price_says_buy`) — this test is about the
+    // replay path, not the rule's regime-independence.
     let proof = risk_managed(90, 90, 50, 80, 70, Some("1000"));
-    let decision: foundling_strategy::Decision =
-        serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
     assert_eq!(decision.regime, Regime::RiskOn);
     assert_eq!(decision.action, Action::SellRisk);
     assert_eq!(decision.amount_in, 1000); // the whole dry book; `sell_wnear` never binds here
@@ -364,8 +368,7 @@ fn a_risk_under_the_veto_replays_a_scaled_buy() {
     // risk 30 < veto_at 50: not severe (30 < exit_at 80 too), so the price rule's buy_risk
     // scales down to buy_usdc * (100 - 30) / 100 = 50000 * 70 / 100 = 35000.
     let proof = risk_managed(30, 0, 50, 80, 70, None);
-    let decision: foundling_strategy::Decision =
-        serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
     assert_eq!(decision.regime, Regime::RiskOn);
     assert_eq!(decision.action, Action::BuyRisk);
     assert_eq!(decision.amount_in, 35_000);
@@ -385,8 +388,7 @@ fn a_risk_at_the_veto_replays_a_held_buy() {
     // risk 60 >= veto_at 50 vetoes the buy, and 60 < exit_at 80 keeps the sell from firing:
     // the AI only lowers exposure, so this is a hold, not the scaled or price-rule trade.
     let proof = risk_managed(60, 0, 50, 80, 70, None);
-    let decision: foundling_strategy::Decision =
-        serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
     assert_eq!(decision.regime, Regime::RiskOn);
     assert_eq!(decision.action, Action::None);
     assert_eq!(decision.amount_in, 0);
@@ -410,8 +412,7 @@ fn a_decision_without_ai_risk_still_replays_under_the_earlier_rule() {
     // only pins the fact down against `foundling_strategy` directly, so a change to
     // `Obs::canonical`'s omission of an absent `ai_risk` fails here before it fails there.
     let proof = opened();
-    let decision: foundling_strategy::Decision =
-        serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
     assert_eq!(decision.obs.ai_risk, None);
     assert_eq!(
         decision.obs.canonical(),
