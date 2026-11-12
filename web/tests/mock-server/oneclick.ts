@@ -36,7 +36,7 @@ export function quote(s: Pick<Scenario, "extra">, req: Record<string, unknown>):
       amountIn: amount.toString(), amountInFormatted: "", amountInUsd: "",
       minAmountIn: ((amount * 99n) / 100n).toString(),
       amountOut: (amount - 200n).toString(), amountOutFormatted: "", amountOutUsd: "",
-      minAmountOut: ((amount * 98n) / 100n).toString(),
+      minAmountOut: String(!req.dry && s.extra.finalMinAmountOut !== undefined ? s.extra.finalMinAmountOut : (amount * 98n) / 100n),
       deadline: s.extra.quoteDeadlineInMs ? new Date(Date.now() + Number(s.extra.quoteDeadlineInMs)).toISOString() : req.deadline,
       timeWhenInactive: req.deadline, timeEstimate: 30, refundFee: "2400", withdrawFee: "0",
     },

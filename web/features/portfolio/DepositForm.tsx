@@ -8,18 +8,10 @@ import type { Position, VaultSnapshot } from "@/lib/chain/types";
 import { formatUnits, parseUnits } from "@/lib/format/units";
 import { type BuildCtx, buildTx } from "@/lib/wallet/calls";
 import type { Step } from "@/lib/wallet/useTx";
-import { type GateReason, depositChecks } from "@/lib/vault/deposit";
+import { GATE_TEXT, type GateReason, depositChecks } from "@/lib/vault/deposit";
 import { CliCommand } from "./CliCommand";
 
 const NEAR = 24;
-const GATE_TEXT: Record<GateReason, string> = {
-  unreadable: "The vault is not readable right now, so deposits are paused here. Use the CLI command, or try again in a moment.",
-  frozen: "The vault is frozen. New deposits are paused.",
-  halted: "The vault is halted. New deposits are paused until the governor clears it.",
-  "not-ready": "Setup or the self-test has not finished, so the vault does not take deposits yet.",
-  "low-vault-near": "The vault holds too little NEAR for its storage, so the contract refuses deposits.",
-  "closed-allowlist": "This vault takes deposits only from its allowlist, and this account is not on it.",
-};
 
 function parseAmount(text: string, decimals: number): bigint | null {
   try {
