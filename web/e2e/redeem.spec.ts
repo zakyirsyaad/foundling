@@ -26,7 +26,7 @@ test("a failed transfer shows in claimable with a withdraw button", async ({ pag
   await page.getByRole("button", { name: "Withdraw USDC" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Done." })).toBeVisible();
 });
-test("a reload after signing resumes the status and does not send again", async ({ page, request }) => {
+test("a reload after finalization does not show the finished transaction as sent, and does not send again", async ({ page, request }) => {
   await useScenario(request, "claimable");
   await connect(page);
   const count = async () => (await (await request.get(`${MOCK}/__tx`)).json()).count as number;
@@ -34,7 +34,10 @@ test("a reload after signing resumes the status and does not send again", async 
   await expect(page.getByRole("status").filter({ hasText: "Done." })).toBeVisible();
   const afterSend = await count();
   await page.reload();
-  await expect(page.getByRole("status").filter({ hasText: "Sent." })).toBeVisible();
+  await expect(page.getByTestId("shares")).toBeVisible();
+  // Success cleared the pending record: a reload starts from idle, not a stale "Sent." state.
+  await expect(page.getByRole("status").filter({ hasText: "Sent." })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Done." })).toHaveCount(0);
   await page.waitForTimeout(500);
   expect(await count()).toBe(afterSend);
 });
