@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { type StoredSwap, blockingSwap, createSwapStore, swapKey } from "@/lib/crosschain/store";
+import { type StoredSwap, blockingSwap, createSwapStore, expiredSwap, swapKey } from "@/lib/crosschain/store";
 
 const H = 3_600_000;
 function fakeStorage() {
@@ -33,19 +33,17 @@ test("a storage event from another tab reaches onChange", () => {
   window.dispatchEvent(new StorageEvent("storage", { key }));
   expect(cb).toHaveBeenCalledTimes(1);
 });
-test("unfinished swaps go 24 hours after their deadline", () => {
-  const storage = fakeStorage();
-  let now = 10 * H + 24 * H - 1;
-  const store = createSwapStore(storage, key, () => now);
+test("unresolved swaps are kept past their deadline and past the old pruning window", () => {
+  const store = createSwapStore(fakeStorage(), key);
   store.upsert(swap("0xA"));
   store.prune();
-  expect(store.list()).toHaveLength(1);
-  now = 10 * H + 24 * H;
-  store.prune();
-  expect(store.list()).toHaveLength(0);
+  expect(store.list()).toEqual([swap("0xA")]);
+  expect(expiredSwap(swap("0xA"), 10 * H + 24 * H + 1)).toBe(true);
+  expect(expiredSwap(swap("0xA"), 10 * H - 1)).toBe(false);
+  expect(expiredSwap(swap("0xA", { final: "FAILED" }), 10 * H + 24 * H)).toBe(false);
 });
 test("a finished swap keeps only its tx record", () => {
-  const store = createSwapStore(fakeStorage(), key, () => 0);
+  const store = createSwapStore(fakeStorage(), key);
   store.upsert(swap("0xA", { final: "SUCCESS", txHashes: ["0xtx"] }));
   store.prune();
   expect(store.list()).toEqual([{ depositAddress: null, recipient: "alice.near", chainId: "base", deadlineMs: 10 * H, createdAtMs: 0, final: "SUCCESS", txHashes: ["0xtx"], declaredNotSent: false }]);
@@ -68,8 +66,18 @@ test("blocked or broken storage falls back to memory", () => {
 test("an entry the schema rejects does not take the other swaps with it", () => {
   const storage = fakeStorage();
   storage.setItem(key, JSON.stringify([swap("0xA"), { ...swap("0xB"), chainId: "sol" }]));
-  const store = createSwapStore(storage, key, () => 0);
+  const store = createSwapStore(storage, key);
   expect(store.list().map((s) => s.depositAddress)).toEqual(["0xA"]);
   store.prune();
   expect(store.list().map((s) => s.depositAddress)).toEqual(["0xA"]);
+});
+
+test("an expired record can be forgotten by its address", () => {
+  const storage = fakeStorage();
+  const store = createSwapStore(storage, key);
+  store.upsert(swap("0xA"));
+  store.upsert(swap("0xB"));
+  store.remove("0xA");
+  expect(store.list().map((s) => s.depositAddress)).toEqual(["0xB"]);
+  expect(JSON.parse(storage.getItem(key) ?? "[]")).toHaveLength(1);
 });

@@ -287,3 +287,22 @@ test("the live swap alone shows no earlier-swaps list", async () => {
   await toAddress();
   expect(screen.queryByRole("list", { name: "Earlier swaps" })).toBeNull();
 });
+test("an expired unresolved swap stays queryable but is never a send destination", async () => {
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xExpired", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() - 25 * 3_600_000, createdAtMs: 0, final: null, txHashes: ["0xtx"], declaredNotSent: false }]));
+  await renderCard();
+  const earlier = await screen.findByRole("list", { name: "Earlier swaps" });
+  expect(earlier).toHaveTextContent("expired · unresolved");
+  expect(earlier).toHaveTextContent("0xExpired");
+  expect(earlier).toHaveTextContent("Do not send to this address");
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+  expect(screen.getByLabelText("USDC to send")).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "Forget this record" }));
+  expect(screen.queryByRole("list", { name: "Earlier swaps" })).toBeNull();
+});
+test("an expired unresolved swap is reconciled when 1Click finally answers", async () => {
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xExpired", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() - 25 * 3_600_000, createdAtMs: 0, final: null, txHashes: ["0xtx"], declaredNotSent: false }]));
+  api.status = { status: "SUCCESS", swapDetails: { amountOut: "1" } };
+  await renderCard();
+  await waitFor(() => expect(screen.getByRole("list", { name: "Earlier swaps" })).toHaveTextContent("SUCCESS"), { timeout: 4000 });
+  expect(screen.queryByText("Expired record")).toBeNull();
+});
