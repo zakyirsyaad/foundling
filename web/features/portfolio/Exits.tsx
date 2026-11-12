@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Banner } from "@/components/fm/Banner";
 import { config } from "@/config";
+import { toJsonNonce } from "@/lib/chain/nonce";
 import { createRpcClient } from "@/lib/chain/rpc";
 import type { Position, VaultSnapshot } from "@/lib/chain/types";
 import { formatUnits, parseUnits } from "@/lib/format/units";
@@ -97,18 +98,25 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
   return (
     <section aria-labelledby="claims-title" className="grid gap-3 rounded-lg border p-5">
       <h2 id="claims-title" className="text-lg font-semibold">Claims</h2>
-      {rows.map((c) => (
-        <div key={c.nonce.toString()} className="flex flex-wrap items-center gap-3" data-claim-nonce={c.nonce.toString()}>
-          <span className="mono">Cycle {c.nonce.toString()} · {c.amount.toString()} shares&apos; part</span>
-          {c.resolved ? (
-            <button type="button" disabled={busy} onClick={() => run([{ name: "claim_bucket", args: { nonce: Number(c.nonce) } }])} className="rounded-md border border-input px-3 py-1.5">
-              Claim
-            </button>
-          ) : (
-            <span className="text-[13px] text-muted-foreground">Waiting for the swap to finish.</span>
-          )}
-        </div>
-      ))}
+      {rows.map((c) => {
+        const nonce = toJsonNonce(c.nonce);
+        return (
+          <div key={c.nonce.toString()} className="flex flex-wrap items-center gap-3" data-claim-nonce={c.nonce.toString()}>
+            <span className="mono">Cycle {c.nonce.toString()} · {c.amount.toString()} shares&apos; part</span>
+            {c.resolved ? (
+              nonce === null ? (
+                <span className="text-[13px] text-danger">This cycle number is too large for this browser to claim exactly. Use the CLI.</span>
+              ) : (
+                <button type="button" disabled={busy} onClick={() => run([{ name: "claim_bucket", args: { nonce } }])} className="rounded-md border border-input px-3 py-1.5">
+                  Claim
+                </button>
+              )
+            ) : (
+              <span className="text-[13px] text-muted-foreground">Waiting for the swap to finish.</span>
+            )}
+          </div>
+        );
+      })}
       {tokens.map((t) => (
         <div key={t.token} className="flex flex-wrap items-center gap-3">
           <span className="mono">{formatUnits(t.amount, t.decimals, 4)} {t.label} claimable</span>
