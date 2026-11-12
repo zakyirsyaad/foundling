@@ -61,6 +61,10 @@ fn opened() -> Proof {
 /// fixture's own (zero, so a protective sell always rounds to nothing) changes `input_data`,
 /// so a proof built with one also fails the attestation's "input hash" — the same way
 /// `changed_input_bytes_are_caught_by_the_digest_and_the_quote` catches it.
+///
+/// Limit: the decision is built here by the same production `decide`, so no TEE quote covers
+/// it. These cases prove the replay plumbing only, never that an AI-managed decision carries a
+/// valid attestation end to end; that needs a captured AI Risk Manager proof.
 fn risk_managed(
     ai_risk: u8,
     ai_conf: u8,
