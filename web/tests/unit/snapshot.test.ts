@@ -1,6 +1,6 @@
 import type { RpcClient } from "@/lib/chain/rpc";
 import { acceptSnapshot, navUsdc, readPosition, readVaultSnapshot, sharePrice } from "@/lib/chain/vault";
-import type { Assets, VaultSnapshot } from "@/lib/chain/types";
+import { type Assets, type VaultSnapshot, u64Schema } from "@/lib/chain/types";
 import { vaultViews } from "../fixtures/vault";
 
 function fakeRpc(views: Record<string, unknown>, perAccount: Record<string, Record<string, unknown>> = {}) {
@@ -85,4 +85,10 @@ test("a snapshot carries the oldest block any of its views came from", async () 
     return m === "stage" ? { ...r, blockHeight: 150n } : r;
   }) as typeof rpc.view;
   expect((await readVaultSnapshot(rpc, "vault.near")).blockHeight).toBe(150n);
+});
+
+test("u64 rejects a value JSON has already rounded", async () => {
+  expect(u64Schema.parse(2 ** 53 - 1)).toBe(BigInt(2 ** 53 - 1));
+  expect(() => u64Schema.parse(2 ** 53)).toThrow(/cannot be represented exactly/);
+  await expect(readVaultSnapshot(fakeRpc({ ...vaultViews, last_nonce: 2 ** 53 }), "vault.near")).rejects.toThrow(/cannot be represented exactly/);
 });

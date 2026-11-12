@@ -133,7 +133,7 @@ export interface Position {
 }
 
 const u128 = z.string().transform((s) => parseU128(s));
-const u64 = z.number().int().nonnegative().transform((n) => BigInt(n));
+const u64 = z.number().int().nonnegative().refine(Number.isSafeInteger, "u64 above 2^53 - 1 cannot be represented exactly").transform((n) => BigInt(n));
 const u32 = z.number().int().nonnegative();
 const token = z.enum(["Usdc", "Wnear"]);
 const step = z.enum(["Deposit", "Swap", "Withdraw"]);
