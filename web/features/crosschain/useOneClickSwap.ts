@@ -14,6 +14,7 @@ import { type StoredSwap, createSwapStore, swapKey } from "@/lib/crosschain/stor
 
 /** 1Click status poll; a test build polls faster so e2e steps do not race it. */
 const POLL_MS = config.testBuild ? 1_000 : 5_000;
+const EXPIRED_POLL_MS = 60_000;
 const TICK_MS = 1_000;
 
 export interface Live {
@@ -100,11 +101,13 @@ export function useOneClickSwap(unreadable: boolean) {
     };
   }, [client, live?.swap.depositAddress]);
 
-  // Swaps saved before a reload: read their status too and write a final one back.
+  // Swaps saved before a reload: read their status too and write a final one back. The first poll is
+  // immediate; records that are all past their deadline then back off to one minute.
   useEffect(() => {
     const open = swaps.filter((w) => w.final === null && w.depositAddress && w.depositAddress !== live?.swap.depositAddress);
     if (open.length === 0) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = () =>
       open.forEach((w) =>
         client.status(String(w.depositAddress)).then(
@@ -118,17 +121,23 @@ export function useOneClickSwap(unreadable: boolean) {
           () => {},
         ),
       );
-    void poll();
-    const t = setInterval(poll, POLL_MS);
+    const tick = () => {
+      if (!alive) return;
+      poll();
+      const hasFresh = open.some((w) => Date.now() < w.deadlineMs);
+      timer = setTimeout(tick, hasFresh ? POLL_MS : EXPIRED_POLL_MS);
+    };
+    tick();
     return () => {
       alive = false;
-      clearInterval(t);
+      if (timer) clearTimeout(timer);
     };
   }, [client, swaps, save, store, live?.swap.depositAddress]);
 
-  // The clock for expiry labels and blocking. It also ticks without a live swap while an unresolved
-  // record exists, so a swap that expires while the page is open stops blocking a new quote.
-  const needsClock = Boolean(live) || swaps.some((w) => w.final === null);
+  // Tick while a live swap needs its countdown or a stored record is still inside its deadline. Once
+  // every stored record is expired, the clock stops instead of re-rendering once per second forever.
+  const hasFreshUnresolved = swaps.some((w) => w.final === null && now.date < w.deadlineMs);
+  const needsClock = Boolean(live) || hasFreshUnresolved;
   useEffect(() => {
     if (!needsClock) return;
     const tick = () => setNow({ perf: performance.now(), date: Date.now() });
