@@ -63,14 +63,17 @@ export function clientKey(address: string): string {
   return h ? `${h.slice(0, 4).join(":")}::/64` : ip;
 }
 
-export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[]; now?: () => number }): MiddlewareHandler & { tracked: () => number } {
+export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[]; now?: () => number; maxTracked?: number }): MiddlewareHandler & { tracked: () => number } {
   const windows = new Map<string, { start: number; count: number }>();
   const now = opts.now ?? Date.now;
+  const maxTracked = opts.maxTracked ?? MAX_TRACKED;
 
-  /** Drops expired windows, then evicts the oldest active bucket until one slot is free. */
-  const makeRoom = (at: number) => {
-    for (const [k, w] of windows) if (at - w.start >= WINDOW_MS) windows.delete(k);
-    while (windows.size >= MAX_TRACKED) {
+  /**
+   * Evicts the oldest bucket in insertion order. Expired windows are naturally at the front, so a
+   * new identity reclaims them first without scanning the whole map on every request.
+   */
+  const makeRoom = () => {
+    while (windows.size >= maxTracked) {
       const oldest = windows.keys().next();
       if (oldest.done) break;
       windows.delete(oldest.value);
@@ -88,7 +91,7 @@ export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[];
       }
     } else {
       if (w) windows.delete(key);
-      makeRoom(at);
+      makeRoom();
       windows.set(key, { start: at, count: 1 });
     }
     await next();
