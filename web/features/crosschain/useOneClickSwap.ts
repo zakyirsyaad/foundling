@@ -68,6 +68,11 @@ export function useOneClickSwap(unreadable: boolean) {
     setSwaps(store.list());
   }, [store]);
 
+  const remove = useCallback((depositAddress: string) => {
+    store.remove(depositAddress);
+    setSwaps(store.list());
+  }, [store]);
+
   const quote = useCallback(async (input: Omit<QuoteInput, "destinationAsset" | "dry">, dry: boolean) => {
     const req = build({ ...input, dry, destinationAsset: `nep141:${config.usdc}` });
     const res = await client.quote(req);
@@ -121,18 +126,25 @@ export function useOneClickSwap(unreadable: boolean) {
     };
   }, [client, swaps, save, store, live?.swap.depositAddress]);
 
-  // The clock, and re-anchoring after the tab was hidden (performance.now can stop while asleep).
+  // The clock for expiry labels and blocking. It also ticks without a live swap while an unresolved
+  // record exists, so a swap that expires while the page is open stops blocking a new quote.
+  const needsClock = Boolean(live) || swaps.some((w) => w.final === null);
   useEffect(() => {
-    if (!live) return;
+    if (!needsClock) return;
     const tick = () => setNow({ perf: performance.now(), date: Date.now() });
     tick();
     const t = setInterval(tick, TICK_MS);
+    return () => clearInterval(t);
+  }, [needsClock]);
+
+  // Re-anchoring after the tab was hidden (performance.now can stop while asleep).
+  useEffect(() => {
+    if (!live) return;
     const hidden = () => setLive((l) => (l ? { ...l, needsReanchor: true, confirmNotSent: l.confirmNotSent } : l));
     const onVis = () => document.visibilityState === "visible" && hidden();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("pageshow", hidden);
     return () => {
-      clearInterval(t);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pageshow", hidden);
     };
@@ -158,5 +170,5 @@ export function useOneClickSwap(unreadable: boolean) {
   const known: SwapStatus = currentStatus === null ? "loading" : st === "PENDING_DEPOSIT" || st === "INCOMPLETE_DEPOSIT" || st === "not-found" || st === "unknown" ? st : "other";
   const view = live ? (live.confirmNotSent ? "hide" : addressView({ status: known, remainingMs: rem, marginMs: margin, needsReanchor: live.needsReanchor, reloaded: false })) : "hide";
 
-  return { listSwaps: () => store.list(), nowMs: now.date, oc, client, swaps, save, tokens, down, quote, live, setLive, status: currentStatus, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
+  return { listSwaps: () => store.list(), nowMs: now.date, oc, client, swaps, save, remove, tokens, down, quote, live, setLive, status: currentStatus, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
 }

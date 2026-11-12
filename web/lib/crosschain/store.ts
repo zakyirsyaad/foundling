@@ -14,8 +14,6 @@ export interface StoredSwap {
   declaredNotSent: boolean;
 }
 
-const KEEP_AFTER_DEADLINE_MS = 24 * 3_600_000;
-
 const swapSchema = z.object({
   depositAddress: z.string().nullable(),
   recipient: z.string(),
@@ -36,8 +34,10 @@ const id = (s: StoredSwap) => s.depositAddress ?? `final:${s.createdAtMs}:${s.tx
 /**
  * Swaps the browser tracks, one entry per deposit address so two tabs never overwrite each other.
  * The stored address is only ever used to read status, never shown again as somewhere to send.
+ * Unresolved swaps are kept past their deadline: a late answer or a stuck transfer must remain
+ * queryable for support. Final records keep only their static tx record.
  */
-export function createSwapStore(storage: Storage | null, key: string, now: () => number = Date.now) {
+export function createSwapStore(storage: Storage | null, key: string) {
   let memory: StoredSwap[] = [];
   const read = (): StoredSwap[] => {
     try {
@@ -69,12 +69,12 @@ export function createSwapStore(storage: Storage | null, key: string, now: () =>
       write([...rest, s]);
     },
     prune() {
-      const t = now();
-      write(
-        read()
-          .filter((s) => s.final !== null || t < s.deadlineMs + KEEP_AFTER_DEADLINE_MS)
-          .map((s) => (s.final ? { ...s, depositAddress: null } : s)),
-      );
+      // Never discard an unresolved swap because time passed. Once it is final, the address is no
+      // longer needed to read status, so only the static tx record remains.
+      write(read().map((s) => (s.final ? { ...s, depositAddress: null } : s)));
+    },
+    remove(depositAddress: string) {
+      write(read().filter((s) => s.depositAddress !== depositAddress));
     },
     onChange(cb: () => void): () => void {
       const handler = (e: StorageEvent) => {
@@ -84,6 +84,11 @@ export function createSwapStore(storage: Storage | null, key: string, now: () =>
       return () => window.removeEventListener("storage", handler);
     },
   };
+}
+
+/** An unresolved swap whose deadline has passed: keep it for status checks, never as a send target. */
+export function expiredSwap(s: StoredSwap, nowMs: number): boolean {
+  return s.final === null && nowMs >= s.deadlineMs;
 }
 
 /** A swap of this account that may still receive funds, so a second quote would risk a second send. */

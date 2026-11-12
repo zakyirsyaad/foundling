@@ -12,7 +12,7 @@ import { depositAmount } from "@/lib/crosschain/amount";
 import { isEvmAddress } from "@/lib/crosschain/evm";
 import { flowReducer, initialFlow } from "@/lib/crosschain/flow";
 import { quoteProblems } from "@/lib/crosschain/signature";
-import { type StoredSwap, blockingSwap } from "@/lib/crosschain/store";
+import { type StoredSwap, blockingSwap, expiredSwap } from "@/lib/crosschain/store";
 import { formatUnits, parseU128, parseUnits } from "@/lib/format/units";
 import { STATUS } from "@/lib/status/table";
 import type { Step } from "@/lib/wallet/useTx";
@@ -322,9 +322,21 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
       </details>
       {earlier.length ? (
         <ul className="grid gap-1 text-[13px]" aria-label="Earlier swaps">
-          {earlier.map((w) => (
-            <li key={`${w.depositAddress}-${w.createdAtMs}`} className="mono">{w.chainId} · {w.final ?? "in progress"} · {w.txHashes[0] ?? "no tx hash yet"}</li>
-          ))}
+          {earlier.map((w) => {
+            const expired = expiredSwap(w, x.nowMs);
+            return (
+              <li key={`${w.depositAddress}-${w.createdAtMs}`} className="mono">
+                {w.chainId} · {w.final ?? (expired ? "expired · unresolved" : "in progress")} · {w.txHashes[0] ?? "no tx hash yet"}
+                {expired && w.depositAddress ? (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-muted-foreground">Expired record</summary>
+                    <p className="mt-1">Do not send to this address. It is kept only for looking up the old transfer: <span className="break-all">{w.depositAddress}</span></p>
+                    <button type="button" className="mt-1 rounded-md border border-input px-2 py-1" onClick={() => { if (w.depositAddress) x.remove(w.depositAddress); }}>Forget this record</button>
+                  </details>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </section>
