@@ -22,3 +22,11 @@ export class WalletCancelled extends Error {
     this.name = "WalletCancelled";
   }
 }
+
+/** An on-chain failure the wallet reported after the transaction was broadcast. */
+export class TxFailed extends Error {
+  constructor(message: string, readonly hashes: string[] = []) {
+    super(message);
+    this.name = "TxFailed";
+  }
+}

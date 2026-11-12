@@ -66,6 +66,7 @@ test("margins per chain and the hide rules", () => {
   expect(v({ status: "INCOMPLETE_DEPOSIT" })).toBe("show");
   expect(v({ needsReanchor: true })).toBe("hide");
   expect(v({ status: "INCOMPLETE_DEPOSIT", reloaded: true })).toBe("hide");
+  expect(v({ status: "loading" })).toBe("hide");
   expect(v({ status: "unknown" })).toBe("hide");
   expect(v({ status: "other" })).toBe("hide");
   expect(v({ status: "unknown", remainingMs: 0 })).toBe("do-not-send");

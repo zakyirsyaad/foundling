@@ -54,7 +54,7 @@ export function useOneClickSwap(unreadable: boolean) {
   const [tokens, setTokens] = useState<{ assetId: string; contractAddress?: string }[] | null>(null);
   const [down, setDown] = useState(false);
   const [live, setLive] = useState<Live | null>(null);
-  const [status, setStatus] = useState<{ status: SwapStatus | string; raw: unknown } | null>(null);
+  const [status, setStatus] = useState<{ address: string; status: SwapStatus | string; raw: unknown } | null>(null);
   const [now, setNow] = useState(() => ({ perf: performance.now(), date: Date.now() }));
 
   useEffect(() => {
@@ -74,6 +74,9 @@ export function useOneClickSwap(unreadable: boolean) {
     return { req, res, problem: checkQuote(req, res) };
   }, [build, client]);
 
+  // A status belongs to the address it was read for; a new address starts at loading.
+  const currentStatus = status?.address === live?.swap.depositAddress ? status : null;
+
   // Status poll for the live swap and every unfinished stored swap.
   useEffect(() => {
     const addr = live?.swap.depositAddress;
@@ -81,8 +84,8 @@ export function useOneClickSwap(unreadable: boolean) {
     let alive = true;
     const poll = () =>
       client.status(addr).then(
-        (r) => alive && setStatus(r === "not-found" ? { status: "not-found", raw: null } : r),
-        () => alive && setStatus({ status: "unknown", raw: null }),
+        (r) => alive && setStatus(r === "not-found" ? { address: addr, status: "not-found", raw: null } : { ...r, address: addr }),
+        () => alive && setStatus({ address: addr, status: "unknown", raw: null }),
       );
     void poll();
     const t = setInterval(poll, POLL_MS);
@@ -142,18 +145,18 @@ export function useOneClickSwap(unreadable: boolean) {
       const { res, problem } = await quote({ chain, amount: BigInt(live.request.amount), recipient: live.request.recipient, refundTo: live.request.refundTo }, true);
       if (problem) return;
       const anchor = { responseTimestampMs: Date.parse(String(res.timestamp)), perfAtReceipt: performance.now(), dateAtReceipt: Date.now() };
-      const pending = status === null || status.status === "PENDING_DEPOSIT" || status.status === "not-found";
+      const pending = currentStatus === null || currentStatus.status === "PENDING_DEPOSIT" || currentStatus.status === "not-found";
       setLive((l) => (l ? { ...l, anchor, needsReanchor: false, confirmNotSent: pending } : l));
     } catch {
       // Leave the address hidden; the user can request a new quote once the old one is past its deadline.
     }
-  }, [live, unreadable, oc.chains, quote, status]);
+  }, [live, unreadable, oc.chains, quote, currentStatus]);
 
   const rem = live ? remainingMs(live.swap.deadlineMs, live.anchor, now.perf, now.date) : 0;
   const margin = live ? (oc.chains.find((c) => c.id === live.swap.chainId)?.marginMs ?? 0) : 0;
-  const st = (status?.status ?? "not-found") as string;
-  const known: SwapStatus = st === "PENDING_DEPOSIT" || st === "INCOMPLETE_DEPOSIT" || st === "not-found" || st === "unknown" ? st : "other";
+  const st = (currentStatus?.status ?? "loading") as string;
+  const known: SwapStatus = currentStatus === null ? "loading" : st === "PENDING_DEPOSIT" || st === "INCOMPLETE_DEPOSIT" || st === "not-found" || st === "unknown" ? st : "other";
   const view = live ? (live.confirmNotSent ? "hide" : addressView({ status: known, remainingMs: rem, marginMs: margin, needsReanchor: live.needsReanchor, reloaded: false })) : "hide";
 
-  return { listSwaps: () => store.list(), nowMs: now.date, oc, client, swaps, save, tokens, down, quote, live, setLive, status, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
+  return { listSwaps: () => store.list(), nowMs: now.date, oc, client, swaps, save, tokens, down, quote, live, setLive, status: currentStatus, rem, margin, view, reanchor, chainIds: oc.chains.map((c) => c.id) as ChainId[] };
 }

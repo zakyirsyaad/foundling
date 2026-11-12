@@ -35,8 +35,8 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
   const { wallet, account } = useWallet();
   const { position: p, gasPrice, reload } = usePosition(account, s);
   const ctx = useMemo(() => buildCtxFor(s), [s]);
-  const { state, run } = useTx(wallet, ctx, reload);
-  const busy = state.kind === "awaiting-wallet";
+  const { state, run, acknowledge } = useTx(wallet, ctx, reload);
+  const busy = state.kind === "awaiting-wallet" || state.kind === "unknown" || state.kind === "interrupted";
   if (!s) return loading ? <LoadingBlock rows={4} label="Reading the vault" /> : <VaultBanner s={null} unreadable />;
   const gate = depositGate(s, p, unreadable);
   const crossChain = slots.crossChain && config.oneClick && ctx ? slots.crossChain({ s, p, unreadable, run, busy, ctx, gasPrice }) : null;
@@ -65,7 +65,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
               </button>
             ) : null}
           </Positions>
-          <TxStatus state={state} />
+          <TxStatus state={state} onAcknowledge={acknowledge} />
         </>
       )}
       {/* Always rendered, so the cross-chain card keeps one place in the tree and its state while the position re-reads. */}

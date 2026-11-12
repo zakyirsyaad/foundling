@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { loadConfig } from "@/config/deployment";
 import { Claims, RedeemForm } from "@/features/portfolio/Exits";
 import type { Position } from "@/lib/chain/types";
+import { PENDING_KEY, persistPending } from "@/lib/wallet/txState";
 import { useTx } from "@/lib/wallet/useTx";
-import { WalletCancelled } from "@/lib/wallet/types";
+import { TxFailed, WalletCancelled } from "@/lib/wallet/types";
 import { fixtureSnapshot } from "../fixtures/snapshot";
 
 const find = vi.fn();
@@ -13,6 +14,8 @@ vi.mock("@/lib/vault/claims", async (orig) => ({ ...(await orig<typeof import("@
 
 const cfg = loadConfig({ NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_VAULT_ID: "vault.foundling.testnet", NEXT_PUBLIC_RPC_URLS: "http://localhost:3199/rpc", NEXT_PUBLIC_USDC_ID: "usdc.foundling.testnet", NEXT_PUBLIC_WNEAR_ID: "wrap.testnet", NEXT_PUBLIC_TEST_BUILD: "1" });
 const pos: Position = { account: "alice.testnet", shares: 9_600_000_000_000n, pending: 0n, netDeposit: 0n, claimable: { usdc: 2_000_000n, wnear: 0n }, registered: { vault: true, usdc: false, wnear: true }, balances: { usdc: 0n, usdcE: 0n, near: 10n ** 24n }, allowed: true };
+
+beforeEach(() => window.sessionStorage.clear());
 
 async function setup() {
   const s = await fixtureSnapshot();
@@ -60,17 +63,51 @@ test("no claims says so", async () => {
 });
 test("useTx sends, settles, and maps cancel and contract errors", async () => {
   const { ctx } = await setup();
-  const send = vi.fn().mockResolvedValueOnce([{ hash: "H1", outcome: null }]).mockRejectedValueOnce(new WalletCancelled()).mockRejectedValueOnce(new Error("Smart contract panicked: NOT_STUCK"));
+  const send = vi.fn().mockResolvedValueOnce([{ hash: "H1", outcome: null }]).mockRejectedValueOnce(new WalletCancelled()).mockRejectedValueOnce(new TxFailed("Smart contract panicked: NOT_STUCK"));
   const wallet = { send, connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
   const settled = vi.fn();
   const { result } = renderHook(() => useTx(wallet, ctx, settled));
   await act(async () => result.current.run([{ name: "advance", args: { nonce: 1 } }]));
   expect(result.current.state).toEqual({ kind: "done", hashes: ["H1"] });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
   await act(async () => result.current.run([{ name: "advance", args: { nonce: 1 } }]));
   expect(result.current.state).toEqual({ kind: "cancelled" });
   await act(async () => result.current.run([{ name: "advance", args: { nonce: 1 } }]));
   expect(result.current.state).toMatchObject({ kind: "rejected", raw: "Smart contract panicked: NOT_STUCK" });
   expect(settled).toHaveBeenCalledTimes(3);
+});
+test("an unknown wallet outcome keeps the pending intent and can be acknowledged", async () => {
+  const { ctx } = await setup();
+  const send = vi.fn().mockRejectedValueOnce(new Error("wallet timeout"));
+  const wallet = { send, connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
+  const { result } = renderHook(() => useTx(wallet, ctx, vi.fn()));
+  await act(async () => result.current.run([{ name: "advance", args: { nonce: 1 } }]));
+  expect(result.current.state).toEqual({ kind: "unknown", raw: "wallet timeout" });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).not.toBeNull();
+  act(() => result.current.acknowledge());
+  expect(result.current.state).toEqual({ kind: "idle" });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+});
+test("a reload after finalization does not show the finished transaction as sent", async () => {
+  const { ctx } = await setup();
+  const send = vi.fn().mockResolvedValueOnce([{ hash: "H1", outcome: null }]);
+  const wallet = { send, connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
+  const first = renderHook(() => useTx(wallet, ctx, vi.fn()));
+  await act(async () => first.result.current.run([{ name: "advance", args: { nonce: 1 } }]));
+  first.unmount();
+  const second = renderHook(() => useTx(wallet, ctx, vi.fn()));
+  expect(second.result.current.state).toEqual({ kind: "idle" });
+});
+test("an interrupted request stays pending until acknowledged", async () => {
+  const { ctx } = await setup();
+  persistPending(window.sessionStorage, { path: window.location.pathname, hashes: [] });
+  const wallet = { send: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
+  const { result } = renderHook(() => useTx(wallet, ctx, vi.fn()));
+  expect(result.current.state).toEqual({ kind: "interrupted" });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).not.toBeNull();
+  act(() => result.current.acknowledge());
+  expect(result.current.state).toEqual({ kind: "idle" });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
 });
 test("useTx refuses out loud when there is no build context", async () => {
   const wallet = { send: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };

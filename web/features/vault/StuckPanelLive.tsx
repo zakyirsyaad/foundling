@@ -13,11 +13,12 @@ import { StuckPanel } from "./StuckPanel";
 export function StuckPanelLive({ s, fresh, onSettled }: { s: VaultSnapshot; fresh: boolean; onSettled: () => void }) {
   const { wallet, account } = useWallet();
   const ctx = useMemo(() => buildCtxFor(s), [s]);
-  const { state, run } = useTx(wallet, ctx, onSettled);
+  const { state, run, acknowledge } = useTx(wallet, ctx, onSettled);
+  const busy = state.kind === "awaiting-wallet" || state.kind === "unknown" || state.kind === "interrupted";
   return (
     <>
-      <StuckPanel s={s} fresh={fresh} run={run} busy={state.kind === "awaiting-wallet"} canSign={Boolean(account && ctx)} />
-      <TxStatus state={state} />
+      <StuckPanel s={s} fresh={fresh} run={run} busy={busy} canSign={Boolean(account && ctx)} />
+      <TxStatus state={state} onAcknowledge={acknowledge} />
     </>
   );
 }

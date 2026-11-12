@@ -3,8 +3,8 @@ import type { Context, MiddlewareHandler } from "hono";
 import { failure } from "./envelope";
 
 const WINDOW_MS = 60_000;
-/** Bounds the limiter's memory under a spray of addresses; old windows are pruned past this. */
-const MAX_TRACKED = 10_000;
+/** Bounds the limiter's memory under a spray of addresses. */
+export const MAX_TRACKED = 10_000;
 
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split(".");
@@ -63,20 +63,38 @@ export function clientKey(address: string): string {
   return h ? `${h.slice(0, 4).join(":")}::/64` : ip;
 }
 
-export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[] }): MiddlewareHandler {
+export function rateLimiter(opts: { perMinute: number; trustProxyFrom: string[]; now?: () => number }): MiddlewareHandler & { tracked: () => number } {
   const windows = new Map<string, { start: number; count: number }>();
-  return async (c, next) => {
-    const now = Date.now();
+  const now = opts.now ?? Date.now;
+
+  /** Drops expired windows, then evicts the oldest active bucket until one slot is free. */
+  const makeRoom = (at: number) => {
+    for (const [k, w] of windows) if (at - w.start >= WINDOW_MS) windows.delete(k);
+    while (windows.size >= MAX_TRACKED) {
+      const oldest = windows.keys().next();
+      if (oldest.done) break;
+      windows.delete(oldest.value);
+    }
+  };
+
+  const limiter: MiddlewareHandler = async (c, next) => {
+    const at = now();
     const key = clientKey(clientAddress(socketAddress(c), c.req.header("x-real-ip"), opts.trustProxyFrom));
-    if (windows.size > MAX_TRACKED) for (const [k, w] of windows) if (now - w.start >= WINDOW_MS) windows.delete(k);
     const w = windows.get(key);
-    if (!w || now - w.start >= WINDOW_MS) windows.set(key, { start: now, count: 1 });
-    else if (++w.count > opts.perMinute) {
-      c.header("retry-after", String(Math.ceil((w.start + WINDOW_MS - now) / 1000)));
-      return failure(c, 429, "too many requests");
+    if (w && at - w.start < WINDOW_MS) {
+      if (++w.count > opts.perMinute) {
+        c.header("retry-after", String(Math.ceil((w.start + WINDOW_MS - at) / 1000)));
+        return failure(c, 429, "too many requests");
+      }
+    } else {
+      if (w) windows.delete(key);
+      makeRoom(at);
+      windows.set(key, { start: at, count: 1 });
     }
     await next();
   };
+
+  return Object.assign(limiter, { tracked: () => windows.size });
 }
 
 export function concurrencyLimit(max: number): MiddlewareHandler {

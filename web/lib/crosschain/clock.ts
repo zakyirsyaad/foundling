@@ -18,7 +18,7 @@ export function remainingMs(deadlineMs: number, a: ClockAnchor, nowPerf: number,
 }
 
 export type AddressView = "show" | "hide" | "do-not-send";
-export type SwapStatus = "PENDING_DEPOSIT" | "INCOMPLETE_DEPOSIT" | "not-found" | "unknown" | "other";
+export type SwapStatus = "loading" | "PENDING_DEPOSIT" | "INCOMPLETE_DEPOSIT" | "not-found" | "unknown" | "other";
 
 /** Whether the deposit address may be shown. A 404 before 1Click knows the address counts as PENDING_DEPOSIT. */
 export function addressView(i: { status: SwapStatus; remainingMs: number; marginMs: number; needsReanchor: boolean; reloaded: boolean }): AddressView {
