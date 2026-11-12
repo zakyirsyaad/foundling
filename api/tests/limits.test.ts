@@ -115,3 +115,23 @@ test("the bucket map is bounded and evicts the oldest active identity", async ()
   at += 60_001;
   expect(limiter.tracked()).toBeLessThanOrEqual(MAX_TRACKED);
 }, 30_000);
+
+test("the cap evicts the oldest bucket with a small deterministic map", async () => {
+  let at = 1_000_000;
+  const limiter = rateLimiter({ perMinute: 1, trustProxyFrom: [], now: () => at, maxTracked: 2 });
+  const app = new Hono();
+  app.use(limiter);
+  app.get("/", (c) => c.text("ok"));
+  const from = (ip: string) => app.request("/", {}, envFrom(ip));
+  expect((await from("10.0.0.1")).status).toBe(200);
+  expect((await from("10.0.0.2")).status).toBe(200);
+  expect((await from("10.0.0.3")).status).toBe(200);
+  expect(limiter.tracked()).toBe(2);
+  // 10.0.0.1 was evicted, so it starts a fresh window instead of being blocked.
+  expect((await from("10.0.0.1")).status).toBe(200);
+  expect(limiter.tracked()).toBe(2);
+  at += 60_001;
+  // The expired 10.0.0.2/10.0.0.3 buckets are reclaimed by the new identity.
+  expect((await from("10.0.0.4")).status).toBe(200);
+  expect(limiter.tracked()).toBe(2);
+});
