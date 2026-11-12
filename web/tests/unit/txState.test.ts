@@ -28,7 +28,7 @@ test("a request sent to the wallet before a reload is remembered without hashes"
   persistPending(storage, { path: "/app/portfolio", hashes: [] });
   expect(takePending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: [] });
   expect(txReducer({ kind: "idle" }, { type: "interrupted" })).toEqual({ kind: "interrupted" });
-  expect(txReducer({ kind: "idle" }, { type: "resumed", hashes: ["H"] })).toEqual({ kind: "sent", hashes: ["H"] });
+  expect(txReducer({ kind: "idle" }, { type: "interrupted", hashes: ["H"] })).toEqual({ kind: "interrupted", hashes: ["H"] });
 });
 test("storage that throws or holds junk is treated as empty", () => {
   const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => {} } as unknown as Storage;
