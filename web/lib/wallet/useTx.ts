@@ -28,11 +28,11 @@ export function useTx(wallet: WalletApi | null, ctx: BuildCtx | null, onSettled:
   const [state, dispatch] = useReducer(txReducer, { kind: "idle" });
 
   useEffect(() => {
-    // Resume what this page sent before a reload: "Sent" with its hashes, or a warning when the
-    // wallet request went out but no hash came back, so the person checks before signing again.
-    // The pending record stays until the person acknowledges, succeeds, cancels, or fails on chain.
+    // Resume what this page sent before a reload as an interrupted request. Even when the wallet
+    // returned hashes, the page cannot prove the chain settled, so it stays blocked until the person
+    // acknowledges. The pending record stays until then, or until a new send succeeds/cancels/fails.
     const pending = readPending(session(), window.location.pathname);
-    if (pending) dispatch(pending.hashes.length ? { type: "resumed", hashes: pending.hashes } : { type: "interrupted" });
+    if (pending) dispatch({ type: "interrupted", hashes: pending.hashes });
     // Runs once, on mount, to resume a transaction sent before a reload.
      
   }, []);

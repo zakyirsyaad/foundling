@@ -18,3 +18,11 @@ test("an interrupted request keeps the same acknowledgement path", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "I checked my wallet; nothing was sent" }));
   expect(acknowledge).toHaveBeenCalledOnce();
 });
+
+test("an interrupted request with hashes shows them next to the acknowledgement", async () => {
+  const acknowledge = vi.fn();
+  render(<TxStatus state={{ kind: "interrupted", hashes: ["H1"] }} onAcknowledge={acknowledge} />);
+  expect(screen.getByRole("alert")).toHaveTextContent(/wallet returned/);
+  await userEvent.setup().click(screen.getByRole("button", { name: "I checked my wallet; nothing was sent" }));
+  expect(acknowledge).toHaveBeenCalledOnce();
+});

@@ -21,6 +21,7 @@ export function TxStatus({ state, onAcknowledge }: { state: TxState; onAcknowled
       return (
         <div role="alert" className="grid gap-2">
           <p>A request went to your wallet before this page reloaded. Check your wallet&apos;s activity before you sign again.</p>
+          {state.hashes?.length ? <p>The wallet returned {state.hashes.map((h) => <Hash key={h} value={h} label="transaction hash" />)}</p> : null}
           {onAcknowledge ? <button type="button" className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={onAcknowledge}>I checked my wallet; nothing was sent</button> : null}
         </div>
       );

@@ -6,7 +6,7 @@ export type TxState =
   | { kind: "sent"; hashes: string[] }
   | { kind: "done"; hashes: string[] }
   | { kind: "partial"; hashes: string[]; why: "claim-pending" | "moved-to-claimable" | "refunded" }
-  | { kind: "interrupted" }
+  | { kind: "interrupted"; hashes?: string[] }
   | { kind: "unknown"; raw: string }
   | { kind: "cancelled" }
   | { kind: "rejected"; sentence: string; raw: string };
@@ -16,8 +16,7 @@ export type TxEvent =
   | { type: "cancelled" }
   | { type: "sent"; hashes: string[] }
   | { type: "settled"; partial?: "claim-pending" | "moved-to-claimable" | "refunded" }
-  | { type: "resumed"; hashes: string[] }
-  | { type: "interrupted" }
+  | { type: "interrupted"; hashes?: string[] }
   | { type: "unknown"; raw: string }
   | { type: "acknowledged" }
   | { type: "rejected"; raw: string };
@@ -36,10 +35,8 @@ export function txReducer(state: TxState, ev: TxEvent): TxState {
     }
     case "rejected":
       return { kind: "rejected", sentence: contractErrorSentence(ev.raw), raw: ev.raw };
-    case "resumed":
-      return { kind: "sent", hashes: ev.hashes };
     case "interrupted":
-      return { kind: "interrupted" };
+      return ev.hashes?.length ? { kind: "interrupted", hashes: ev.hashes } : { kind: "interrupted" };
     case "unknown":
       return { kind: "unknown", raw: ev.raw };
     case "acknowledged":

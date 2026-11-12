@@ -109,6 +109,16 @@ test("an interrupted request stays pending until acknowledged", async () => {
   expect(result.current.state).toEqual({ kind: "idle" });
   expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
 });
+test("a resumed request with hashes stays interrupted until acknowledged", async () => {
+  const { ctx } = await setup();
+  persistPending(window.sessionStorage, { path: window.location.pathname, hashes: ["H1"] });
+  const wallet = { send: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
+  const { result } = renderHook(() => useTx(wallet, ctx, vi.fn()));
+  expect(result.current.state).toEqual({ kind: "interrupted", hashes: ["H1"] });
+  act(() => result.current.acknowledge());
+  expect(result.current.state).toEqual({ kind: "idle" });
+  expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+});
 test("useTx refuses out loud when there is no build context", async () => {
   const wallet = { send: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), accountId: () => "a", onAccountChange: () => () => {} };
   const { result } = renderHook(() => useTx(wallet, null, vi.fn()));
