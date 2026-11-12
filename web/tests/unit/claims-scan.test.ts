@@ -40,3 +40,18 @@ test("the scan stops at nonce 1", async () => {
   expect(await findClaims(rpc, s, "a.near", 3n)).toEqual({ rows: [], next: null });
   expect(rpc.asked).toEqual([3, 2, 1]);
 });
+
+test("the scan skips a nonce it cannot send exactly and continues with the safe ones", async () => {
+  const s = await fixtureSnapshot({ lastNonce: 2n ** 53n });
+  const rpc = rpcWithClaims({}, new Set());
+  expect(await findClaims(rpc, s, "a.near", 2n ** 53n)).toEqual({ rows: [], next: 2n ** 53n - 16n });
+  expect(rpc.asked).toHaveLength(15);
+  expect(rpc.asked).not.toContain(Number(2n ** 53n));
+  expect(rpc.asked[0]).toBe(Number(2n ** 53n - 1n));
+});
+test("the scan stops when every nonce in the page is above 2^53", async () => {
+  const s = await fixtureSnapshot({ lastNonce: 2n ** 53n + 100n });
+  const rpc = rpcWithClaims({}, new Set());
+  expect(await findClaims(rpc, s, "a.near", 2n ** 53n + 100n)).toEqual({ rows: [], next: null });
+  expect(rpc.asked).toEqual([]);
+});

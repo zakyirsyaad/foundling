@@ -66,3 +66,13 @@ test("without a wallet the buttons are replaced by the CLI command", async () =>
   expect(screen.getByRole("button", { name: "Advance cycle 9" })).toBeDisabled();
   expect(screen.getByText(/advance/, { selector: "code" })).toBeInTheDocument();
 });
+
+test("an advance with a nonce above 2^53 is disabled, not rounded", async () => {
+  const base = await stuckSnapshot();
+  const s = { ...base, stage: { ...base.stage, nonce: 2n ** 53n } as typeof base.stage };
+  const run = vi.fn();
+  render(<StuckPanel s={s} fresh run={run} busy={false} canSign />);
+  expect(screen.getByRole("button", { name: `Advance cycle ${2n ** 53n}` })).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent(/too large for this browser to send exactly/);
+  expect(screen.queryByText(/advance/, { selector: "code" })).toBeNull();
+});

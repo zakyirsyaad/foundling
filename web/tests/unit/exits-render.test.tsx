@@ -98,3 +98,13 @@ test("redeem states the NEAR it needs for gas and registration", async () => {
   render(<RedeemForm s={s} p={{ ...pos, balances: { ...pos.balances, near: 0n } }} ctx={ctx} run={vi.fn()} busy={false} unreadable={false} gasPrice={100_000_000n} />);
   expect(screen.getByTestId("near-need")).toHaveTextContent(/You need .* more NEAR/);
 });
+
+test("an unsafe claim nonce is shown but not sent", async () => {
+  const { s, ctx } = await setup();
+  find.mockResolvedValueOnce({ rows: [{ nonce: 2n ** 53n, amount: 5n, resolved: true }], next: null });
+  const run = vi.fn();
+  await act(async () => render(<Claims s={s} p={{ ...pos, claimable: { usdc: 0n, wnear: 0n } }} ctx={ctx} run={run} busy={false} />));
+  expect(await screen.findByText(/too large for this browser to claim exactly/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Claim" })).toBeNull();
+  expect(run).not.toHaveBeenCalled();
+});
