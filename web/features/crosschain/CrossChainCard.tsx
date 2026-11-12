@@ -70,6 +70,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   const [txHash, setTxHash] = useState("");
   const [lookup, setLookup] = useState("");
   const [lookupResult, setLookupResult] = useState<string | null>(null);
+  const [requesting, setRequesting] = useState(false);
+  const inFlight = useRef(false);
   const latest = useRef({ s, p, account, unreadable });
   useEffect(() => {
     latest.current = { s, p, account, unreadable };
@@ -97,10 +99,13 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   const refundOk = isEvmAddress(refundTo);
 
   async function getQuote() {
+    if (inFlight.current) return;
     const current = latest.current;
     if (!current.account || amount === null) return;
     const gateNow = depositGate(current.s, current.p, current.unreadable);
     if (gateNow.reasons.length) return dispatch({ type: "problem", message: gateProblemMessage(gateNow.reasons) });
+    inFlight.current = true;
+    setRequesting(true);
     try {
       const { res, problem } = await x.quote({ chain, amount, recipient: current.account, refundTo }, true);
       if (problem) return dispatch({ type: "problem", message: problem });
@@ -112,16 +117,22 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
       dispatch({ type: "quoted", chain: chain.id });
     } catch (err) {
       dispatch({ type: "problem", message: `1Click did not give a quote: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      inFlight.current = false;
+      setRequesting(false);
     }
   }
 
   async function getAddress() {
+    if (inFlight.current) return;
     const current = latest.current;
     if (!current.account || amount === null) return;
     const gateNow = depositGate(current.s, current.p, current.unreadable);
     if (gateNow.reasons.length) return dispatch({ type: "problem", message: gateProblemMessage(gateNow.reasons) });
     // Another tab may have got an address since this one passed the quote step.
     if (blockingSwap(x.listSwaps(), current.account, Date.now())) return dispatch({ type: "problem", message: "Another swap for this account may still be waiting for funds. Check it below before asking for a new address." });
+    inFlight.current = true;
+    setRequesting(true);
     try {
       const { req, res, problem } = await x.quote({ chain, amount, recipient: current.account, refundTo }, false);
       if (problem) return dispatch({ type: "problem", message: problem });
@@ -144,6 +155,9 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
       dispatch({ type: "address-verified", swap });
     } catch (err) {
       dispatch({ type: "problem", message: `1Click did not give an address: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      inFlight.current = false;
+      setRequesting(false);
     }
   }
 
@@ -188,15 +202,15 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               <legend className="fm-label mb-1">Chain</legend>
               {x.oc.chains.map((c) => (
                 <label key={c.id} className={`rounded-md border px-3 py-1.5 ${c.enabled ? "" : "opacity-50"}`}>
-                  <input type="radio" name="chain" value={c.id} disabled={!c.enabled} checked={chainId === c.id} onChange={() => setChainId(c.id)} /> {c.label}{c.enabled ? "" : " · not available yet"}
+                  <input type="radio" name="chain" value={c.id} disabled={!c.enabled || requesting} checked={chainId === c.id} onChange={() => setChainId(c.id)} /> {c.label}{c.enabled ? "" : " · not available yet"}
                 </label>
               ))}
             </fieldset>
-            <label className="grid gap-1"><span className="fm-label">USDC to send</span><input inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} className="mono rounded-md border border-input bg-transparent px-3 py-2" /></label>
+            <label className="grid gap-1"><span className="fm-label">USDC to send</span><input inputMode="decimal" value={amountText} disabled={requesting} onChange={(e) => setAmountText(e.target.value)} className="mono rounded-md border border-input bg-transparent px-3 py-2 disabled:opacity-50" /></label>
             <div className="grid gap-1">
               <label className="grid gap-1">
                 <span className="fm-label">Refund address on {chain.label}</span>
-                <input value={refundTo} onChange={(e) => setRefundTo(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2" aria-invalid={refundTo !== "" && !refundOk} aria-describedby="refund-help" />
+                <input value={refundTo} disabled={requesting} onChange={(e) => setRefundTo(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2 disabled:opacity-50" aria-invalid={refundTo !== "" && !refundOk} aria-describedby="refund-help" />
               </label>
               <div id="refund-help" className="grid gap-1">
                 {refundTo !== "" && !refundOk ? <span className="text-[13px] text-danger">Not a valid EVM address. Check it, including upper and lower case.</span> : null}
@@ -204,7 +218,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               </div>
             </div>
             {chain.id === "eth" ? <p className="text-[13px]">Network fees on Ethereum can be more than a small deposit.</p> : null}
-            <button type="button" disabled={amount === null || !refundOk} onClick={getQuote} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Get a quote</button>
+            <button type="button" disabled={requesting || amount === null || !refundOk} onClick={getQuote} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">{requesting ? "Asking 1Click…" : "Get a quote"}</button>
           </div>
         )
       ) : null}
@@ -234,7 +248,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
         <div className="grid gap-2">
           <p>The next quote is final: prices can move, so the numbers may change. Check them before you send.</p>
           <p className="text-[13px]">By sending you accept the <Link href="/terms#cross-chain" className="underline underline-offset-4">terms for deposits from another chain</Link>.</p>
-          <button type="button" onClick={getAddress} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">Get the deposit address</button>
+          <button type="button" disabled={requesting} onClick={getAddress} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">{requesting ? "Asking 1Click…" : "Get the deposit address"}</button>
         </div>
       ) : null}
 

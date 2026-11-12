@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { Position } from "@/lib/chain/types";
@@ -13,7 +13,7 @@ vi.mock("@/config", async () => {
 const { wallet, extra, api } = vi.hoisted(() => ({
   wallet: { account: "alice.near" as string | null },
   extra: {} as Record<string, unknown>,
-  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, delayMs: 0, fails: false, submitted: [] as string[], submitFails: false },
+  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, delayMs: 0, fails: false, quoteDelayMs: 0, quotes: 0, statusCalls: 0, submitted: [] as string[], submitFails: false },
 }));
 vi.mock("@/lib/wallet/WalletProvider", () => ({ useWallet: () => ({ wallet: null, account: wallet.account }) }));
 
@@ -26,8 +26,13 @@ vi.mock("@/lib/crosschain/signature", async (orig) => ({
 vi.mock("@/lib/crosschain/client", () => ({
   createOneClick: () => ({
     tokens: async () => (api.down ? Promise.reject(new Error("down")) : [{ assetId: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", contractAddress: "0x8335" }]),
-    quote: async (req: Record<string, unknown>) => (await import("../mock-server/oneclick")).quote({ extra }, req),
+    quote: async (req: Record<string, unknown>) => {
+      if (api.quoteDelayMs) await new Promise((resolve) => setTimeout(resolve, api.quoteDelayMs));
+      api.quotes += 1;
+      return (await import("../mock-server/oneclick")).quote({ extra }, req);
+    },
     status: async () => {
+      api.statusCalls += 1;
       if (api.delayMs) await new Promise((resolve) => setTimeout(resolve, api.delayMs));
       if (api.fails) throw new Error("1Click is down");
       return api.status ? { status: api.status.status, raw: api.status } : "not-found";
@@ -48,6 +53,9 @@ beforeEach(() => {
   api.status = null;
   api.delayMs = 0;
   api.fails = false;
+  api.quoteDelayMs = 0;
+  api.quotes = 0;
+  api.statusCalls = 0;
   api.submitted = [];
   api.submitFails = false;
   wallet.account = "alice.near";
@@ -366,4 +374,25 @@ test("a low TVL estimate is a warning, not a hard refusal", async () => {
   expect(screen.queryByText(/The vault may be full/)).toBeNull();
   await act(async () => r.rerender(<CrossChainCard s={{ ...s, policy: { ...s.policy, tvlCap: 100_000_000n } }} p={{ ...pos, registered: { vault: true, usdc: true, wnear: true } }} unreadable={false} run={vi.fn()} busy={false} ctx={ctx} gasPrice={100_000_000n} />));
   expect(screen.getByText(/The vault may be full/)).toBeInTheDocument();
+});
+
+test("a double quote click starts one request and disables the form", async () => {
+  api.quoteDelayMs = 300;
+  await renderCard();
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("USDC to send"), "5");
+  await user.type(screen.getByLabelText("Refund address on Base"), REFUND);
+  const button = screen.getByRole("button", { name: "Get a quote" });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(screen.getByLabelText("USDC to send")).toBeDisabled();
+  expect(await screen.findByText("Arrives (about)")).toBeInTheDocument();
+  expect(api.quotes).toBe(1);
+});
+test("an expired record polls once and then backs off", async () => {
+  window.localStorage.setItem("foundling.swaps.v1:mainnet:foundling-vault.near", JSON.stringify([{ depositAddress: "0xExpired", recipient: "alice.near", chainId: "base", deadlineMs: Date.now() - 25 * 3_600_000, createdAtMs: 0, final: null, txHashes: [], declaredNotSent: false }]));
+  await renderCard();
+  await waitFor(() => expect(api.statusCalls).toBe(1), { timeout: 2000 });
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  expect(api.statusCalls).toBe(1);
 });
