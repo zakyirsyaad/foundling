@@ -2,11 +2,12 @@
   "attack": "headline-injection",
   "expected_codes": [
     "COOLDOWN",
-    "OVER_BOOK"
+    "OVER_BOOK",
+    "OVER_EPOCH_CAP"
   ],
   "ledger_after": {
     "book": {
-      "usdc": "19999999",
+      "usdc": "19999998",
       "wnear": "0"
     },
     "rhea_book": {
@@ -14,10 +15,10 @@
       "wnear": "0"
     },
     "total_shares": "20000000000000",
-    "wallet_usdc": "19999999",
+    "wallet_usdc": "19999998",
     "wallet_wnear": "0",
-    "window_usdc": "2000000",
-    "window_wnear": "444444444444444444444444"
+    "window_usdc": "3000000",
+    "window_wnear": "666666666666666666666666"
   },
   "ledger_before": {
     "book": {
@@ -37,7 +38,8 @@
   "not_exercised": [],
   "observed_codes": [
     "COOLDOWN",
-    "OVER_BOOK"
+    "OVER_BOOK",
+    "OVER_EPOCH_CAP"
   ],
   "policy": {
     "abort_after_blocks": 450,
@@ -70,7 +72,7 @@
     "tvl_cap": "100000000"
   },
   "result": "PASS",
-  "source_commit": "f600983e54b4eb99dc1a73662e9d90b06a2701ee",
+  "source_commit": "05fa2e471e8172ba7e0f997be789cfad2c8b3f07",
   "source_dirty": false,
   "steps": [
     {
@@ -92,6 +94,7 @@
     },
     {
       "detail": {
+        "answers_left_unread_in_outlayer": 1,
         "seen_as": "panic of trigger_cycle, not a Rejected event"
       },
       "held": true,
@@ -105,10 +108,40 @@
       "held": true,
       "observed": "OVER_BOOK",
       "step": "past the cooldown, the same amount finds an empty book"
+    },
+    {
+      "detail": {
+        "nonce": 5,
+        "refilled_wnear": "222222222222222222222222"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a second, smaller buy refills the book after the first sell emptied it"
+    },
+    {
+      "detail": {
+        "amount_in": "222222222222222222222222",
+        "bought_and_sold": "666666666666666666666666",
+        "epoch_cap_wnear": "8000000000000000000000000",
+        "nonce": 6,
+        "window_wnear": "666666666666666666666666"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the book refilled, the next cooldown lets the same headline sell once more, no more than the refill"
+    },
+    {
+      "detail": {
+        "amount_in": "1500000",
+        "nonce": 7
+      },
+      "held": true,
+      "observed": "OVER_EPOCH_CAP",
+      "step": "a third refill inside the same epoch hits the buy side's epoch limit"
     }
   ],
   "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
   "unexpected_codes": [],
-  "vault_wasm_sha256": "2f9fd7f3a29996364eabd95d83ba0f16092700053b289a44e6becf28c4afa9be",
+  "vault_wasm_sha256": "85c8e99f290307a30e8127a66c967e91ff08b6d9f7252bd89517ed12348e61de",
   "verdict": "held"
 }

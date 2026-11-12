@@ -74,7 +74,7 @@
     "nothing claimable"
   ],
   "result": "PASS",
-  "source_commit": "f600983e54b4eb99dc1a73662e9d90b06a2701ee",
+  "source_commit": "05fa2e471e8172ba7e0f997be789cfad2c8b3f07",
   "source_dirty": false,
   "steps": [
     {
@@ -211,6 +211,6 @@
   ],
   "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
   "unexpected_codes": [],
-  "vault_wasm_sha256": "2f9fd7f3a29996364eabd95d83ba0f16092700053b289a44e6becf28c4afa9be",
+  "vault_wasm_sha256": "85c8e99f290307a30e8127a66c967e91ff08b6d9f7252bd89517ed12348e61de",
   "verdict": "held"
 }
