@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { clientAddress, concurrencyLimit, rateLimiter } from "../src/limits";
+import { MAX_TRACKED, clientAddress, concurrencyLimit, rateLimiter } from "../src/limits";
 
 const envFrom = (ip: string) => ({ incoming: { socket: { remoteAddress: ip } } });
 
@@ -91,3 +91,27 @@ test.each([
   const { clientKey } = await import("../src/limits");
   expect(clientKey(ip)).toBe(key);
 });
+
+test("the bucket map is bounded and evicts the oldest active identity", async () => {
+  let at = 1_000_000;
+  const limiter = rateLimiter({ perMinute: 60, trustProxyFrom: [], now: () => at });
+  const app = new Hono();
+  app.use(limiter);
+  app.get("/", (c) => c.text("ok"));
+
+  const ip = (i: number) => `10.0.${Math.floor(i / 256)}.${i % 256}`;
+  for (let i = 0; i < MAX_TRACKED; i++) {
+    expect((await app.request("/", {}, envFrom(ip(i)))).status).toBe(200);
+  }
+  expect(limiter.tracked()).toBe(MAX_TRACKED);
+
+  // A new identity evicts the oldest bucket instead of being refused; memory stays at the cap.
+  expect((await app.request("/", {}, envFrom("192.0.2.1"))).status).toBe(200);
+  expect(limiter.tracked()).toBe(MAX_TRACKED);
+
+  // The evicted identity starts a fresh window rather than being blocked for the rest of the minute.
+  expect((await app.request("/", {}, envFrom(ip(0)))).status).toBe(200);
+  expect(limiter.tracked()).toBe(MAX_TRACKED);
+  at += 60_001;
+  expect(limiter.tracked()).toBeLessThanOrEqual(MAX_TRACKED);
+}, 30_000);
