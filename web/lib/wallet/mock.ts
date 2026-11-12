@@ -3,7 +3,7 @@
  * Signs nothing: it posts each call to the mock server, which applies it to the scenario.
  */
 import type { WalletTx } from "./calls";
-import { type TxOutcome, type WalletApi, WalletCancelled } from "./types";
+import { type TxOutcome, type WalletApi, TxFailed, WalletCancelled } from "./types";
 
 const MOCK = "http://localhost:3199";
 const ACCOUNT_KEY = "foundling.mock.account";
@@ -44,7 +44,7 @@ export function createMockWallet(): WalletApi {
         body: JSON.stringify({ signer: account, fail: next?.startsWith("contract:") ? next.slice(9) : null, txs: txs.map((t) => ({ ...t, gas: t.gas.toString(), deposit: t.deposit.toString() })) }),
       });
       const body = (await res.json()) as { hashes?: string[]; error?: string };
-      if (!res.ok) throw new Error(`Smart contract panicked: ${body.error ?? "unknown"}`);
+      if (!res.ok) throw new TxFailed(`Smart contract panicked: ${body.error ?? "unknown"}`);
       return (body.hashes ?? []).map((hash) => ({ hash, outcome: null }));
     },
     onAccountChange(cb) {

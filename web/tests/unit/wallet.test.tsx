@@ -6,7 +6,7 @@ import { ConnectButton } from "@/features/vault/ConnectButton";
 import { createWallet } from "@/lib/wallet/connector";
 import { createMockWallet } from "@/lib/wallet/mock";
 import { createMockWallet as noMock } from "@/lib/wallet/no-mock";
-import { WalletCancelled } from "@/lib/wallet/types";
+import { TxFailed, WalletCancelled } from "@/lib/wallet/types";
 import { WalletProvider } from "@/lib/wallet/WalletProvider";
 
 const handlers: Record<string, (e: unknown) => void> = {};
@@ -71,7 +71,7 @@ test("the mock wallet posts calls to the mock server and can be told to cancel o
   await expect(w.send([tx])).rejects.toBeInstanceOf(WalletCancelled);
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "NOT_STUCK" }), { status: 400 }));
   window.__mockWallet!.next = "contract:NOT_STUCK";
-  await expect(w.send([tx])).rejects.toThrow("NOT_STUCK");
+  await expect(w.send([tx])).rejects.toBeInstanceOf(TxFailed);
   await w.disconnect();
   expect(w.accountId()).toBeNull();
   vi.unstubAllGlobals();
@@ -98,9 +98,17 @@ test("an account id from the wallet that is not a NEAR account is dropped", () =
 test("an outcome that failed on chain is thrown with its panic, not returned as done", async () => {
   const w = createWallet(cfg, "nonce");
   wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H1" }, status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: NOT_STUCK" } } } } }, receipts_outcome: [] }]);
-  await expect(w.send([tx])).rejects.toThrow("NOT_STUCK");
+  await expect(w.send([tx])).rejects.toBeInstanceOf(TxFailed);
   wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H2" }, status: { SuccessValue: "" }, receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: LOW_GAS" } } } } } } }] }]);
-  await expect(w.send([tx])).rejects.toThrow("LOW_GAS");
+  await expect(w.send([tx])).rejects.toBeInstanceOf(TxFailed);
+});
+test("an on-chain failure whose text says cancelled is still a failure, not a wallet cancel", async () => {
+  const w = createWallet(cfg, "nonce");
+  wallet.signAndSendTransactions.mockResolvedValueOnce([{ transaction: { hash: "H1" }, status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: cancelled by market" } } } } }, receipts_outcome: [] }]);
+  const err = await w.send([tx]).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(TxFailed);
+  expect(err).not.toBeInstanceOf(WalletCancelled);
+  expect((err as TxFailed).hashes).toEqual(["H1"]);
 });
 test("a deposit the vault refunded in full is marked refunded", async () => {
   const w = createWallet(cfg, "nonce");
