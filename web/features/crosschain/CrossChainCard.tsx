@@ -2,7 +2,7 @@
 
 import type { OneClickQuoteResponse } from "@defuse-protocol/one-click-sdk-typescript";
 import Link from "next/link";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import { Status } from "@/components/fm/Status";
 import { config } from "@/config";
@@ -17,7 +17,7 @@ import { formatUnits, parseU128, parseUnits } from "@/lib/format/units";
 import { STATUS } from "@/lib/status/table";
 import type { Step } from "@/lib/wallet/useTx";
 import { useWallet } from "@/lib/wallet/WalletProvider";
-import { depositGate } from "@/lib/vault/deposit";
+import { GATE_TEXT, type GateReason, depositGate, remainingVaultCap } from "@/lib/vault/deposit";
 import { ConnectButton } from "@/features/vault/ConnectButton";
 import { NearNeed } from "@/features/portfolio/NearNeed";
 import { type BuildCtx, buildTx } from "@/lib/wallet/calls";
@@ -26,6 +26,17 @@ import { useOneClickSwap } from "./useOneClickSwap";
 const USDC_DECIMALS = 6;
 const WRONG_TOKEN: Record<ChainId, string> = { base: "USDbC is not the token asked for.", arb: "USDC.e is not the token asked for.", eth: "" };
 type Quote = OneClickQuoteResponse & { quote: Record<string, string | undefined> };
+const remainingCapFor = (s: VaultSnapshot, p: Position | null) => (p && s.policy.perUserCap > p.netDeposit ? s.policy.perUserCap - p.netDeposit : 0n);
+const quoteProblemMessage = (issues: ("below-min" | "over-cap")[]) =>
+  issues.includes("below-min") ? "The USDC that would arrive is below the vault's minimum deposit." : "The USDC that would arrive is more than this account can still deposit.";
+const gateProblemMessage = (reasons: GateReason[]) => reasons.map((r) => GATE_TEXT[r]).join(" ");
+/** The vault's TVL cap has no exact view; this is a warning, not a refusal. */
+const tvlWarning = (res: Quote, s: VaultSnapshot) => {
+  const minOut = readAmount(res.quote.minAmountOut);
+  return minOut !== null && minOut > remainingVaultCap(s)
+    ? "The vault may be full. If it refuses the deposit, the USDC stays in your NEAR account and the deposit is refunded in full."
+    : null;
+};
 
 /** A base-unit amount from a 1Click answer, or null when it is missing or not a whole-number string. */
 function readAmount(v: unknown): bigint | null {
@@ -59,6 +70,10 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   const [txHash, setTxHash] = useState("");
   const [lookup, setLookup] = useState("");
   const [lookupResult, setLookupResult] = useState<string | null>(null);
+  const latest = useRef({ s, p, account, unreadable });
+  useEffect(() => {
+    latest.current = { s, p, account, unreadable };
+  }, [s, p, account, unreadable]);
 
   useEffect(() => {
     if (account && flow.step === "connect") dispatch({ type: "connected", account });
@@ -71,7 +86,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
 
   const chain = x.oc.chains.find((c) => c.id === chainId)!;
   const gate = depositGate(s, p, unreadable);
-  const remainingCap = p && s.policy.perUserCap > p.netDeposit ? s.policy.perUserCap - p.netDeposit : 0n;
+  const remainingCap = remainingCapFor(s, p);
   const blocking = account ? blockingSwap(x.swaps, account, x.nowMs) : null;
   let amount: bigint | null = null;
   try {
@@ -82,12 +97,17 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   const refundOk = isEvmAddress(refundTo);
 
   async function getQuote() {
-    if (!account || amount === null) return;
+    const current = latest.current;
+    if (!current.account || amount === null) return;
+    const gateNow = depositGate(current.s, current.p, current.unreadable);
+    if (gateNow.reasons.length) return dispatch({ type: "problem", message: gateProblemMessage(gateNow.reasons) });
     try {
-      const { res, problem } = await x.quote({ chain, amount, recipient: account, refundTo }, true);
+      const { res, problem } = await x.quote({ chain, amount, recipient: current.account, refundTo }, true);
       if (problem) return dispatch({ type: "problem", message: problem });
-      const issues = quoteProblems(res, { minDeposit: s.policy.minDeposit, remainingUserCap: remainingCap });
-      if (issues.length) return dispatch({ type: "problem", message: issues.includes("below-min") ? "The USDC that would arrive is below the vault's minimum deposit." : "The USDC that would arrive is more than this account can still deposit." });
+      const after = latest.current;
+      if (after.account !== current.account) return dispatch({ type: "problem", message: "The connected account changed while 1Click was quoting. Start again with the account you want to use." });
+      const issues = quoteProblems(res, { minDeposit: after.s.policy.minDeposit, remainingUserCap: remainingCapFor(after.s, after.p) });
+      if (issues.length) return dispatch({ type: "problem", message: quoteProblemMessage(issues) });
       setDry(res as Quote);
       dispatch({ type: "quoted", chain: chain.id });
     } catch (err) {
@@ -96,18 +116,29 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   }
 
   async function getAddress() {
-    if (!account || amount === null || depositGate(s, p, unreadable).reasons.length) return;
+    const current = latest.current;
+    if (!current.account || amount === null) return;
+    const gateNow = depositGate(current.s, current.p, current.unreadable);
+    if (gateNow.reasons.length) return dispatch({ type: "problem", message: gateProblemMessage(gateNow.reasons) });
     // Another tab may have got an address since this one passed the quote step.
-    if (blockingSwap(x.listSwaps(), account, Date.now())) return dispatch({ type: "problem", message: "Another swap for this account may still be waiting for funds. Check it below before asking for a new address." });
+    if (blockingSwap(x.listSwaps(), current.account, Date.now())) return dispatch({ type: "problem", message: "Another swap for this account may still be waiting for funds. Check it below before asking for a new address." });
     try {
-      const { req, res, problem } = await x.quote({ chain, amount, recipient: account, refundTo }, false);
+      const { req, res, problem } = await x.quote({ chain, amount, recipient: current.account, refundTo }, false);
       if (problem) return dispatch({ type: "problem", message: problem });
+      const after = latest.current;
+      if (after.account !== current.account) return dispatch({ type: "problem", message: "The connected account changed while 1Click was quoting. Start again with the account you want to use." });
+      // The dry quote's checks must hold for the signed final quote too.
+      const gateAfter = depositGate(after.s, after.p, after.unreadable);
+      if (gateAfter.reasons.length) return dispatch({ type: "problem", message: gateProblemMessage(gateAfter.reasons) });
+      const issues = quoteProblems(res, { minDeposit: after.s.policy.minDeposit, remainingUserCap: remainingCapFor(after.s, after.p) });
+      if (issues.length) return dispatch({ type: "problem", message: quoteProblemMessage(issues) });
+      if (blockingSwap(x.listSwaps(), current.account, Date.now())) return dispatch({ type: "problem", message: "Another swap for this account was saved while 1Click was quoting. Check it below before asking for a new address." });
       const q = res as Quote;
       // The address closes at quote.deadline (signed); never later than what was asked for.
       const deadlineMs = Math.min(Date.parse(String(q.quote.deadline)), Date.parse(req.deadline));
       const stamp = Date.parse(String(res.timestamp));
       if (!Number.isFinite(deadlineMs) || !Number.isFinite(stamp) || !q.quote.depositAddress) return dispatch({ type: "problem", message: "1Click's answer had no usable deadline or address, so none is shown." });
-      const swap = { depositAddress: String(q.quote.depositAddress), recipient: account, chainId: chain.id, deadlineMs, createdAtMs: Date.now(), final: null, txHashes: [], declaredNotSent: false };
+      const swap = { depositAddress: String(q.quote.depositAddress), recipient: current.account, chainId: chain.id, deadlineMs, createdAtMs: Date.now(), final: null, txHashes: [], declaredNotSent: false };
       x.save(swap);
       x.setLive({ swap, request: req, signed: res, anchor: { responseTimestampMs: stamp, perfAtReceipt: performance.now(), dateAtReceipt: Date.now() }, needsReanchor: false, confirmNotSent: false });
       dispatch({ type: "address-verified", swap });
@@ -118,6 +149,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
 
   const live = x.live;
   const liveChain = live ? x.oc.chains.find((c) => c.id === live.swap.chainId) : undefined;
+  const dryTvlWarning = dry ? tvlWarning(dry, s) : null;
+  const liveTvlWarning = live ? tvlWarning(live.signed as Quote, s) : null;
   const earlier = x.swaps.filter((w) => w.recipient === account && w.depositAddress !== live?.swap.depositAddress);
   const raw = (x.status?.raw ?? {}) as { swapDetails?: { amountOut?: string; refundedAmount?: string; refundReason?: string; depositedAmount?: string } };
   const st = x.status?.status;
@@ -184,6 +217,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
             <div><dt className="fm-label">Send at least</dt><dd className="mono">{usdc(dry.quote.minAmountIn)}</dd></div>
             <div><dt className="fm-label">Fees</dt><dd className="mono">refund {usdc(dry.quote.refundFee)} · withdraw {usdc(dry.quote.withdrawFee)}</dd></div>
           </dl>
+          {dryTvlWarning ? <p role="status" className="text-[13px]">{dryTvlWarning}</p> : null}
           {p && (!p.registered.vault || !p.registered.usdc) ? (
             <div className="grid gap-2">
               {ctx ? <NearNeed txs={[...(!p.registered.vault ? [buildTx("register_vault", {}, ctx)] : []), ...(!p.registered.usdc ? [buildTx("register_usdc", {}, ctx)] : [])]} near={p.balances.near} gasPrice={gasPrice} /> : null}
@@ -212,6 +246,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               <p className="mono break-all text-[15px]" data-testid="deposit-address">{live.swap.depositAddress}</p>
               <p className="mono text-[13px]">Token {x.tokens?.find((t) => t.assetId === liveChain?.originAsset)?.contractAddress ?? liveChain?.originAsset} · send {usdc((live.signed as Quote).quote.amountIn)} · at least {usdc((live.signed as Quote).quote.minAmountIn)}</p>
               <p className="text-[13px]" data-testid="send-before">Send before {new Date(live.swap.deadlineMs - x.margin).toLocaleTimeString()} · {Math.max(0, Math.floor((x.rem - x.margin) / 60_000))} min left</p>
+              {liveTvlWarning ? <p role="status" className="text-[13px]">{liveTvlWarning}</p> : null}
               {WRONG_TOKEN[live.swap.chainId] ? <p className="text-[13px]">{WRONG_TOKEN[live.swap.chainId]}</p> : null}
             </>
           ) : x.view === "do-not-send" ? (
@@ -226,6 +261,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               <p>The address is hidden until the remaining time is checked again.</p>
               <button type="button" disabled={unreadable} className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={() => void x.reanchor()}>Check the time</button>
             </div>
+          ) : x.status === null ? (
+            <p>Checking 1Click for the first status of this address. The address appears only after 1Click answers.</p>
           ) : (
             <p>The address is hidden while 1Click cannot confirm the status of the swap.</p>
           )}

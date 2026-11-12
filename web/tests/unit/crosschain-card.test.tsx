@@ -13,7 +13,7 @@ vi.mock("@/config", async () => {
 const { wallet, extra, api } = vi.hoisted(() => ({
   wallet: { account: "alice.near" as string | null },
   extra: {} as Record<string, unknown>,
-  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, submitted: [] as string[], submitFails: false },
+  api: { down: false, status: null as null | { status: string; swapDetails?: unknown }, delayMs: 0, fails: false, submitted: [] as string[], submitFails: false },
 }));
 vi.mock("@/lib/wallet/WalletProvider", () => ({ useWallet: () => ({ wallet: null, account: wallet.account }) }));
 
@@ -27,7 +27,11 @@ vi.mock("@/lib/crosschain/client", () => ({
   createOneClick: () => ({
     tokens: async () => (api.down ? Promise.reject(new Error("down")) : [{ assetId: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", contractAddress: "0x8335" }]),
     quote: async (req: Record<string, unknown>) => (await import("../mock-server/oneclick")).quote({ extra }, req),
-    status: async () => (api.status ? { status: api.status.status, raw: api.status } : "not-found"),
+    status: async () => {
+      if (api.delayMs) await new Promise((resolve) => setTimeout(resolve, api.delayMs));
+      if (api.fails) throw new Error("1Click is down");
+      return api.status ? { status: api.status.status, raw: api.status } : "not-found";
+    },
     submit: async (h: string) => (api.submitFails ? Promise.reject(new Error("1Click is down")) : void api.submitted.push(h)),
   }),
 }));
@@ -42,6 +46,8 @@ beforeEach(() => {
   for (const k of Object.keys(extra)) delete extra[k];
   api.down = false;
   api.status = null;
+  api.delayMs = 0;
+  api.fails = false;
   api.submitted = [];
   api.submitFails = false;
   wallet.account = "alice.near";
@@ -50,12 +56,12 @@ beforeEach(() => {
 
 async function renderCard(p: Position = pos, run = vi.fn(), unreadable = false) {
   const s = await fixtureSnapshot();
+  const ctx = { config, assets: s.assets, storageMin: { vault: s.storageMin, usdc: s.tokenStorageMin.usdc, wnear: s.tokenStorageMin.wnear } };
   let r!: ReturnType<typeof render>;
   await act(async () => {
-    const ctx = { config, assets: s.assets, storageMin: { vault: s.storageMin, usdc: s.tokenStorageMin.usdc, wnear: s.tokenStorageMin.wnear } };
     r = render(<CrossChainCard s={s} p={p} unreadable={unreadable} run={run} busy={false} ctx={ctx} gasPrice={100_000_000n} />);
   });
-  return { r, run, s };
+  return { r, run, s, ctx };
 }
 
 async function fillAndQuote() {
@@ -305,4 +311,59 @@ test("an expired unresolved swap is reconciled when 1Click finally answers", asy
   await renderCard();
   await waitFor(() => expect(screen.getByRole("list", { name: "Earlier swaps" })).toHaveTextContent("SUCCESS"), { timeout: 4000 });
   expect(screen.queryByText("Expired record")).toBeNull();
+});
+
+test("the deposit address waits for the first status response", async () => {
+  api.delayMs = 300;
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+  expect(screen.getByText(/Checking 1Click for the first status/)).toBeInTheDocument();
+  expect(await screen.findByTestId("deposit-address", {}, { timeout: 4000 })).toHaveTextContent("0xDep");
+});
+test("a provider error hides the address until 1Click answers", async () => {
+  api.fails = true;
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByText(/hidden while 1Click cannot confirm/)).toBeInTheDocument();
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+});
+
+test("a final quote below the minimum is refused before an address is saved", async () => {
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  extra.finalMinAmountOut = "1";
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("below the vault's minimum deposit");
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+});
+test("a final quote over the account cap is refused before an address is saved", async () => {
+  await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  extra.finalMinAmountOut = "150000000";
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("more than this account can still deposit");
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+});
+test("a vault that stops accepting deposits before the address step is refused", async () => {
+  const { s, ctx, r } = await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  const user = await fillAndQuote();
+  await act(async () => r.rerender(<CrossChainCard s={{ ...s, frozen: true }} p={{ ...pos, registered: { vault: true, usdc: true, wnear: true } }} unreadable={false} run={vi.fn()} busy={false} ctx={ctx} gasPrice={100_000_000n} />));
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Get the deposit address" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The vault is frozen");
+  expect(screen.queryByTestId("deposit-address")).toBeNull();
+});
+test("a low TVL estimate is a warning, not a hard refusal", async () => {
+  const { s, ctx, r } = await renderCard({ ...pos, registered: { vault: true, usdc: true, wnear: true } });
+  await fillAndQuote();
+  expect(screen.queryByText(/The vault may be full/)).toBeNull();
+  await act(async () => r.rerender(<CrossChainCard s={{ ...s, policy: { ...s.policy, tvlCap: 100_000_000n } }} p={{ ...pos, registered: { vault: true, usdc: true, wnear: true } }} unreadable={false} run={vi.fn()} busy={false} ctx={ctx} gasPrice={100_000_000n} />));
+  expect(screen.getByText(/The vault may be full/)).toBeInTheDocument();
 });
