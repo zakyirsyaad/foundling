@@ -15,7 +15,7 @@ vi.mock("@/config", async (importOriginal) => {
 vi.mock("@/lib/chain/useVaultSnapshot", () => ({ useVaultSnapshot: () => ({ snapshot: h.snap, unreadable: false, fresh: true, loading: false }) }));
 vi.mock("@/lib/chain/usePosition", () => ({ usePosition: () => ({ position: h.position, gasPrice: 100_000_000n, reload: () => {} }) }));
 vi.mock("@/lib/wallet/WalletProvider", () => ({ useWallet: () => ({ wallet: null, account: "alice.testnet" }) }));
-vi.mock("@/lib/wallet/useTx", () => ({ useTx: () => ({ state: { kind: "idle" }, run: () => {} }) }));
+vi.mock("@/lib/wallet/useTx", () => ({ useTx: () => ({ state: { kind: "idle" }, run: () => {}, acknowledge: () => {} }) }));
 
 const pos: Position = {
   account: "alice.testnet", shares: 5n, pending: 0n, netDeposit: 0n, claimable: { usdc: 0n, wnear: 0n },

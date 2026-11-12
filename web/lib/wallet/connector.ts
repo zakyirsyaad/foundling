@@ -3,7 +3,7 @@ import { NearConnector } from "@hot-labs/near-connect";
 import type { DeploymentConfig } from "@/config/deployment";
 import { isNearAccount } from "@/lib/format/shell";
 import type { WalletTx } from "./calls";
-import { type TxOutcome, type WalletApi, WalletCancelled } from "./types";
+import { type TxOutcome, type WalletApi, TxFailed, WalletCancelled } from "./types";
 
 type Status = { Failure?: unknown; SuccessValue?: string };
 type Outcome = { transaction?: { hash?: string }; transaction_outcome?: { id?: string }; status?: Status; receipts_outcome?: { outcome?: { status?: Status } }[] };
@@ -82,10 +82,14 @@ export function createWallet(cfg: DeploymentConfig, cspNonce: string): WalletApi
             actions: [{ type: "FunctionCall" as const, params: { methodName: t.methodName, args: t.args, gas: t.gas.toString(), deposit: t.deposit.toString() } }],
           })),
         });
+        const hashes = outcomes.map(hashOf).filter((hash) => hash !== "");
         const failure = outcomes.map(failureOf).find((f) => f !== null);
-        if (failure) throw new Error(failure);
+        if (failure) throw new TxFailed(failure, hashes);
         return outcomes.map((o, i) => ({ hash: hashOf(o), outcome: o, refunded: refundedInFull(o, txs[i]!) }));
       } catch (err) {
+        // A reported on-chain failure is confirmed; it must not be re-read as a wallet cancel
+        // when its panic text happens to contain "cancelled".
+        if (err instanceof TxFailed) throw err;
         if (isCancel(err)) throw new WalletCancelled();
         throw err;
       }

@@ -1,4 +1,4 @@
-import { persistPending, takePending, txReducer } from "@/lib/wallet/txState";
+import { PENDING_KEY, persistPending, readPending, takePending, txReducer } from "@/lib/wallet/txState";
 
 test("the happy path", () => {
   let s = txReducer({ kind: "idle" }, { type: "submit" });
@@ -37,4 +37,20 @@ test("storage that throws or holds junk is treated as empty", () => {
   expect(takePending(null, "/")).toBeNull();
   const junk = { getItem: () => "{not json", setItem: () => {}, removeItem: () => {} } as unknown as Storage;
   expect(takePending(junk, "/")).toBeNull();
+});
+
+test("a pending request can be read without being consumed", () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) } as unknown as Storage;
+  persistPending(storage, { path: "/app/portfolio", hashes: ["H"] });
+  expect(readPending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: ["H"] });
+  expect(readPending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: ["H"] });
+  expect(store.get(PENDING_KEY)).not.toBeNull();
+  expect(takePending(storage, "/app/portfolio")).toEqual({ path: "/app/portfolio", hashes: ["H"] });
+  expect(store.get(PENDING_KEY)).toBeUndefined();
+});
+test("an unknown submission outcome is not a rejection and acknowledge returns to idle", () => {
+  let s = txReducer({ kind: "awaiting-wallet" }, { type: "unknown", raw: "wallet timeout" });
+  expect(s).toEqual({ kind: "unknown", raw: "wallet timeout" });
+  expect(txReducer(s, { type: "acknowledged" })).toEqual({ kind: "idle" });
 });
