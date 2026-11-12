@@ -46,10 +46,11 @@
     },
     {
       "name": "headline-injection",
-      "expected": "Satu `SellRisk` lolos, dibatasi buku wNEAR; pengulangan `SellRisk` dalam `cooldown` yang sama ditolak `COOLDOWN` sebelum sampai ke OutLayer; sesudah `cooldown`, jumlah yang sama menemukan buku kosong, `Rejected(OVER_BOOK)`",
+      "expected": "Satu `SellRisk` lolos, dibatasi buku wNEAR; pengulangan `SellRisk` dalam `cooldown` yang sama ditolak `COOLDOWN` sebelum sampai ke OutLayer; sesudah `cooldown`, jumlah yang sama menemukan buku kosong, `Rejected(OVER_BOOK)`; bila buku diisi ulang, jual berikutnya lolos sekali lagi dan total yang terjual sama dengan yang dibeli, di bawah `epoch_cap_wnear`; pengisian ketiga dalam epoch yang sama ditolak `Rejected(OVER_EPOCH_CAP)` oleh batas beli",
       "codes": [
         "COOLDOWN",
-        "OVER_BOOK"
+        "OVER_BOOK",
+        "OVER_EPOCH_CAP"
       ],
       "test_binary": "attacks_batch1"
     },

@@ -24,6 +24,10 @@ const REF_LIQUIDITY_USDC: u128 = 1_000_000_000;
 const REF_LIQUIDITY_WNEAR: u128 = 1_000_000_000_000_000_000_000_000_000;
 const COOLDOWN: u64 = 60;
 const EPOCH_LEN: u64 = 600;
+/// `headline_injection` buys 2 USDC, refills the wNEAR book with `REFILL_USDC`, then asks for
+/// `OVER_REFILL_USDC`: under `cap_bps` (2 USDC at NAV 20), but past `epoch_cap_bps` (4 USDC).
+const REFILL_USDC: u128 = 1_000_000;
+const OVER_REFILL_USDC: u128 = 1_500_000;
 /// A block is 0.3 s of chain time, so this many blocks cover a second without passing it.
 const BLOCKS_PER_SECOND_NUM: u64 = 10;
 const BLOCKS_PER_SECOND_DEN: u64 = 3;
@@ -181,6 +185,30 @@ async fn ledger(env: &Foundling) -> anyhow::Result<Value> {
             .await?;
     }
     Ok(ledger)
+}
+
+/// Answers the mock OutLayer still holds. Its queue is first in, first out, and a cycle that
+/// `trigger_cycle` refuses never reads one.
+async fn queued_answers(env: &Foundling) -> anyhow::Result<u32> {
+    env.view_contract(&env.outlayer, "queued", json!({})).await
+}
+
+async fn clear_queue(env: &Foundling) -> anyhow::Result<()> {
+    let result = env
+        .parent
+        .call(env.outlayer.id(), "clear_queue")
+        .transact()
+        .await?;
+    anyhow::ensure!(result.is_success(), "clear_queue: {}", failures(&result));
+    Ok(())
+}
+
+async fn wnear_book(env: &Foundling) -> anyhow::Result<u128> {
+    env.view_vault::<Value>("book", json!({})).await?["wnear"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("book has no wnear"))?
+        .parse()
+        .map_err(Into::into)
 }
 
 /// A hold cycle: it mints the queued deposit and trades nothing, so the next ledger is the
@@ -863,11 +891,17 @@ async fn bad_route() -> anyhow::Result<()> {
 /// the attack staged here is the `SellRisk` decision a poisoned advisor would cause, fed to the
 /// vault through the mock OutLayer as fast as a repeated fake headline could ask. How large a
 /// single sell may be (`cap_wnear`, `cap_sell_bps`) is `deflated-sell`'s claim; this one is the
-/// repeat.
+/// repeat. It stages the decision, never a headline through `strategy/src/advisor.rs`, so it
+/// shows what the vault contains once the advisor is already fooled, not that the advisor
+/// resists. After the book is refilled the headline sells once more, and the total sold stays
+/// what the buy side's own epoch limit let in.
 #[tokio::test]
 async fn headline_injection() -> anyhow::Result<()> {
     let env = attack_env(testnet_timing()).await?;
-    let mut run = Run::new("headline-injection", &["COOLDOWN", "OVER_BOOK"]);
+    let mut run = Run::new(
+        "headline-injection",
+        &["COOLDOWN", "OVER_BOOK", "OVER_EPOCH_CAP"],
+    );
     let before = settle_deposit(&env).await?;
 
     let funded = decide(&env, template("buy_risk", DEPOSIT / 10)).await?;
@@ -881,10 +915,7 @@ async fn headline_injection() -> anyhow::Result<()> {
     );
 
     wait_seconds(&env, COOLDOWN + 1).await?;
-    let book_wnear: u128 = ledger(&env).await?["book"]["wnear"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("book has no wnear"))?
-        .parse()?;
+    let book_wnear = wnear_book(&env).await?;
     anyhow::ensure!(
         book_wnear > 0,
         "setup failed: no wNEAR in the book to attack"
@@ -900,17 +931,26 @@ async fn headline_injection() -> anyhow::Result<()> {
         json!({"nonce": sold.nonce, "amount_in": book_wnear.to_string()}),
     );
 
-    // The same fake headline, asked again before the cooldown that one sell just spent. No
-    // second Decision is even staged: trigger_cycle itself refuses the cycle outright.
+    // The same fake headline, asked again before the cooldown that one sell just spent. The
+    // answer is staged, but trigger_cycle refuses the cycle outright, so it must still be
+    // waiting in the mock OutLayer's queue; it is cleared so the next cycle gets its own answer
+    // and not this one.
     env.set_next(json!({"Decision": {"template": template("sell_risk", book_wnear)}}))
         .await?;
     let again = env.trigger_cycle().await?;
     let refused = refused_text(&again);
+    let unread = queued_answers(&env).await?;
+    clear_queue(&env).await?;
     run.step(
         "the same headline, repeated inside the cooldown the first sell just spent",
-        refusal(refused.as_deref(), &["COOLDOWN"]).is_some() && ledger(&env).await? == after_sell,
+        refusal(refused.as_deref(), &["COOLDOWN"]).is_some()
+            && unread == 1
+            && ledger(&env).await? == after_sell,
         refusal(refused.as_deref(), &["COOLDOWN"]),
-        json!({"seen_as": "panic of trigger_cycle, not a Rejected event"}),
+        json!({
+            "seen_as": "panic of trigger_cycle, not a Rejected event",
+            "answers_left_unread_in_outlayer": unread,
+        }),
     );
 
     // Past the cooldown, the identical headline is heard again, but the book it was feeding on
@@ -924,6 +964,64 @@ async fn headline_injection() -> anyhow::Result<()> {
             && ledger(&env).await? == after_sell,
         nothing_left.rejected.as_deref(),
         json!({"nonce": nothing_left.nonce}),
+    );
+
+    // The only way to feed the sell again is to refill the book with a buy, and the buy side
+    // has its own epoch limit: the poisoned advisor can sell no more wNEAR than the vault was
+    // let to buy. Both refills stay under `cap_bps` and well inside one `epoch_len`.
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let refilled = decide(&env, template("buy_risk", REFILL_USDC)).await?;
+    let refilled_wnear = wnear_book(&env).await?;
+    anyhow::ensure!(
+        refilled.started && refilled_wnear > 0,
+        "setup failed: a second buy within cap should refill the wNEAR book: {refilled:?}"
+    );
+    run.context(
+        "setup: a second, smaller buy refills the book after the first sell emptied it",
+        json!({"nonce": refilled.nonce, "refilled_wnear": refilled_wnear.to_string()}),
+    );
+
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let resold = decide(&env, template("sell_risk", refilled_wnear)).await?;
+    let after_resell = ledger(&env).await?;
+    let sold_total = book_wnear + refilled_wnear;
+    let epoch_cap_wnear: u128 = env.config["policy"]["epoch_cap_wnear"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("policy has no epoch_cap_wnear"))?
+        .parse()?;
+    let turnover: u128 = after_resell["window_wnear"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("ledger has no window_wnear"))?
+        .parse()?;
+    run.step(
+        "the book refilled, the next cooldown lets the same headline sell once more, no more than the refill",
+        resold.started
+            && resold.rejected.is_none()
+            && after_resell["book"]["wnear"] == "0"
+            && turnover == sold_total
+            && turnover <= epoch_cap_wnear,
+        resold.rejected.as_deref(),
+        json!({
+            "nonce": resold.nonce,
+            "amount_in": refilled_wnear.to_string(),
+            "window_wnear": turnover.to_string(),
+            "bought_and_sold": sold_total.to_string(),
+            "epoch_cap_wnear": epoch_cap_wnear.to_string(),
+        }),
+    );
+
+    // Refilling past the buy side's epoch limit is refused, so the book stays empty and there
+    // is nothing for a third sell to take.
+    wait_seconds(&env, COOLDOWN + 1).await?;
+    let before_third = ledger(&env).await?;
+    let third_buy = decide(&env, template("buy_risk", OVER_REFILL_USDC)).await?;
+    run.step(
+        "a third refill inside the same epoch hits the buy side's epoch limit",
+        third_buy.rejected.as_deref() == Some("OVER_EPOCH_CAP")
+            && !third_buy.started
+            && ledger(&env).await? == before_third,
+        third_buy.rejected.as_deref(),
+        json!({"nonce": third_buy.nonce, "amount_in": OVER_REFILL_USDC.to_string()}),
     );
 
     run.finish(&env, before, ledger(&env).await?)
