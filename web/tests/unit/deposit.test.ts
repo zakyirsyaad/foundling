@@ -1,5 +1,5 @@
 import type { Position } from "@/lib/chain/types";
-import { depositChecks, depositGate, nearShortfallFor } from "@/lib/vault/deposit";
+import { depositChecks, depositGate, nearShortfallFor, remainingVaultCap } from "@/lib/vault/deposit";
 import { fixtureSnapshot } from "../fixtures/snapshot";
 
 const pos: Position = {
@@ -42,4 +42,10 @@ test("below min_deposit and over per_user_cap are flagged", async () => {
   expect(near.remainingUserCap).toBe(20_000_000n);
   expect(near.overUserCap).toBe(true);
   expect(depositChecks(60_000_000n, snap, pos, 1n).overBalance).toBe(true);
+});
+
+test("remainingVaultCap is the TVL estimate the cross-chain card warns from", async () => {
+  const snap = await fixtureSnapshot();
+  expect(remainingVaultCap(snap)).toBe(1_000_000_000n - 96_400_000n);
+  expect(remainingVaultCap({ ...snap, policy: { ...snap.policy, tvlCap: 1n } })).toBe(0n);
 });
