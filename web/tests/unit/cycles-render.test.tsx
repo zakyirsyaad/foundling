@@ -167,3 +167,24 @@ test("the legend says in plain words what each cycle result means, closed until 
   for (const word of Object.keys(STATUS.cycle)) expect(within(fold).getByText(word)).toBeInTheDocument();
   expect(fold).toHaveTextContent("The strategy chose not to trade this cycle. Nothing moved.");
 });
+
+const SEALED_NOTE = /stay sealed until reveal/;
+const REVEALED_NOTE = /are public since the reveal/;
+
+test("before the reveal the reason card says the rule is still sealed", () => {
+  render(<CycleDetail row={row(25n, "hold", "NO_DECISION")} proof={{ verifier: done, obsRecheck: null, replay: "sealed", verifierCommit: null }} decision={HELD_DECISION} revealAfter={1000n} chainTime={999n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.getByText(SEALED_NOTE)).toBeInTheDocument();
+  expect(screen.queryByText(REVEALED_NOTE)).not.toBeInTheDocument();
+});
+
+test("once the replay has run the reason card says the rule is public and how to read it", () => {
+  render(<CycleDetail row={row(25n, "hold", "NO_DECISION")} proof={{ verifier: done, obsRecheck: null, replay: "pass", verifierCommit: null }} decision={HELD_DECISION} revealAfter={1000n} chainTime={2000n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.getByText(REVEALED_NOTE)).toBeInTheDocument();
+  expect(screen.getByText(REVEALED_NOTE)).toHaveTextContent("revealed");
+  expect(screen.queryByText(SEALED_NOTE)).not.toBeInTheDocument();
+});
+
+test("a replay that failed still means the rule was revealed", () => {
+  render(<CycleDetail row={row(25n, "hold", "NO_DECISION")} proof={{ verifier: done, obsRecheck: null, replay: "fail", verifierCommit: null }} decision={HELD_DECISION} revealAfter={1000n} chainTime={2000n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.getByText(REVEALED_NOTE)).toBeInTheDocument();
+});

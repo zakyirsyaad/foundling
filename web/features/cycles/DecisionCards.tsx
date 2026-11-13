@@ -17,7 +17,8 @@ function actionText(d: PublishedDecision): string {
 }
 
 /** The answer to "why did this cycle end the way it did", in the order the code decides it. */
-export function WhyCard({ reason }: { reason: DecisionReason }) {
+/** `revealed` is true once the replay has run, which the worker does only after the vault's `reveal`. */
+export function WhyCard({ reason, revealed }: { reason: DecisionReason; revealed: boolean }) {
   return (
     <Card id="why" title={reason.title} aside="Read from the published decision">
       <div className="grid gap-5 p-5">
@@ -34,7 +35,11 @@ export function WhyCard({ reason }: { reason: DecisionReason }) {
           {reason.managed
             ? "The AI risk manager reads public crypto headlines and the market, and can only lower exposure: it shrinks or holds back a buy, or moves part of the vault to USDC on a severe risk. It cannot start a buy or stop a sell the price rule calls for."
             : "The AI reads public crypto headlines and can only hold back a buy. It cannot start a trade or stop a sell."}{" "}
-          The thresholds and the prompt stay sealed until reveal; after that, anyone can replay this decision.
+          {revealed ? (
+            <>The thresholds and the prompt are public since the reveal: read them with the vault&apos;s <code className="mono">revealed</code> view, and replay this decision with the command under Proof.</>
+          ) : (
+            "The thresholds and the prompt stay sealed until reveal; after that, anyone can replay this decision."
+          )}
         </p>
       </div>
     </Card>

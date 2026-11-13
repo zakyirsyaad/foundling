@@ -58,7 +58,7 @@ export function CycleDetail({ row, proof, decision, revealAfter, chainTime, netw
       </header>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="grid gap-6">
-          {view ? <WhyCard reason={view.reason} /> : null}
+          {view ? <WhyCard reason={view.reason} revealed={proof?.replay === "pass" || proof?.replay === "fail"} /> : null}
           <Card id="timeline" title="Timeline">
             <ol className="grid gap-3 p-5">
               {row.events.map((e, i) => (
