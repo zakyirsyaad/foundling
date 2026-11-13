@@ -1,50 +1,106 @@
 import Link from "next/link";
 
 import { CopyButton } from "@/components/fm/CopyButton";
+import { LimitMeter } from "@/components/fm/LimitMeter";
+import { Status } from "@/components/fm/Status";
 import { Video } from "@/components/fm/Video";
+import { FAQ } from "@/content/faq";
 import { BUILT_ON_FIXED, BUILT_ON_NOTE, CLOSING, GUARANTEES, HEADS, HERO, HOW_IT_WORKS } from "@/content/landing";
 import { MEDIA } from "@/content/media";
 import { NOT_CLAIMED } from "@/content/not-claimed";
 import { type Claim, claimText } from "@/lib/claims";
+import type { SnapshotSource } from "@/lib/proof/local";
+import { limitMeters } from "@/lib/vault/overview";
 import { splitFirstSentence } from "@/lib/format/text";
 import { Section } from "./Section";
 
 type ClaimLine = ReturnType<typeof claimText>;
 
-export function Home({ claims, keysLine }: { claims: Claim[]; keysLine: string }) {
+export function Home({ claims, keysLine, source = null }: { claims: Claim[]; keysLine: string; source?: SnapshotSource | null }) {
   const advisor = claimText(claims, "near-ai-advisor");
   return (
     <main className="text-[14px] leading-[1.5]">
-      <Hero keyless={claimText(claims, "born-without-keys")} keysLine={keysLine} />
+      <Hero keyless={claimText(claims, "born-without-keys")} keysLine={keysLine} source={source} />
       <BuiltOn advisor={advisor} intents={claimText(claims, "near-intents")} />
+      <Guarantees claims={claims} keys={source ? source.snapshot.accessKeys : null} />
       <HowItWorks advisor={advisor} />
       <Section id="demo" head={HEADS.demo}>
         <Video {...MEDIA.demo} />
       </Section>
-      <Guarantees claims={claims} />
       <NotClaimed />
+      <Questions />
       <Closing />
     </main>
   );
 }
 
-function Hero({ keyless, keysLine }: { keyless: ClaimLine; keysLine: string }) {
+function Hero({ keyless, keysLine, source }: { keyless: ClaimLine; keysLine: string; source: SnapshotSource | null }) {
+  const title = keyless.downgraded ? HERO.titleUnchecked : HERO.title;
+  const lead = title.endsWith(HERO.accent) ? title.slice(0, -HERO.accent.length) : title;
   return (
     <section id="hero" aria-labelledby="hero-title" className="hero">
       <div className="hero__grid" aria-hidden="true" />
       <div className="wrap hero__in">
-        <h1 id="hero-title" className="display-xl max-w-[760px]">{keyless.downgraded ? HERO.titleUnchecked : HERO.title}</h1>
+        <h1 id="hero-title" className="display-xl max-w-[760px]">
+          {lead}
+          {lead === title ? null : <span className="text-brand">{HERO.accent}</span>}
+        </h1>
         <p className="lead max-w-[600px] text-[18px]">{HERO.lead}</p>
         <div className="flex flex-wrap justify-center gap-3">
           <Link href="/app" className="fm-btn fm-btn--primary fm-btn--lg">Open app</Link>
           <Link href="/proof" className="fm-btn fm-btn--outline fm-btn--lg">Read the proof</Link>
         </div>
-        <div className="mt-6 grid w-full max-w-[880px] gap-3">
-          <Video {...MEDIA.hero} loop />
+        <div className="mt-6 grid w-full max-w-[920px] gap-3">
+          <HeroVault source={source} />
           <p data-testid="keys-line" className="mono text-[13px] text-muted-foreground">{keysLine}</p>
         </div>
       </div>
     </section>
+  );
+}
+
+/** The vault as the hero picture: three facts read from the chain on the server, never a number we made up. */
+function HeroVault({ source }: { source: SnapshotSource | null }) {
+  if (!source) {
+    return (
+      <div data-testid="hero-vault" className="hero-vault">
+        <p className="p-6 text-muted-foreground">Vault not readable right now.</p>
+      </div>
+    );
+  }
+  const s = source.snapshot;
+  const epoch = limitMeters(s).epochWindow;
+  return (
+    <div data-testid="hero-vault" className="hero-vault">
+      <div className="hero-vault__bar">
+        <span className="mono text-[13px]">{s.vaultId}</span>
+        <span className="fm-small">{source.kind === "sample" ? source.label : `as of block #${s.blockHeight}`}</span>
+      </div>
+      <div className="hero-vault__facts">
+        <div data-fact="keys">
+          <p className="fm-label">Access keys</p>
+          <p className="hero-vault__value">{s.accessKeys}</p>
+          <p className="fm-small">{s.accessKeys === 0 ? "No person can sign for the vault." : "The final vault is meant to have none."}</p>
+        </div>
+        <div data-fact="epoch">
+          {epoch.cap === 0n ? (
+            // A zero cap is a closed window, not a full one: no bar, so it does not read as "at the limit".
+            <>
+              <p className="fm-label">Traded this epoch</p>
+              <p className="hero-vault__value">0</p>
+            </>
+          ) : (
+            <LimitMeter label="Traded this epoch" used={epoch.used} cap={epoch.cap} decimals={s.assets.usdcDecimals} unit="USDC" />
+          )}
+          <p className="fm-small">{epoch.cap === 0n ? "The trading window is closed right now." : "The contract refuses a trade over the cap."}</p>
+        </div>
+        <div data-fact="exit">
+          <p className="fm-label">Exit</p>
+          <p className="hero-vault__value">Redeem</p>
+          <p className="fm-small">Built to stay open when trading is frozen, halted or stuck.</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -91,22 +147,83 @@ function HowItWorks({ advisor }: { advisor: ClaimLine }) {
   );
 }
 
-function Guarantees({ claims }: { claims: Claim[] }) {
+function Guarantees({ claims, keys }: { claims: Claim[]; keys: number | null }) {
   return (
     <Section id="guarantees" head={HEADS.guarantees}>
-      <ul className="gcards">
+      <ul className="gtiles">
         {GUARANTEES.map((g) => {
           const c = claimText(claims, g.id);
           return (
-            <li key={g.id} className={`gcard ${g.wide ? "gcard--wide" : "gcard--third"}`} data-claim={g.id} data-downgraded={c.downgraded || undefined}>
+            <li key={g.id} className={`gtile gtile--${g.span}`} data-claim={g.id} data-downgraded={c.downgraded || undefined}>
               <span className="gcard__tag">{g.tag}</span>
               <h3 className="h3">{g.title}</h3>
               <p>{c.text}</p>
+              <div className="gtile__art" data-art={g.id} aria-hidden="true">
+                <Art id={g.id} keys={keys} />
+              </div>
               <p className="gcard__foot"><b>Limit</b> {g.limit}</p>
             </li>
           );
         })}
       </ul>
+    </Section>
+  );
+}
+
+/** One small picture per guarantee. Decoration only: the claim and its limit carry the meaning. */
+function Art({ id, keys }: { id: (typeof GUARANTEES)[number]["id"]; keys: number | null }) {
+  if (id === "born-without-keys") return <span className="gtile__num">{keys ?? "–"}</span>;
+  if (id === "g2-bounded-loss") {
+    return (
+      <svg viewBox="0 0 240 120" className="gtile__bars">
+        <line className="capline" x1="0" x2="240" y1="34" y2="34" />
+        <text x="240" y="26" textAnchor="end">cap</text>
+        {[[6, 44], [36, 62], [66, 34], [126, 54], [156, 72], [186, 48], [216, 64]].map(([x, h]) => (
+          <rect key={x} className="bar" x={x} y={120 - h!} width="20" height={h} rx="3" />
+        ))}
+        <rect className="ghost" x="96" y="6" width="20" height="114" rx="3" />
+        <text className="refused" x="124" y="18">refused</text>
+      </svg>
+    );
+  }
+  if (id === "g3-exit") {
+    return (
+      <div className="artrows">
+        {(["Frozen", "Halted", "Stuck"] as const).map((word) => (
+          <div key={word}><Status group="vault" word={word} /><span>Redeem stays open</span></div>
+        ))}
+      </div>
+    );
+  }
+  if (id === "g1-confidentiality") {
+    return (
+      <div className="artrows">
+        <div><span>Parameters</span><span className="artmask"><i /><i /><i /><i /></span></div>
+        <div><span>Commitment</span><span>public</span></div>
+        <div><span>Rule replay</span><Status group="proof" word="Sealed" /></div>
+      </div>
+    );
+  }
+  return (
+    <div className="artrows">
+      <div><span>Enclave attestation</span><span>checked offline</span></div>
+      <div><span>Vault and code hash</span><span>bound</span></div>
+      <div><span>Recorded inputs</span><span>rechecked</span></div>
+    </div>
+  );
+}
+
+function Questions() {
+  return (
+    <Section id="faq" head={HEADS.faq} split>
+      <div className="faq">
+        {FAQ.map(({ q, a }) => (
+          <details key={q}>
+            <summary>{q}</summary>
+            <p>{a}</p>
+          </details>
+        ))}
+      </div>
     </Section>
   );
 }

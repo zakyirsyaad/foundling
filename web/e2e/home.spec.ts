@@ -14,7 +14,7 @@ test.describe("server HTML", () => {
   test("sections come in the spec order", async ({ page }) => {
     await page.goto("/");
     const ids = await page.locator("main > section").evaluateAll((s) => s.map((e) => e.id));
-    expect(ids).toEqual(["hero", "built-on", "how-it-works", "demo", "guarantees", "not-claimed", "closing"]);
+    expect(ids).toEqual(["hero", "built-on", "guarantees", "how-it-works", "demo", "not-claimed", "faq", "closing"]);
   });
   test("the header and footer carry the spec links", async ({ page }) => {
     await page.goto("/");
@@ -43,5 +43,5 @@ test("the page still renders when every RPC is down", async ({ page, request }) 
 });
 test("the video slot shows a poster until the files exist", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("#hero").getByText("Video coming soon")).toBeVisible();
+  await expect(page.locator("#demo").getByText("Video coming soon")).toBeVisible();
 });

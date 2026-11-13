@@ -1,8 +1,10 @@
 import path from "node:path";
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { FAQ } from "@/content/faq";
+import { findForbidden } from "@/content/forbidden";
 import { Footer } from "@/features/landing/Footer";
 import { Header } from "@/features/landing/Header";
 import { Home } from "@/features/landing/Home";
@@ -19,7 +21,7 @@ const claims = loadClaims(path.resolve(__dirname, "../fixtures/claims.json"));
 
 test("Home lays out the sections in order with one not-claimed block", () => {
   const { container } = render(<Home claims={claims} keysLine="Testnet rehearsal (m12) · x · 1 access key · as of block #1" />);
-  expect(Array.from(container.querySelectorAll("main > section")).map((s) => s.id)).toEqual(["hero", "built-on", "how-it-works", "demo", "guarantees", "not-claimed", "closing"]);
+  expect(Array.from(container.querySelectorAll("main > section")).map((s) => s.id)).toEqual(["hero", "built-on", "guarantees", "how-it-works", "demo", "not-claimed", "faq", "closing"]);
   expect(container.querySelectorAll('[data-copy-exempt="not-claimed"]')).toHaveLength(1);
   expect(screen.getByTestId("keys-line")).toHaveTextContent("1 access key");
 });
@@ -105,4 +107,54 @@ test("the closing block copies both commands with one button", async () => {
 test("section heads carry the design's lead line", () => {
   render(<Home claims={claims} keysLine="x" />);
   expect(screen.getByText("Every step leaves something on chain that you can read.")).toBeInTheDocument();
+});
+
+test("the hero shows the vault itself: its keys, its epoch window and the way out", async () => {
+  const snapshot = await fixtureSnapshot({}, 0);
+  render(<Home claims={claims} keysLine="x" source={{ kind: "sample", label: "Testnet rehearsal vault (m12)", snapshot }} />);
+  const card = screen.getByTestId("hero-vault");
+  expect(card).toHaveTextContent("Access keys");
+  expect(card.querySelector("[data-fact=keys]")).toHaveTextContent("0");
+  expect(card).toHaveTextContent("Testnet rehearsal vault (m12)");
+  expect(within(card).getByRole("meter", { name: "Traded this epoch" })).toBeInTheDocument();
+  expect(card.querySelector("[data-fact=exit]")).toHaveTextContent("Redeem");
+});
+test("without a readable vault the hero card says so and invents no numbers", () => {
+  render(<Home claims={claims} keysLine="x" source={null} />);
+  const card = screen.getByTestId("hero-vault");
+  expect(card).toHaveTextContent("Vault not readable right now.");
+  expect(card.querySelector("[data-fact=keys]")).toBeNull();
+  expect(within(card).queryByRole("meter")).toBeNull();
+});
+test("the hero no longer carries a video; the demo section does", () => {
+  const { container } = render(<Home claims={claims} keysLine="x" source={null} />);
+  expect(container.querySelector("#hero")).not.toHaveTextContent("Video coming soon");
+  expect(container.querySelector("#demo")).toHaveTextContent("Video coming soon");
+});
+test("each guarantee is a tile with its claim, its limit and a picture", () => {
+  const { container } = render(<Home claims={claims} keysLine="x" source={null} />);
+  const tiles = Array.from(container.querySelectorAll("#guarantees [data-claim]"));
+  expect(tiles.map((t) => t.getAttribute("data-claim"))).toEqual(["born-without-keys", "g2-bounded-loss", "g3-exit", "g1-confidentiality", "g4-traceability"]);
+  for (const t of tiles) {
+    expect(t.querySelector("[data-art]")).not.toBeNull();
+    expect(t).toHaveTextContent("Limit");
+  }
+});
+test("the questions section answers five questions, each one closed until opened", () => {
+  const { container } = render(<Home claims={claims} keysLine="x" source={null} />);
+  const items = Array.from(container.querySelectorAll("#faq details"));
+  expect(items).toHaveLength(5);
+  expect(items.every((d) => !(d as HTMLDetailsElement).open)).toBe(true);
+  expect(container.querySelector("#faq")).toHaveTextContent("Can I lose money?");
+});
+test("the questions use no word the site keeps for the not-claimed block", () => {
+  for (const { q, a } of FAQ) expect(findForbidden(`${q} ${a}`)).toEqual([]);
+});
+test("a closed trading window shows no bar, so it does not read as a full one", async () => {
+  const base = await fixtureSnapshot({}, 0);
+  const snapshot = { ...base, policy: { ...base.policy, epochCapUsdc: 0n } };
+  render(<Home claims={claims} keysLine="x" source={{ kind: "sample", label: "Testnet rehearsal vault (m12)", snapshot }} />);
+  const card = screen.getByTestId("hero-vault");
+  expect(within(card).queryByRole("meter")).toBeNull();
+  expect(card).toHaveTextContent("The trading window is closed right now.");
 });
