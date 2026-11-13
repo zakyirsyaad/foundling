@@ -62,9 +62,10 @@ fn opened() -> Proof {
 /// so a proof built with one also fails the attestation's "input hash" — the same way
 /// `changed_input_bytes_are_caught_by_the_digest_and_the_quote` catches it.
 ///
-/// Limit: the decision is built here by the same production `decide`, so no TEE quote covers
-/// it. These cases prove the replay plumbing only, never that an AI-managed decision carries a
-/// valid attestation end to end; that needs a captured AI Risk Manager proof.
+/// Limit: the decision is built here by the same production `decide`, with `inputs_digest`
+/// recomputed to match, so no TEE quote covers it and the digest check is circular. These cases
+/// prove the replay plumbing only, never that an AI-managed decision carries a valid
+/// attestation end to end; that needs a captured AI Risk Manager proof.
 fn risk_managed(
     ai_risk: u8,
     ai_conf: u8,
@@ -347,15 +348,16 @@ fn collateral_past_its_life_fails_the_quote() {
 #[test]
 fn a_severe_risk_replays_a_protective_sell() {
     // risk 90 >= exit_at 80, conf 90 >= exit_conf 70: severe, regardless of veto_at. This
-    // runs in the fixture's own regime, risk_on; that the same sell fires in risk_off and
-    // undetermined too (SPEC §3.2 rule 1, "pada rezim apa pun") is `strategy`'s to prove
-    // (`a_severe_confident_risk_sells_while_the_price_says_buy`) — this test is about the
-    // replay path, not the rule's regime-independence.
+    // runs in the fixture's own regime, risk_on. That the same sell fires in other regimes
+    // (SPEC §3.2 rule 1, "pada rezim apa pun") is `strategy`'s to prove: risk_on by
+    // `a_severe_confident_risk_sells_while_the_price_says_buy`, undetermined by
+    // `a_severe_confident_risk_sells_between_the_thresholds`; no strategy test covers a severe
+    // risk in risk_off. This test is about the replay path, not regime-independence.
     let proof = risk_managed(90, 90, 50, 80, 70, Some("1000"));
     let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
     assert_eq!(decision.regime, Regime::RiskOn);
     assert_eq!(decision.action, Action::SellRisk);
-    assert_eq!(decision.amount_in, 1000); // the whole dry book; `sell_wnear` never binds here
+    assert_eq!(decision.amount_in, 1000); // the whole wNEAR book; `sell_wnear` never binds here
 
     let report = check(&proof);
     assert_report_fails(&report, &[UNCOVERED, "input hash"]);
