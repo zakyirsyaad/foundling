@@ -349,6 +349,24 @@ impl Foundling {
         Ok(())
     }
 
+    /// Answers the mock OutLayer still holds. Its queue is first in, first out, and a cycle that
+    /// `trigger_cycle` refuses never reads one.
+    pub async fn queued_answers(&self) -> anyhow::Result<u32> {
+        self.view_contract(&self.outlayer, "queued", json!({}))
+            .await
+    }
+
+    /// Drops every answer the mock OutLayer still holds.
+    pub async fn clear_queue(&self) -> anyhow::Result<()> {
+        let result = self
+            .parent
+            .call(self.outlayer.id(), "clear_queue")
+            .transact()
+            .await?;
+        anyhow::ensure!(result.is_success(), "clear_queue: {}", failures(&result));
+        Ok(())
+    }
+
     pub async fn trigger_cycle(&self) -> anyhow::Result<ExecutionFinalResult> {
         self.call_vault(&self.keeper, "trigger_cycle", json!({}))
             .await
