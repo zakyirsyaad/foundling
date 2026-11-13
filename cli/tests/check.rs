@@ -8,7 +8,9 @@
 //! replaces this split with one fixture that passes everything.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use foundling_strategy::{commitment, Params};
+use foundling_strategy::{
+    commitment, decide, inputs_digest, Action, Decision, Input, Params, Regime,
+};
 use foundling_verify::check;
 use foundling_verify::hex::decode;
 use foundling_verify::proof::Proof;
@@ -47,6 +49,67 @@ fn opened() -> Proof {
     for cycle in &mut proof.cycles {
         cycle.decision = replaced(&cycle.decision, &proof.commitment, &sealed);
     }
+    proof.commitment = sealed;
+    proof
+}
+
+/// `opened()` with the AI Risk Manager's thresholds sealed in on top of the fixture's own
+/// params, and the first cycle's `obs`/decision rewritten to whatever `decide` gives for the
+/// chosen score on this input — proving the replay path (not the rule itself, which
+/// `strategy::tests` already covers) carries `ai_risk` end to end: through `Obs`'s JSON
+/// shape, the resealed commitment, and `inputs_digest`. A `wnear_book` other than the
+/// fixture's own (zero, so a protective sell always rounds to nothing) changes `input_data`,
+/// so a proof built with one also fails the attestation's "input hash" — the same way
+/// `changed_input_bytes_are_caught_by_the_digest_and_the_quote` catches it.
+///
+/// Limit: the decision is built here by the same production `decide`, with `inputs_digest`
+/// recomputed to match, so no TEE quote covers it and the digest check is circular. These cases
+/// prove the replay plumbing only, never that an AI-managed decision carries a valid
+/// attestation end to end; that needs a captured AI Risk Manager proof.
+fn risk_managed(
+    ai_risk: u8,
+    ai_conf: u8,
+    veto_at: u8,
+    exit_at: u8,
+    exit_conf: u8,
+    wnear_book: Option<&str>,
+) -> Proof {
+    let mut proof = opened();
+    let opening = proof.opening.as_mut().unwrap();
+    let mut fields: serde_json::Value = serde_json::from_str(&opening.params).unwrap();
+    fields["ai_veto_at"] = veto_at.to_string().into();
+    fields["ai_exit_at"] = exit_at.to_string().into();
+    fields["ai_exit_conf"] = exit_conf.to_string().into();
+    let params: Params = serde_json::from_value(fields).unwrap();
+    opening.params = params.canonical();
+    let salt = decode(&opening.salt).unwrap();
+    let sealed = commitment(&proof.chain, &proof.vault, &proof.wasm_hash, &params, &salt);
+
+    let cycle = &mut proof.cycles[0];
+    if let Some(book) = wnear_book {
+        cycle.input_data = replaced(
+            &cycle.input_data,
+            r#""wnear_book":"0""#,
+            &format!(r#""wnear_book":"{book}""#),
+        );
+    }
+    let input: Input = serde_json::from_str(&cycle.input_data).unwrap();
+    let mut decision: Decision = serde_json::from_str(&cycle.decision).unwrap();
+    decision.obs.ai_conf = ai_conf;
+    decision.obs.ai_risk = Some(ai_risk);
+    let verdict = decide(&params, &input, &decision.obs);
+    decision.regime = verdict.regime;
+    decision.action = verdict.action;
+    decision.amount_in = verdict.amount_in;
+    decision.ref_price = verdict.ref_price;
+    decision.inputs_digest = inputs_digest(
+        &cycle.input_data,
+        &decision.obs,
+        &decision.ai_ref.resp_sig_hash,
+    );
+    decision.commitment = sealed.clone();
+    cycle.decision = serde_json::to_string(&decision).unwrap();
+
     proof.commitment = sealed;
     proof
 }
@@ -280,4 +343,85 @@ fn collateral_past_its_life_fails_the_quote() {
     let mut proof = proof();
     proof.cycles[0].collateral_fetched_at += TEN_YEARS_SECONDS;
     assert_fails(&proof, &["quote"]);
+}
+
+#[test]
+fn a_severe_risk_replays_a_protective_sell() {
+    // risk 90 >= exit_at 80, conf 90 >= exit_conf 70: severe, regardless of veto_at. This
+    // runs in the fixture's own regime, risk_on. That the same sell fires in other regimes
+    // (SPEC §3.2 rule 1, "pada rezim apa pun") is `strategy`'s to prove: risk_on by
+    // `a_severe_confident_risk_sells_while_the_price_says_buy`, undetermined by
+    // `a_severe_confident_risk_sells_between_the_thresholds`; no strategy test covers a severe
+    // risk in risk_off. This test is about the replay path, not regime-independence.
+    let proof = risk_managed(90, 90, 50, 80, 70, Some("1000"));
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    assert_eq!(decision.regime, Regime::RiskOn);
+    assert_eq!(decision.action, Action::SellRisk);
+    assert_eq!(decision.amount_in, 1000); // the whole wNEAR book; `sell_wnear` never binds here
+
+    let report = check(&proof);
+    assert_report_fails(&report, &[UNCOVERED, "input hash"]);
+    assert_eq!(report.skipped, 0);
+    assert!(report
+        .lines
+        .iter()
+        .any(|line| line == "PASS nonce 1 replay"));
+    assert!(report.lines.iter().any(|line| line == "1/1 reproduced"));
+}
+
+#[test]
+fn a_risk_under_the_veto_replays_a_scaled_buy() {
+    // risk 30 < veto_at 50: not severe (30 < exit_at 80 too), so the price rule's buy_risk
+    // scales down to buy_usdc * (100 - 30) / 100 = 50000 * 70 / 100 = 35000.
+    let proof = risk_managed(30, 0, 50, 80, 70, None);
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    assert_eq!(decision.regime, Regime::RiskOn);
+    assert_eq!(decision.action, Action::BuyRisk);
+    assert_eq!(decision.amount_in, 35_000);
+
+    let report = check(&proof);
+    assert_report_fails(&report, &[UNCOVERED]);
+    assert_eq!(report.skipped, 0);
+    assert!(report
+        .lines
+        .iter()
+        .any(|line| line == "PASS nonce 1 replay"));
+    assert!(report.lines.iter().any(|line| line == "1/1 reproduced"));
+}
+
+#[test]
+fn a_risk_at_the_veto_replays_a_held_buy() {
+    // risk 60 >= veto_at 50 vetoes the buy, and 60 < exit_at 80 keeps the sell from firing:
+    // the AI only lowers exposure, so this is a hold, not the scaled or price-rule trade.
+    let proof = risk_managed(60, 0, 50, 80, 70, None);
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    assert_eq!(decision.regime, Regime::RiskOn);
+    assert_eq!(decision.action, Action::None);
+    assert_eq!(decision.amount_in, 0);
+
+    let report = check(&proof);
+    assert_report_fails(&report, &[UNCOVERED]);
+    assert_eq!(report.skipped, 0);
+    assert!(report
+        .lines
+        .iter()
+        .any(|line| line == "PASS nonce 1 replay"));
+    assert!(report.lines.iter().any(|line| line == "1/1 reproduced"));
+}
+
+#[test]
+fn a_decision_without_ai_risk_still_replays_under_the_earlier_rule() {
+    // `opened()` alone (no AI Risk Manager thresholds) is exactly a vault born before it:
+    // `before_reveal_a_real_cycle_passes_and_the_replay_is_skipped` and
+    // `an_opening_sealed_under_this_rule_reproduces_the_decision` already cover this through
+    // the whole replay path, including `inputs_digest` with no `ai_risk` in `obs`. This test
+    // only pins the fact down against `foundling_strategy` directly, so a change to
+    // `Obs::canonical`'s omission of an absent `ai_risk` fails here before it fails there.
+    let proof = opened();
+    let decision: Decision = serde_json::from_str(&proof.cycles[0].decision).unwrap();
+    assert_eq!(decision.obs.ai_risk, None);
+    assert_eq!(
+        decision.obs.canonical(),
+        r#"{"ai_conf":0,"ai_flag":0,"pa":"210000000","pb":"210000000","ta":1793556265,"tb":1793556265}"#
+    );
 }
