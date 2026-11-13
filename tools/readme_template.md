@@ -51,15 +51,28 @@ Cycle 1 on mainnet, transaction `AoW2epeLpgbjjQa9p9bhiyhwHaCJvZUAvo6Vt49oYifW` (
 5. The price rule reads risk-off and calls for a sell, but the vault holds no wNEAR, so the strategy returns `action: none`. The vault stores the full decision, with the commitment and a digest of the inputs, and emits `hold`. No funds move.
 6. OutLayer charges 0.00163 NEAR for 5.8 seconds of compute and refunds 0.04837 NEAR to the vault.
 
-As of 2026-11-13 12:10 UTC the keeper bot had run cycles 2 to 17 unattended, and every cycle ended in `Hold`: no swap has executed on mainnet yet. The revealed rule buys only when Kraken's price is above 3.55 USD per NEAR; over these cycles it moved between 3.27 and 3.54. The swap path is exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
+As of 2026-11-13 14:05 UTC the keeper bot had run cycles 2 to 21 unattended. Cycles 1 to 20 ended in `Hold`: the revealed rule buys only when Kraken's price is above 3.55 USD per NEAR, and over those cycles it stayed between 3.27 and 3.55. Cycle 21 traded (see "The first trade on mainnet"). The swap path is also exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
 
 ### The reveal
 
-The parameters and the salt were revealed on 2026-11-13, after `reveal_after` (tx `8KVToKUVS9NezbnfyoN2YQWTGWMrbgEHDJ5rBgsXqENc`). The vault accepted them only because their hash equals the commitment stored at birth. Anyone can now read them with the `revealed` view, and `foundling-verify` reproduces the decision of each of the 17 cycles from them.
+The parameters and the salt were revealed on 2026-11-13, after `reveal_after` (tx `8KVToKUVS9NezbnfyoN2YQWTGWMrbgEHDJ5rBgsXqENc`). The vault accepted them only because their hash equals the commitment stored at birth. Anyone can now read them with the `revealed` view, and `foundling-verify` reproduces the decision of each of the first 21 cycles from them.
 
-- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json`. **See** `PASS commitment`, `PASS nonce 17 replay` and `SUMMARY pass=14 skip=1 fail=0`. The one skip is the advisor's signature: the worker did not archive it for the mainnet cycles, so that check runs on the testnet fixture below.
+- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json`. **See** `PASS commitment`, `PASS nonce 21 replay`, `PASS nonce 21 ai signer` and `SUMMARY pass=21 skip=0 fail=0`: the decision of cycle 21 is reproduced from the revealed parameters, and the model's answer carries a signature from its TEE.
 
-### A cycle where the model changed the trade
+### The first trade on mainnet
+
+Cycle 21 ran on 2026-11-13 at 13:51 UTC, started by the keeper bot:
+
+- Kraken read 3.6077 USD per NEAR and Rhea pool 4512 read 3.6115, above the 3.55 threshold, so the price rule read risk-on.
+- The model answered risk 15 of 100, confidence 85: "Market-wide BTC slump and jitters, but no direct threat to NEAR, Rhea, or USDC".
+- The strategy cut the base buy of 2.5 USDC by that 15%, to 2.125 USDC, and then to 0.4 USDC: the room the per-trade cap leaves, 10% of a 4 USDC book.
+- The vault swapped 0.4 USDC for 0.11043 wNEAR on Rhea pool 4512. After it the vault held 3.6 USDC and 0.11043 wNEAR.
+- Transactions: trigger `3A74n5wU8qgE3Dshto8Cnodd7vrhQ6FBRTixcuqBVxrC`, execute `GTpH3vEPtiu416yAgPyiAJJYLWAvzd3vkaVypn3FFUci`.
+- The fixture in the command above is the proof of this cycle.
+
+### A testnet cycle where the model's cut is visible in the amount
+
+On mainnet the cap set the final amount of cycle 21, so the model's 15% cut does not show in it. This testnet cycle shows the cut alone.
 
 On the testnet rehearsal vault `vault.fdl-adv3-139b75.testnet` (the same vault build `9ab6b6d6…` and the same strategy WASM `b15a66b4…` as mainnet), cycle 3 ran on 2026-11-13 with 5 test USDC:
 
@@ -76,8 +89,8 @@ Keywords from the hackathon tracks are named only where this repository has code
 | Track | What is built | Evidence | Not claimed |
 | --- | --- | --- | --- |
 | `security` | AGENT SECURITY, FUNCTION CALL KEYS, TEE ATTESTATION. The contract enforces the caps, the vault account has no keys, the keeper and guardian sign with function-call keys limited to named vault methods, and the guardian can freeze trading. | `python3 verify.py --live …` above; `make attack-lab-full`; key state and transactions in [`proofs/mainnet.json`](proofs/mainnet.json) | A third-party audit. |
-| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment and reveal in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json`; `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json` | The advisor's signature on the mainnet cycles: it was not archived, so it is checked on the testnet fixture only. |
-| `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | Sandbox tests and the Attack Lab; redeem on mainnet in [`proofs/mainnet.json`](proofs/mainnet.json) | A swap on mainnet (none has executed yet), NEAR INTENTS (in testing), CHAIN SIGNATURES. |
+| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment and reveal in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json` | That nobody knew the parameters before the reveal: the lead wrote them. The claim is that they were not published, and could not be changed, until then. |
+| `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | The first mainnet swap (`first_trade`) and a redeem in [`proofs/mainnet.json`](proofs/mainnet.json); sandbox tests and the Attack Lab | Returns of any kind: one small trade has run. NEAR INTENTS (in testing), CHAIN SIGNATURES. |
 | `agents` | AGENT COMMERCE, in one narrow sense: each cycle the vault pays for the agent's compute from an on-chain budget (`ops_budget`), with a receipt. | Step 6 above; `first_cycle` in [`proofs/mainnet.json`](proofs/mainnet.json) | Hiring other agents, revenue, NEAR INTENTS, CHAIN SIGNATURES. |
 
 ## Try to rob it
