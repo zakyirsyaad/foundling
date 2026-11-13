@@ -35,3 +35,14 @@ export function claimText(claims: Claim[], id: WebClaimId): { text: string; down
   if (!claim) throw new Error(`no claim ${id}`);
   return claim.status === "pass" ? { text: claim.claim, downgraded: false } : { text: claim.downgrade, downgraded: true };
 }
+
+/**
+ * The keys claim also has to agree with the vault on screen. A live vault that shows a key is
+ * not "born without keys", whatever the last check said, so the claim steps down to a plain
+ * statement of what the chain shows. `liveKeys` is null when no live vault was read.
+ */
+export function keylessClaim(claims: Claim[], liveKeys: number | null): { text: string; downgraded: boolean } {
+  const checked = claimText(claims, "born-without-keys");
+  if (checked.downgraded || liveKeys === null || liveKeys === 0) return checked;
+  return { text: `The vault shows ${liveKeys} access key${liveKeys === 1 ? "" : "s"} right now, so this does not hold yet.`, downgraded: true };
+}

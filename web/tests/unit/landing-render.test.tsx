@@ -165,3 +165,38 @@ test("a downgraded exit claim is downgraded in the hero card too", async () => {
   const tile = container.querySelector("[data-claim=g3-exit] > p")!.textContent!;
   expect(screen.getByTestId("hero-vault").querySelector("[data-fact=exit]")).toHaveTextContent(tile);
 });
+test("a live vault that shows a key downgrades the keys claim, even after the check passed", async () => {
+  const snapshot = await fixtureSnapshot({}, 1);
+  const { container } = render(<Home claims={claims} keysLine="x" source={{ kind: "live", snapshot }} />);
+  const tile = container.querySelector("[data-claim=born-without-keys]")!;
+  expect(tile).toHaveAttribute("data-downgraded");
+  expect(tile).not.toHaveTextContent("The vault account has no access keys.");
+  expect(tile).toHaveTextContent("1 access key right now");
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("A vault meant to be born without keys.");
+});
+test("the labelled sample vault does not downgrade a passed keys claim, and its number says where it is from", async () => {
+  const snapshot = await fixtureSnapshot({}, 1);
+  const { container } = render(<Home claims={claims} keysLine="x" source={{ kind: "sample", label: "Testnet rehearsal vault (m12)", snapshot }} />);
+  const tile = container.querySelector("[data-claim=born-without-keys]")!;
+  expect(tile).not.toHaveAttribute("data-downgraded");
+  expect(tile.querySelector("[data-art]")).toHaveTextContent("on the rehearsal vault");
+});
+test("the keys picture on a live vault says the number is read now", async () => {
+  const snapshot = await fixtureSnapshot({}, 0);
+  const { container } = render(<Home claims={claims} keysLine="x" source={{ kind: "live", snapshot }} />);
+  expect(container.querySelector("[data-claim=born-without-keys] [data-art]")).toHaveTextContent("access keys now");
+});
+test("zero keys with an unchecked keys claim does not state the claim in the hero card", async () => {
+  const snapshot = await fixtureSnapshot({}, 0);
+  const unchecked = claims.map((c) => (c.id === "born-without-keys" ? { ...c, status: "skip" as const } : c));
+  render(<Home claims={unchecked} keysLine="x" source={{ kind: "live", snapshot }} />);
+  const fact = screen.getByTestId("hero-vault").querySelector("[data-fact=keys]")!;
+  expect(fact).toHaveTextContent("0");
+  expect(fact).not.toHaveTextContent("No person can sign for the vault.");
+  expect(fact).toHaveTextContent("Read from the chain. The full check has not run yet.");
+});
+test("zero keys with a passed keys claim states it in the hero card", async () => {
+  const snapshot = await fixtureSnapshot({}, 0);
+  render(<Home claims={claims} keysLine="x" source={{ kind: "live", snapshot }} />);
+  expect(screen.getByTestId("hero-vault").querySelector("[data-fact=keys]")).toHaveTextContent("No person can sign for the vault.");
+});
