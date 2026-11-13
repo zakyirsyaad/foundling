@@ -25,6 +25,23 @@ export function vaultWord(s: VaultSnapshot): VaultWord {
   return "Live";
 }
 
+/** One sentence a newcomer can read: what the vault is doing right now. Same order of precedence as `vaultWord`. */
+export function vaultHeadline(s: VaultSnapshot): string {
+  switch (vaultWord(s)) {
+    case "Halted": return "Trading has stopped. Redeem still works.";
+    case "Frozen": return "Trading is paused. Redeem still works.";
+    case "Stuck": return "A swap is stuck. Redeem still works.";
+    case "Not ready": return "The vault is not ready for deposits yet.";
+    case "Live": return s.inflight ? "A swap is running." : s.stage.kind === "Idle" ? "Waiting for the next cycle." : "A cycle is running.";
+  }
+}
+
+/** A holder's pro-rata share of the book in USDC base units, rounded down as the contract rounds a redeem. */
+export function positionValue(nav: bigint | null, shares: bigint, totalShares: bigint): bigint | null {
+  if (nav === null || totalShares === 0n) return null;
+  return (nav * shares) / totalShares;
+}
+
 export function dataAge(s: VaultSnapshot, nowMs: number): { ageSeconds: number; unreadable: boolean } {
   const ms = Math.max(0, nowMs - s.fetchedAtMs);
   return { ageSeconds: Math.floor(ms / 1000), unreadable: ms > STALE_AFTER_MS };

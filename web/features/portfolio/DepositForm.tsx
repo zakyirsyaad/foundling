@@ -37,6 +37,10 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
   const amount = parseAmount(text, d);
   const checks = amount === null ? null : depositChecks(amount, s, p, gasPrice);
   const steps: Step[] = [...(p.registered.vault ? [] : [{ name: "register_vault" as const, args: {} }]), { name: "deposit", args: { amount: (amount ?? 0n).toString() } }];
+  const room = s.policy.perUserCap > p.netDeposit ? s.policy.perUserCap - p.netDeposit : 0n;
+  /** The most this account can add now: what it holds, or what its cap still allows, whichever is smaller. */
+  const most = p.balances.usdc < room ? p.balances.usdc : room;
+  const refused = Boolean(checks && (checks.belowMin || checks.overUserCap || checks.overBalance));
   const disabled = busy || amount === null || amount === 0n || !checks || checks.belowMin || checks.overUserCap || checks.overBalance;
   return (
     <section aria-labelledby="deposit-title" className="grid gap-3 rounded-lg border p-5">
@@ -45,6 +49,10 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
         <span className="fm-label">Amount in USDC</span>
         <input inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} className="fm-input mono" aria-describedby="deposit-help" />
       </label>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="fm-btn fm-btn--outline fm-btn--sm mono" onClick={() => setText(formatUnits(s.policy.minDeposit, d))}>Min</button>
+        <button type="button" className="fm-btn fm-btn--outline fm-btn--sm mono" onClick={() => setText(formatUnits(most, d))}>Max</button>
+      </div>
       <div id="deposit-help" className="grid gap-1 text-[13px] text-muted-foreground">
         <p>Token: <span className="mono">{s.assets.usdc}</span>. Balance {formatUnits(p.balances.usdc, d, 2)} USDC.</p>
         {p.balances.usdcE > 0n && p.balances.usdc === 0n ? <p>This account holds only bridged USDC.e. The vault takes native USDC only.</p> : null}
@@ -52,9 +60,13 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
         <p>The vault has room for about {formatUnits(checks?.tvlRemainingEstimate ?? 0n, d, 2)} USDC more. This is an estimate; if the vault is full, the deposit is refunded in full.</p>
         {p.registered.vault ? null : <p>First deposit: a one-time, non-refundable registration of {formatUnits(s.storageMin, NEAR, 4)} NEAR.</p>}
         {checks && checks.nearShortfall > 0n ? <p data-testid="near-shortfall">You need {formatUnits(checks.nearShortfall, NEAR, 5)} more NEAR for this.</p> : null}
-        {checks?.belowMin ? <p>That is below the minimum deposit.</p> : null}
-        {checks?.overUserCap ? <p>That is over what this account can still add.</p> : null}
-        {checks?.overBalance ? <p>That is more than this account holds.</p> : null}
+        {refused ? (
+          <div role="alert" className="grid gap-1 font-medium text-danger">
+            {checks?.belowMin ? <p>That is below the minimum deposit.</p> : null}
+            {checks?.overUserCap ? <p>That is over what this account can still add.</p> : null}
+            {checks?.overBalance ? <p>That is more than this account holds.</p> : null}
+          </div>
+        ) : null}
         <p>Shares mint at the next cycle, when the vault holds only USDC, so a wrong price cannot dilute holders.</p>
       </div>
       <p className="text-[13px] font-medium">

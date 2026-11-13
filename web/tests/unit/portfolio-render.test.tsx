@@ -87,3 +87,21 @@ test("a token mismatch gives no build context", async () => {
   expect(buildCtxFor({ ...s, assets: { ...s.assets, usdc: "evil.testnet", wnear: "wrap.testnet" } })).toBeNull();
   expect(buildCtxFor(null)).toBeNull();
 });
+
+test("Max fills the most this account can still add, and Min the smallest deposit", async () => {
+  const { snap, ctx } = await setup();
+  const user = userEvent.setup();
+  const capped = { ...snap, policy: { ...snap.policy, perUserCap: 20_000_000n, minDeposit: 1_000_000n } };
+  render(<DepositForm s={capped} p={pos} gasPrice={100_000_000n} reasons={[]} ctx={ctx} network="testnet" busy={false} onSubmit={vi.fn()} />);
+  await user.click(screen.getByRole("button", { name: "Max" }));
+  expect(screen.getByLabelText("Amount in USDC")).toHaveValue("20");
+  await user.click(screen.getByRole("button", { name: "Min" }));
+  expect(screen.getByLabelText("Amount in USDC")).toHaveValue("1");
+});
+test("an amount the contract would refuse is called out as a problem, not as a hint", async () => {
+  const { snap, ctx } = await setup();
+  const user = userEvent.setup();
+  render(<DepositForm s={snap} p={pos} gasPrice={100_000_000n} reasons={[]} ctx={ctx} network="testnet" busy={false} onSubmit={vi.fn()} />);
+  await user.type(screen.getByLabelText("Amount in USDC"), "999999");
+  expect(screen.getByRole("alert")).toHaveTextContent(/more than this account holds|over what this account can still add/);
+});
