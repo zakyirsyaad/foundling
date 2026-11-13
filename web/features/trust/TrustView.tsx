@@ -1,4 +1,4 @@
-import { LOSS_SCENARIOS, RHEA_NOTE, ROLES_NOTE, WINDOW_FORMULA } from "@/content/trust";
+import { LOSS_SCENARIOS, RHEA_NOTE, ROLES_NOTE, TRUST_SHORT, WINDOW_FORMULA } from "@/content/trust";
 import type { VaultSnapshot } from "@/lib/chain/types";
 import { PartiesTable } from "./PartiesTable";
 import { RolesTable } from "./RolesTable";
@@ -24,6 +24,17 @@ export function TrustView({ snapshot, label }: { snapshot: VaultSnapshot | null;
           <h1 className="display-lg max-w-[760px]">Who you trust, and how much.</h1>
           <p className="lead">Foundling takes the keys out of the vault, not the trust out of the system. Here is every party you still rely on, what each one can do, and what limits it.</p>
           {label ? <p className="mono fm-small">{label}</p> : null}
+        </div>
+      </section>
+      <section aria-label="The short version" className="wrap pb-16">
+        <div className="trio">
+          {TRUST_SHORT.map((c) => (
+            <div key={c.tag} className="trio__cell">
+              <p className="eyebrow">{c.tag}</p>
+              <h2 className="h3">{c.title}</h2>
+              <p className="fm-small">{c.body}</p>
+            </div>
+          ))}
         </div>
       </section>
       <RolesSection snapshot={snapshot} />

@@ -12,7 +12,7 @@ const TABS = [
 export function AppTabs() {
   const path = usePathname();
   return (
-    <nav aria-label="App" className="mx-auto max-w-[1120px] overflow-x-auto px-4">
+    <nav aria-label="App" className="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-x-6 overflow-x-auto px-4">
       <ul className="flex gap-5 text-sm">
         {TABS.map((t) => {
           const active = t.href === "/app" ? path === "/app" : path?.startsWith(t.href);
@@ -25,6 +25,7 @@ export function AppTabs() {
           );
         })}
       </ul>
+      <Link href="/#how-it-works" className="py-3 text-[13px] font-medium text-brand">New here? How it works</Link>
     </nav>
   );
 }

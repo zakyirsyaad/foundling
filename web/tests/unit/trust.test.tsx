@@ -1,7 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
 
 import { termsReady } from "@/lib/terms";
+import { findForbidden } from "@/content/forbidden";
+import { TRUST_SHORT } from "@/content/trust";
 import { PartiesTable } from "@/features/trust/PartiesTable";
+import { TrustView } from "@/features/trust/TrustView";
 import { RolesTable } from "@/features/trust/RolesTable";
 import { Rotations } from "@/features/trust/Rotations";
 
@@ -35,4 +38,12 @@ test("terms are not ready while a value is still TBD", () => {
   expect(termsReady({ date: "2026-11-10", oneClickTosUrl: "TBD" })).toBe(false);
   expect(termsReady({ date: "2026-11-10", oneClickTosUrl: "http://example.org" })).toBe(false);
   expect(termsReady({ date: "2026-11-10", oneClickTosUrl: "https://example.org/terms" })).toBe(true);
+});
+
+test("the trust page opens with a short version: what cannot happen, what can, what is still trusted", () => {
+  render(<TrustView snapshot={null} label={null} />);
+  const short = screen.getByRole("region", { name: "The short version" });
+  expect(within(short).getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(TRUST_SHORT.map((c) => c.title));
+  expect(TRUST_SHORT.map((c) => c.tag)).toEqual(["Cannot happen", "Can happen", "Still trusted"]);
+  for (const c of TRUST_SHORT) expect(findForbidden(`${c.title} ${c.body}`)).toEqual([]);
 });

@@ -37,3 +37,8 @@ test("the chart needs two points", () => {
   rerender(<SharePriceChart points={[p, { ...p, nonce: 2n, at: "2026-11-02T00:00:00Z" }]} usdcDecimals={6} />);
   expect(screen.getByRole("img", { name: "Share price by cycle" })).toBeInTheDocument();
 });
+
+test("every app page offers a newcomer the way to the explanation", () => {
+  render(<AppHeader vaultId="vault.foundling.testnet" network="testnet" />);
+  expect(screen.getByRole("link", { name: "New here? How it works" })).toHaveAttribute("href", "/#how-it-works");
+});

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { config } from "@/config";
-import { CycleFilterBar, CycleMap, CyclePager, CycleTable, OlderPageUnreadable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
+import { CycleFilterBar, CycleMap, CyclePager, ResultLegend, CycleTable, OlderPageUnreadable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
 import { createRpcClient } from "@/lib/chain/rpc";
 import { getSnapshot } from "@/lib/chain/source";
 import { fallbackCycles, historyPendingText } from "@/lib/cycles/fallback";
@@ -31,6 +31,7 @@ export default async function CyclesPage({ searchParams }: { searchParams: Promi
           <p className="text-sm text-muted-foreground">Every cycle the keeper started, newest first. Each one links to its timeline and proof.</p>
         </div>
         <CycleMap rows={rows} />
+        <ResultLegend />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CycleFilterBar active={filter} />
           <p className="fm-small">Times in UTC</p>

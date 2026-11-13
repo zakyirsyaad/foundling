@@ -65,6 +65,17 @@
   .artmask { display: inline-flex; gap: 4px; }
   .artmask i { width: 22px; height: 10px; border-radius: 9999px; background: var(--muted); }
 
+  .fold { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); }
+  .fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; padding: 0 20px; cursor: pointer; font-size: 17px; font-weight: 600; letter-spacing: -0.015em; list-style: none; }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary::after { content: "+"; flex: none; font-family: var(--font-mono); font-size: 18px; font-weight: 400; color: var(--muted-foreground); }
+  .fold[open] > summary::after { content: "\2212"; }
+  .fold[open] > summary { border-bottom: 1px solid var(--border); }
+  .fold__body { margin: 0; padding: 20px; }
+  .fold__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px 32px; }
+  .trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 1px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--border); overflow: hidden; }
+  .trio__cell { display: grid; align-content: start; gap: 10px; padding: 24px; background: var(--card); }
+
   .faq details { border-bottom: 1px solid var(--border); }
   .faq details:first-child { border-top: 1px solid var(--border); }
   .faq summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; cursor: pointer; font-size: 17px; font-weight: 600; letter-spacing: -0.015em; list-style: none; }
