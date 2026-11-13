@@ -12,8 +12,8 @@ import { serializeSnapshot } from "@/lib/chain/serialize";
 import { readVaultSnapshot } from "@/lib/chain/vault";
 
 const RPC = {
-  mainnet: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"],
-  testnet: ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near.org"],
+  mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"],
+  testnet: ["https://rpc.testnet.fastnear.com", "https://near-testnet.drpc.org"],
 } as const;
 
 /** Rehearsal vaults older than PR #29 have no storage registration; read their bounds as zero. */

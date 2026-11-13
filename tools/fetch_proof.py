@@ -34,12 +34,12 @@ import urllib.request
 
 CHAINS = {
     "testnet": {
-        "rpcs": ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],
+        "rpcs": ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"],
         "api": "https://testnet-api.outlayer.ai",
         "registry": "worker.outlayer.testnet",
     },
     "mainnet": {
-        "rpcs": ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"],
+        "rpcs": ["https://free.rpc.fastnear.com", "https://near.drpc.org"],
         "api": "https://api.outlayer.ai",
         "registry": "worker.outlayer.near",
     },
