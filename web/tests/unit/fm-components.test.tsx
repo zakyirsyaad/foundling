@@ -78,6 +78,15 @@ test("LimitMeter without a price says so instead of showing zero", () => {
   expect(screen.getByText("Price unavailable")).toBeInTheDocument();
   expect(screen.queryByRole("meter")).toBeNull();
 });
+test("LimitMeter with a zero cap and nothing used is an empty bar, not a full one", () => {
+  const { container } = render(<LimitMeter label="Epoch window" used={0n} cap={0n} decimals={6} />);
+  expect(screen.getByRole("meter", { name: "Epoch window" })).toHaveAttribute("aria-valuenow", "0");
+  expect(container.querySelector(".fm-meter-fill")).not.toHaveAttribute("data-near");
+});
+test("LimitMeter with a zero cap and something used is full", () => {
+  render(<LimitMeter label="TVL" used={5n} cap={0n} decimals={0} />);
+  expect(screen.getByRole("meter", { name: "TVL" })).toHaveAttribute("aria-valuenow", "100");
+});
 test("Video shows only the poster under reduced motion", () => {
   mockReducedMotion(true);
   render(<Video src="/media/hero.mp4" poster="/media/hero.jpg" captions="/media/hero.vtt" alt="Foundling demo" loop />);

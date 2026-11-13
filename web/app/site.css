@@ -53,6 +53,7 @@
   .gtile--2 { grid-column: span 2; }
   .gtile--3 { grid-column: span 3; }
   .gtile__art { flex: 1; display: grid; place-items: center; min-height: 160px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); }
+  .gtile__count { display: grid; justify-items: center; gap: 8px; text-align: center; }
   .gtile__num { font-family: var(--font-mono); font-size: 112px; line-height: 1; font-weight: 500; letter-spacing: -0.06em; color: var(--brand); }
   .gtile__bars { display: block; width: 100%; max-width: 280px; height: auto; }
   .gtile__bars .bar { fill: var(--brand); }

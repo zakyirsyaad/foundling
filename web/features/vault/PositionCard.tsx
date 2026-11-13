@@ -11,7 +11,7 @@ import { useWallet } from "@/lib/wallet/WalletProvider";
 /** The visitor's own position on the Overview, so the first screen answers "what do I have here?". */
 export function PositionCard({ s, nav }: { s: VaultSnapshot; nav: bigint | null }) {
   const { account } = useWallet();
-  const { position: p } = usePosition(account, s);
+  const { position: p } = usePosition(account, s, { refresh: "change" });
   const d = s.assets.usdcDecimals;
   if (!account) {
     return (

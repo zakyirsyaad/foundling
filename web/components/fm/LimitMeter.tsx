@@ -11,7 +11,8 @@ export function LimitMeter({ label, used, cap, decimals, estimate = false, unit,
       </div>
     );
   }
-  const pct = cap === 0n ? 100 : Number(((used > cap ? cap : used) * PERCENT) / cap);
+  // A zero cap with nothing used is a closed limit, not a reached one: the bar stays empty.
+  const pct = cap === 0n ? (used > 0n ? 100 : 0) : Number(((used > cap ? cap : used) * PERCENT) / cap);
   const name = estimate ? `${label} (estimate)` : label;
   const text = `${formatUnits(used, decimals, digits)} / ${formatUnits(cap, decimals, digits)}${unit ? ` ${unit}` : ""}`;
   return (

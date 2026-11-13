@@ -8,7 +8,7 @@ import { FAQ } from "@/content/faq";
 import { BUILT_ON_FIXED, BUILT_ON_NOTE, CLOSING, GUARANTEES, HEADS, HERO, HOW_IT_WORKS } from "@/content/landing";
 import { MEDIA } from "@/content/media";
 import { NOT_CLAIMED } from "@/content/not-claimed";
-import { type Claim, claimText } from "@/lib/claims";
+import { type Claim, claimText, keylessClaim } from "@/lib/claims";
 import type { SnapshotSource } from "@/lib/proof/local";
 import { limitMeters } from "@/lib/vault/overview";
 import { splitFirstSentence } from "@/lib/format/text";
@@ -18,11 +18,13 @@ type ClaimLine = ReturnType<typeof claimText>;
 
 export function Home({ claims, keysLine, source = null }: { claims: Claim[]; keysLine: string; source?: SnapshotSource | null }) {
   const advisor = claimText(claims, "near-ai-advisor");
+  // Only a live read can speak against the claim; the labelled sample is another vault.
+  const keyless = keylessClaim(claims, source?.kind === "live" ? source.snapshot.accessKeys : null);
   return (
     <main className="text-[14px] leading-[1.5]">
-      <Hero keyless={claimText(claims, "born-without-keys")} exit={claimText(claims, "g3-exit")} keysLine={keysLine} source={source} />
+      <Hero keyless={keyless} exit={claimText(claims, "g3-exit")} keysLine={keysLine} source={source} />
       <BuiltOn advisor={advisor} intents={claimText(claims, "near-intents")} />
-      <Guarantees claims={claims} keys={source ? source.snapshot.accessKeys : null} />
+      <Guarantees claims={claims} keyless={keyless} source={source} />
       <HowItWorks advisor={advisor} />
       <Section id="demo" head={HEADS.demo}>
         <Video {...MEDIA.demo} />
@@ -51,7 +53,7 @@ function Hero({ keyless, exit, keysLine, source }: { keyless: ClaimLine; exit: C
           <Link href="/proof" className="fm-btn fm-btn--outline fm-btn--lg">Read the proof</Link>
         </div>
         <div className="mt-6 grid w-full max-w-[920px] gap-3">
-          <HeroVault source={source} exit={exit} />
+          <HeroVault source={source} keyless={keyless} exit={exit} />
           <p data-testid="keys-line" className="mono text-[13px] text-muted-foreground">{keysLine}</p>
         </div>
       </div>
@@ -60,7 +62,7 @@ function Hero({ keyless, exit, keysLine, source }: { keyless: ClaimLine; exit: C
 }
 
 /** The vault as the hero picture: three facts read from the chain on the server, never a number we made up. */
-function HeroVault({ source, exit }: { source: SnapshotSource | null; exit: ClaimLine }) {
+function HeroVault({ source, keyless, exit }: { source: SnapshotSource | null; keyless: ClaimLine; exit: ClaimLine }) {
   if (!source) {
     return (
       <div data-testid="hero-vault" className="hero-vault">
@@ -80,7 +82,8 @@ function HeroVault({ source, exit }: { source: SnapshotSource | null; exit: Clai
         <div data-fact="keys">
           <p className="fm-label">Access keys</p>
           <p className="hero-vault__value">{s.accessKeys}</p>
-          <p className="fm-small">{s.accessKeys === 0 ? "No person can sign for the vault." : "The final vault is meant to have none."}</p>
+          {/* The number is a read; the sentence is a claim, so it waits for the claim's check. */}
+          <p className="fm-small">{s.accessKeys > 0 ? "The final vault is meant to have none." : keyless.downgraded ? "Read from the chain. The full check has not run yet." : "No person can sign for the vault."}</p>
         </div>
         <div data-fact="epoch">
           {epoch.cap === 0n ? (
@@ -148,19 +151,19 @@ function HowItWorks({ advisor }: { advisor: ClaimLine }) {
   );
 }
 
-function Guarantees({ claims, keys }: { claims: Claim[]; keys: number | null }) {
+function Guarantees({ claims, keyless, source }: { claims: Claim[]; keyless: ClaimLine; source: SnapshotSource | null }) {
   return (
     <Section id="guarantees" head={HEADS.guarantees}>
       <ul className="gtiles">
         {GUARANTEES.map((g) => {
-          const c = claimText(claims, g.id);
+          const c = g.id === "born-without-keys" ? keyless : claimText(claims, g.id);
           return (
             <li key={g.id} className={`gtile gtile--${g.span}`} data-claim={g.id} data-downgraded={c.downgraded || undefined}>
               <span className="gcard__tag">{g.tag}</span>
               <h3 className="h3">{g.title}</h3>
               <p>{c.text}</p>
               <div className="gtile__art" data-art={g.id} aria-hidden="true">
-                <Art id={g.id} keys={keys} />
+                <Art id={g.id} source={source} />
               </div>
               <p className="gcard__foot"><b>Limit</b> {g.limit}</p>
             </li>
@@ -172,8 +175,16 @@ function Guarantees({ claims, keys }: { claims: Claim[]; keys: number | null }) 
 }
 
 /** One small picture per guarantee. Decoration only: the claim and its limit carry the meaning. */
-function Art({ id, keys }: { id: (typeof GUARANTEES)[number]["id"]; keys: number | null }) {
-  if (id === "born-without-keys") return <span className="gtile__num">{keys ?? "–"}</span>;
+function Art({ id, source }: { id: (typeof GUARANTEES)[number]["id"]; source: SnapshotSource | null }) {
+  if (id === "born-without-keys") {
+    // The number always says which vault it was read from, so it cannot pass for the claim itself.
+    return (
+      <div className="gtile__count">
+        <span className="gtile__num">{source ? source.snapshot.accessKeys : "–"}</span>
+        <span className="fm-small">{source === null ? "vault not readable" : source.kind === "sample" ? "access keys on the rehearsal vault" : "access keys now"}</span>
+      </div>
+    );
+  }
   if (id === "g2-bounded-loss") {
     return (
       <svg viewBox="0 0 240 120" className="gtile__bars">
