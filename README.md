@@ -16,7 +16,7 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 | Each trade stays inside caps the contract enforces. | [`proofs/attack/reproducible/over-cap.json`](proofs/attack/reproducible/over-cap.json) | `make attack-proofs` | 0b, sandbox | pass |
 | You can redeem while trading is frozen, halted or stuck. | tests: [`contracts/vault/src/tests/recovery.rs`](contracts/vault/src/tests/recovery.rs)<br>[`contracts/vault/src/tests/flows.rs`](contracts/vault/src/tests/flows.rs) | `cargo test --manifest-path contracts/vault/Cargo.toml redeem` | 0b, offline | pass |
 | Every cycle links to its transactions and its proof. | tests: [`cli/tests/check.rs`](cli/tests/check.rs) | `git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json` | 1, live | pass |
-| A NEAR AI model in a TEE reads the latest crypto headlines and can only hold back a buy. Its signed answer is checked offline. | [`cli/fixtures/testnet-advisor-proof.json`](cli/fixtures/testnet-advisor-proof.json) | `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json`<br>`cargo test --manifest-path strategy/Cargo.toml advisor` | 0b, offline<br>0b, offline | pass |
+| A NEAR AI model in a TEE reads the latest crypto headlines and the market, and can only lower exposure: it shrinks or holds back a buy, or sells to USDC on a severe risk. Its signed answer is checked offline. | [`cli/fixtures/testnet-risk-manager-proof.json`](cli/fixtures/testnet-risk-manager-proof.json)<br>[`cli/fixtures/testnet-advisor-proof.json`](cli/fixtures/testnet-advisor-proof.json) | `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json`<br>`cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json`<br>`cargo test --manifest-path strategy/Cargo.toml` | 0b, offline<br>0b, offline<br>0b, offline | pass |
 
 ```
 [Depositor] <-> [Vault contract] <-> [OutLayer TEE: sealed strategy + NEAR AI advisor];  [Keeper bot] -> [Vault contract]
@@ -60,6 +60,16 @@ Cycle 1 on mainnet, transaction `AoW2epeLpgbjjQa9p9bhiyhwHaCJvZUAvo6Vt49oYifW` (
 
 As of 2026-11-13 07:46 UTC the keeper bot had run cycles 2 to 9 unattended, and every cycle ended in `Hold`: no swap has executed on mainnet yet. The swap path is exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
 
+### A cycle where the model changed the trade
+
+On the testnet rehearsal vault `vault.fdl-adv3-139b75.testnet` (the same vault build `9ab6b6d6…` and the same strategy WASM `b15a66b4…` as mainnet), cycle 3 ran on 2026-11-13 with 5 test USDC:
+
+- The price rule read risk-on. The model answered risk 15 of 100: "Broad market jitters and BTC weakness, but no direct threat to NEAR Protocol, Rhea, or USDC on NEAR."
+- The strategy cut the base buy of 0.05 USDC by that 15%, to 0.0425 USDC (`amount_in: 42500`), and the keeper executed it: 0.0425 USDC for 0.01206 wNEAR.
+- On testnet the pool and the price oracle are our mocks. The prices the strategy read, the TEE run and the model's signed answer are real.
+- Transactions on testnet: trigger `DUpsCut376WP4gQvGRBrbbFbCTc481UATAQVsMrdL8En`, execute `ApRB2E682ZjwCqny2sTQU8BxSq22EYbJroZ8PKQ34Hev`.
+- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json`. **See** `PASS nonce 3 replay`, `PASS nonce 3 ai signer` and `SUMMARY pass=21 skip=0 fail=0`: the decision is reproduced from the revealed parameters, and the model's answer carries a signature from its TEE.
+
 ## Tracks
 
 Keywords from the hackathon tracks are named only where this repository has code and evidence for them.
@@ -98,7 +108,7 @@ make attack-lab-full
 | Exit | The vault code; the USDC token contract and its issuer, who can blocklist, pause and upgrade; NEAR itself; Rhea only for funds that are mid-swap. Not the agent, the keeper, OutLayer or the governor. |
 | Traceability | The open-source verifier; OutLayer's result for the pinned code hash; NEAR AI for the signature on its inference, with the inference image and model weights trusted to NEAR AI. |
 
-The full threat model, with the worst case in numbers, is in [docs/SPEC.md](docs/SPEC.md) section 9.
+The full threat model, with the worst case in numbers, is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) (English) and in [docs/SPEC.md](docs/SPEC.md) section 9 (Indonesian, the source).
 
 ## Disclaimer
 
