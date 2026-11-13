@@ -17,7 +17,7 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 ```
 
 - **Video:** not recorded yet. The video and a timestamped transcript will be added under docs/video.
-- **Try to rob it:** `make attack-lab-full` builds the contracts and runs 15 attacks against a local sandbox with throwaway keys. The last line should be `PASS=15 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
+- **Try to rob it:** `make attack-lab-full` builds the contracts and runs 16 attacks against a local sandbox with throwaway keys. The last line should be `PASS=16 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
 
 ## Not proven yet
 
@@ -26,6 +26,12 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 - {{mainnet_status}}
 - The sandbox runs the vault against mocks of the price oracle, Rhea (the swap venue), OutLayer and the tokens (`contracts/mock-oracle`, `contracts/mock-ref`, `contracts/mock-outlayer`, `contracts/mock-token`). The Attack Lab results hold for the vault against these mocks, not against the real services.
 - The fixtures behind `python3 verify.py` are synthetic.
+
+## The vault on mainnet
+
+- **Vault:** `vault.foundling.near`, live since 2026-11-13 with 4 USDC from the lead. **Website:** https://foundling.xyz
+- **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash` and `PASS decision`. `commitment` is `SKIP` until the parameters are revealed after `reveal_after` (2026-11-13 12:00 UTC).
+- Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
 
 ## Try to rob it
 

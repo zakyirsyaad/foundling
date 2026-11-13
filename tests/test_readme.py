@@ -23,6 +23,11 @@ def head(text):
     return text.split("\n## ", 1)[0]
 
 
+def first_not_pass(claims):
+    """Only a claim that is not `pass` puts its downgrade text in the README, so drift is tested on one of those."""
+    return next(claim for claim in claims if claim["status"] != "pass")
+
+
 def run_tool(*args):
     return subprocess.run([sys.executable, str(ROOT / "tools" / "readme.py"), *args],
                           capture_output=True, text=True, cwd=ROOT)
@@ -61,7 +66,7 @@ class DriftTest(Workspace):
     def test_changing_claims_json_without_regenerating_fails_the_check(self):
         self.assertEqual(self.tool().returncode, 0)
         self.assertEqual(self.tool("--check").returncode, 0)
-        self.edit_claims(lambda claims: claims[0].update(downgrade="A changed downgrade text."))
+        self.edit_claims(lambda claims: first_not_pass(claims).update(downgrade="A changed downgrade text."))
         done = self.tool("--check")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn("make readme", done.stderr + done.stdout)
@@ -73,7 +78,7 @@ class DriftTest(Workspace):
 
     def test_regenerating_after_the_change_passes_again(self):
         self.tool()
-        self.edit_claims(lambda claims: claims[0].update(downgrade="A different sentence."))
+        self.edit_claims(lambda claims: first_not_pass(claims).update(downgrade="A different sentence."))
         self.assertEqual(self.tool("--check").returncode, 1)
         self.assertEqual(self.tool().returncode, 0)
         self.assertEqual(self.tool("--check").returncode, 0)

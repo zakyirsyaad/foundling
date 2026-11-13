@@ -12,6 +12,7 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 
 | Claim (status from [claims.json](claims.json)) | Evidence | Command | Runs | Status |
 | --- | --- | --- | --- | --- |
+| The vault account has no access keys. Nobody can sign for it. | [`proofs/mainnet.json`](proofs/mainnet.json) | `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` | 1, live | pass |
 | Each trade stays inside caps the contract enforces. | [`proofs/attack/reproducible/over-cap.json`](proofs/attack/reproducible/over-cap.json) | `make attack-proofs` | 0b, sandbox | pass |
 | You can redeem while trading is frozen, halted or stuck. | tests: [`contracts/vault/src/tests/recovery.rs`](contracts/vault/src/tests/recovery.rs)<br>[`contracts/vault/src/tests/flows.rs`](contracts/vault/src/tests/flows.rs) | `cargo test --manifest-path contracts/vault/Cargo.toml redeem` | 0b, offline | pass |
 | Every cycle links to its transactions and its proof. | tests: [`cli/tests/check.rs`](cli/tests/check.rs) | `git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json` | 1, live | pass |
@@ -22,17 +23,22 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 ```
 
 - **Video:** not recorded yet. The video and a timestamped transcript will be added under docs/video.
-- **Try to rob it:** `make attack-lab-full` builds the contracts and runs 15 attacks against a local sandbox with throwaway keys. The last line should be `PASS=15 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
+- **Try to rob it:** `make attack-lab-full` builds the contracts and runs 16 attacks against a local sandbox with throwaway keys. The last line should be `PASS=16 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
 
 ## Not proven yet
 
-- `born-without-keys` (skip): The vault is meant to be born without keys. That check has not run on the final vault yet, and the testnet rehearsal vault still has one key.
 - `g1-confidentiality` (skip): Sealing is designed. It is checked on this vault once the parameters are revealed and replayed.
 - `near-intents` (skip): Cross-chain deposits through NEAR Intents are in testing.
 - No third-party audit of the vault code has been done.
-- No final mainnet vault is recorded in this repository yet (the file proofs/mainnet.json does not exist).
+- The final mainnet vault and its transactions are recorded in [`proofs/mainnet.json`](proofs/mainnet.json).
 - The sandbox runs the vault against mocks of the price oracle, Rhea (the swap venue), OutLayer and the tokens (`contracts/mock-oracle`, `contracts/mock-ref`, `contracts/mock-outlayer`, `contracts/mock-token`). The Attack Lab results hold for the vault against these mocks, not against the real services.
 - The fixtures behind `python3 verify.py` are synthetic.
+
+## The vault on mainnet
+
+- **Vault:** `vault.foundling.near`, live since 2026-11-13 with 4 USDC from the lead. **Website:** https://foundling.xyz
+- **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash` and `PASS decision`. `commitment` is `SKIP` until the parameters are revealed after `reveal_after` (2026-11-13 12:00 UTC).
+- Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
 
 ## Try to rob it
 
@@ -50,7 +56,7 @@ make attack-lab-full
 
 ## Who holds which key
 
-**Who holds which key.** Foundling is built by a team of two, so the roles below are split between two teammates, not between independent parties. The lead holds the governor and keeper roles and deployed the vault. The other teammate holds only the guardian role. On the vault, the guardian account can call only `freeze` and `cancel_keeper_change`; the contract enforces this. Its everyday key is a function-call key limited to those two methods, and its full-access key is kept offline. This split limits one leaked key. A leaked keeper key can run cycles inside the caps, and a leaked guardian key can stop trading but cannot move funds. It does not limit the lead: the governor can unfreeze at once and can replace the guardian after a 24-hour timelock that the guardian cannot cancel. Whoever holds these keys, the contract still enforces the caps, moves tokens only to share holders and Rhea, and keeps `redeem` open while frozen. Depositor accounts are ordinary accounts: anyone holding a depositor's key can redeem that depositor's shares.
+**Who holds which key.** Foundling is built by a team of two, so the roles below are split between two teammates, not between independent parties. The lead holds the governor and keeper roles and deployed the vault. The other teammate holds only the guardian role. On the vault, the guardian account can call only `freeze` and `cancel_keeper_change`; the contract enforces this. Its only key is a function-call key limited to those two methods; it has no full-access key. This split limits one leaked key. A leaked keeper key can run cycles inside the caps, and a leaked guardian key can stop trading but cannot move funds. It does not limit the lead: the governor can unfreeze at once and can replace the guardian after a 24-hour timelock that the guardian cannot cancel. Whoever holds these keys, the contract still enforces the caps, moves tokens only to share holders and Rhea, and keeps `redeem` open while frozen. Depositor accounts are ordinary accounts: anyone holding a depositor's key can redeem that depositor's shares.
 
 ## What you still have to trust
 
