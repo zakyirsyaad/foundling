@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 import verify
 
 ENDPOINTS = {
-    "testnet": ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://rpc.testnet.fastnear.com"],
-    "mainnet": ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org", "https://rpc.mainnet.fastnear.com"],
+    "testnet": ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org", "https://rpc.testnet.fastnear.com"],
+    "mainnet": ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://rpc.shitzuapes.xyz"],
 }
 MAX_CALLS = 15
 TIMEOUT = 20
@@ -78,7 +78,9 @@ def is_method_not_found(text):
 
 def http_transport(url, payload, timeout=TIMEOUT):
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+        url, data=json.dumps(payload).encode(),
+        # Some public RPC providers answer 403 to the default Python-urllib agent.
+        headers={"Content-Type": "application/json", "User-Agent": "foundling-verify"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:

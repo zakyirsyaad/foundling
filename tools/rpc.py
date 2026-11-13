@@ -14,7 +14,7 @@ import sys
 import time
 import urllib.request
 
-RPCS = ["https://rpc.testnet.near.org", "https://test.rpc.fastnear.com"]
+RPCS = ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"]
 
 
 def call(method, params):
@@ -23,7 +23,7 @@ def call(method, params):
         url = RPCS[attempt % len(RPCS)]
         body = json.dumps({"jsonrpc": "2.0", "id": "sp9", "method": method, "params": params}).encode()
         try:
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "foundling-tools"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = json.load(resp)
             if "error" in data:

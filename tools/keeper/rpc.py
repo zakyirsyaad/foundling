@@ -16,7 +16,9 @@ class ViewError(RpcError):
 
 def http_transport(url, payload, timeout=20):
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+        url, data=json.dumps(payload).encode(),
+        # Some public RPC providers answer 403 to the default Python-urllib agent.
+        headers={"Content-Type": "application/json", "User-Agent": "foundling-keeper"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)

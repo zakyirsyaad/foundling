@@ -13,7 +13,7 @@ from .near_cli import NearCli, NearCliError, run_subprocess
 from .rpc import RpcClient, RpcError
 from .soak import render, summarize_log
 
-TESTNET_RPCS = ["https://rpc.testnet.near.org", "https://test.rpc.fastnear.com"]
+TESTNET_RPCS = ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"]
 
 
 class TeeLog:
