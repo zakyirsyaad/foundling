@@ -46,19 +46,19 @@
     ],
     "evidence": [
       "proofs/mainnet.json",
-      "cli/fixtures/mainnet-cycle-17-proof.json",
+      "cli/fixtures/mainnet-cycle-21-proof.json",
       "proofs/commitment.json"
     ],
     "checks": [
       {
         "tier": "0b",
-        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json",
         "requires": [
           "cargo"
         ],
         "network": "offline",
         "seconds": 300,
-        "expect": "PASS nonce 17 replay"
+        "expect": "PASS nonce 21 replay"
       },
       {
         "tier": "0a",
@@ -202,10 +202,21 @@
       "cli/tests/ai_signature.rs"
     ],
     "evidence": [
+      "cli/fixtures/mainnet-cycle-21-proof.json",
       "cli/fixtures/testnet-risk-manager-proof.json",
       "cli/fixtures/testnet-advisor-proof.json"
     ],
     "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 300,
+        "expect": "PASS nonce 21 ai signer"
+      },
       {
         "tier": "0b",
         "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json",

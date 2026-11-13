@@ -101,6 +101,20 @@
     "guardian_full_key_deleted": {
       "tx": "5aMBJgsySNBE4hc2tkBS3SERc8kh8CdVwV7FaHmnMmmb",
       "signer": "guard.foundling.near"
+    },
+    "first_trade": {
+      "nonce": 21,
+      "date_utc": "2026-11-13T13:51:07Z",
+      "trigger_tx": "3A74n5wU8qgE3Dshto8Cnodd7vrhQ6FBRTixcuqBVxrC",
+      "execute_tx": "GTpH3vEPtiu416yAgPyiAJJYLWAvzd3vkaVypn3FFUci",
+      "signer": "keeper.foundling.near",
+      "action": "buy_risk",
+      "usdc_in": "400000",
+      "wnear_out": "110425676281369891947110",
+      "pool": "v2.ref-finance.near pool 4512",
+      "result": "Executed",
+      "fixture": "cli/fixtures/mainnet-cycle-21-proof.json",
+      "check": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json"
     }
   },
   "check": "python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
@@ -110,8 +124,8 @@
     "date_utc": "2026-11-13",
     "salt": "50c42f7b08dd007c859e10cdfc62a17ebccede0a6ad48404475d2437a0ed252b",
     "params": "Read them with the vault's `revealed` view; the salt with `revealed_salt`.",
-    "replay": "Cycles 1 to 17 were reproduced from the revealed parameters by foundling-verify at commit 5294acbf077f0119fcc85e1d0fede04ed0d9f1aa.",
-    "fixture": "cli/fixtures/mainnet-cycle-17-proof.json",
-    "check": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json"
+    "replay": "Cycles 1 to 21 were reproduced from the revealed parameters by foundling-verify at commit 5294acbf077f0119fcc85e1d0fede04ed0d9f1aa.",
+    "fixture": "cli/fixtures/mainnet-cycle-21-proof.json",
+    "check": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json"
   }
 }
