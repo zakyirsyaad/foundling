@@ -212,7 +212,7 @@ class DisclosureTest(unittest.TestCase):
 
     def test_provenance_names_the_baseline_the_ai_help_and_the_libraries(self):
         section = README.split("\n## Provenance", 1)[1].split("\n## ", 1)[0]
-        for needle in ("2026-11-01", "baseline", "Claude-Session", "THIRD_PARTY_NOTICES.md", "spikes/sp1a"):
+        for needle in ("2026-11-01", "baseline", "Claude-Session", "THIRD_PARTY_NOTICES.md", "strategy/src/bin/sp1a_probe.rs"):
             self.assertIn(needle, section)
 
     def test_the_trust_table_names_who_still_has_to_be_trusted(self):

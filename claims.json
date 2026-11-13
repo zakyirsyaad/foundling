@@ -153,15 +153,14 @@
     "checks": [
       {
         "tier": "1",
-        "cmd": "git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json",
+        "cmd": "cargo build --release --locked --features fetch --manifest-path cli/Cargo.toml && python3 tools/fetch_proof.py --chain mainnet --vault vault.foundling.near --collateral-bin cli/target/release/foundling-verify --rpc https://archival-rpc.mainnet.fastnear.com --out proof.json 3A74n5wU8qgE3Dshto8Cnodd7vrhQ6FBRTixcuqBVxrC && cli/target/release/foundling-verify check proof.json",
         "requires": [
-          "git",
           "python3",
           "cargo"
         ],
         "network": "live",
-        "seconds": 120,
-        "expect": "fail=0"
+        "seconds": 600,
+        "expect": "PASS nonce 21 replay"
       }
     ],
     "status": "pass",

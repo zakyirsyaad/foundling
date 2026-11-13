@@ -45,3 +45,6 @@ next-env.d.ts
 .superpowers/
 .next-mainnet/
 .next-prodcheck/
+
+# Written by the live proof command in the README
+/proof.json

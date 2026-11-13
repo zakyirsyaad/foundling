@@ -16,7 +16,7 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 | The strategy parameters stayed sealed until the reveal. The revealed values match the commitment made at birth and reproduce each decision. | [`proofs/mainnet.json`](proofs/mainnet.json)<br>[`cli/fixtures/mainnet-cycle-21-proof.json`](cli/fixtures/mainnet-cycle-21-proof.json)<br>[`proofs/commitment.json`](proofs/commitment.json) | `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json`<br>`python3 verify.py` | 0b, offline<br>0a, offline | pass |
 | Each trade stays inside caps the contract enforces. | [`proofs/attack/reproducible/over-cap.json`](proofs/attack/reproducible/over-cap.json) | `make attack-proofs` | 0b, sandbox | pass |
 | You can redeem while trading is frozen, halted or stuck. | tests: [`contracts/vault/src/tests/recovery.rs`](contracts/vault/src/tests/recovery.rs)<br>[`contracts/vault/src/tests/flows.rs`](contracts/vault/src/tests/flows.rs) | `cargo test --manifest-path contracts/vault/Cargo.toml redeem` | 0b, offline | pass |
-| Every cycle links to its transactions and its proof. | tests: [`cli/tests/check.rs`](cli/tests/check.rs) | `git checkout <verifier_commit> && python3 tools/fetch_proof.py --chain <network> --vault <vault> --collateral-bin COLLATERAL.bin --out proof.json <trigger_tx> && cargo run --manifest-path cli/Cargo.toml -- check proof.json` | 1, live | pass |
+| Every cycle links to its transactions and its proof. | tests: [`cli/tests/check.rs`](cli/tests/check.rs) | `cargo build --release --locked --features fetch --manifest-path cli/Cargo.toml && python3 tools/fetch_proof.py --chain mainnet --vault vault.foundling.near --collateral-bin cli/target/release/foundling-verify --rpc https://archival-rpc.mainnet.fastnear.com --out proof.json 3A74n5wU8qgE3Dshto8Cnodd7vrhQ6FBRTixcuqBVxrC && cli/target/release/foundling-verify check proof.json` | 1, live | pass |
 | A NEAR AI model in a TEE reads the latest crypto headlines and the market, and can only lower exposure: it shrinks or holds back a buy, or sells to USDC on a severe risk. Its signed answer is checked offline. | [`cli/fixtures/mainnet-cycle-21-proof.json`](cli/fixtures/mainnet-cycle-21-proof.json)<br>[`cli/fixtures/testnet-risk-manager-proof.json`](cli/fixtures/testnet-risk-manager-proof.json)<br>[`cli/fixtures/testnet-advisor-proof.json`](cli/fixtures/testnet-advisor-proof.json) | `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json`<br>`cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json`<br>`cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json`<br>`cargo test --manifest-path strategy/Cargo.toml` | 0b, offline<br>0b, offline<br>0b, offline<br>0b, offline | pass |
 
 ```
@@ -37,7 +37,7 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 ## The vault on mainnet
 
 - **Vault:** `vault.foundling.near`, live since 2026-11-13 with 4 USDC from the lead. **Website:** https://foundling.xyz
-- **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash` and `PASS decision`. `commitment` is `SKIP` until the parameters are revealed after `reveal_after` (2026-11-13 12:00 UTC).
+- **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash`, `PASS commitment` and `PASS decision`, then `SUMMARY pass=4 skip=0 fail=0`. `PASS commitment` means the parameters and salt revealed on 2026-11-13 open the commitment stored at birth.
 - Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
 
 ## Try the website
@@ -107,7 +107,7 @@ make attack-lab-full
 ```
 
 - Needs the Rust toolchain pinned in `rust-toolchain.toml`, `cargo-near`, and network access once, to download the `neard` sandbox binary.
-- It builds the five contracts, then runs the 16 core attacks listed in `tools/attack-registry.json` one at a time, each limited to 300 seconds. Allow about 15 minutes after the first build on a laptop.
+- It builds the five contracts, then runs the 16 core attacks listed in `tools/attack-registry.json` one at a time, each limited to 300 seconds. Allow about 15 minutes after the first build on a laptop. From a fresh clone, first build included, the whole run took 42 minutes on ours.
 - Exit 0 and the last line `PASS=16 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` mean every attack was refused or contained. `FAIL` means one got through; that is the result to report.
 - `freeze-race` is the slowest, about 4 minutes on a quiet laptop. On a busy machine it can pass the 300-second limit and report `ERROR` (a timeout, not a failed attack); run it alone with `python3 tools/attack.py run freeze-race`.
 - The sandbox is a node started on your machine for the run. The accounts it creates, and their keys, exist for that run only. No key is read from or written to this repository.
@@ -136,8 +136,8 @@ Foundling is a technical demo made for the NEAR Hackathon. It has not been audit
 ## Provenance
 
 - This is a new project. Its git history starts on 2026-11-01. Everything made before that date is disclosed here as baseline: the design notes and the spike experiments that were run outside this repository (see [docs/SPEC.md](docs/SPEC.md) section 6). The hackathon FAQ (Q-001) counts code from the announcement on 2026-10-19 as inside the window; we list everything before 2026-11-01 as baseline anyway.
-- The SP1a spike (a test of OutLayer WASM runs) is kept in `spikes/sp1a/` and `strategy/src/bin/sp1a_probe.rs`.
-- Code, tests and documents were written with AI assistance. Commits made in Claude Code sessions (Anthropic) carry a `Claude-Session:` trailer in the commit message. At run time the strategy also calls a NEAR AI Cloud model as an advisor.
+- The SP1a spike (a test of OutLayer WASM runs) ran outside this repository. Its probe is kept in `strategy/src/bin/sp1a_probe.rs`, and the binaries OutLayer ran are in the public repository [zakyirsyaad/sp1a-wasm](https://github.com/zakyirsyaad/sp1a-wasm).
+- Code, tests and documents were written with AI assistance throughout. Many commits made in Claude Code sessions (Anthropic) carry a `Claude-Session:` trailer in the commit message; a commit without the trailer may be AI-assisted too. At run time the strategy also calls a NEAR AI Cloud model as an advisor.
 - Libraries, from the manifests: `near-sdk` (the vault and the mocks), `near-workspaces` (sandbox tests), `dcap-qvl` and `k256` (checking attestations and signatures), Next.js and React (the website), Hono (the API), Drizzle ORM and `pg` (the indexer). Services are named as text only: OutLayer, NEAR AI Cloud, Rhea, NEAR Intents (1Click) and an aggregate price oracle. The full list of dependencies, with licenses, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Team
