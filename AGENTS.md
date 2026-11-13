@@ -19,7 +19,7 @@ Prasyarat: Rust 1.97.1 + target wasm, cargo-near 0.22.0, Node 24, Python 3.9+. I
 - Build strategi (satu-satunya cara): `cd strategy && ./build.sh`; rehearsal: `./build.sh --features rehearsal`
 - Tes verifier CLI: `cd cli && cargo test --locked`; jalankan: `cargo run --manifest-path cli/Cargo.toml -- check <proof.json>`
 - Verifier offline: `make verify`; strict (SKIP gagal): `make verify-strict`; live baca-saja: `python3 verify_live.py --vault <id> --network testnet` (atau `mainnet`)
-- Attack Lab: `make attack-lab-full` (build + 15 serangan); setelah wasm ada: `make attack-lab`; satu serangan: `python3 tools/attack.py run freeze-race`; strict: `python3 tools/attack.py run-all --strict`
+- Attack Lab: `make attack-lab-full` (build + 16 serangan); setelah wasm ada: `make attack-lab`; satu serangan: `python3 tools/attack.py run freeze-race`; strict: `python3 tools/attack.py run-all --strict`
 - Bukti reproducible (Docker, menulis file yang di-commit): `make attack-proofs`
 - README (dihasilkan): `make readme`; cek seperti CI: `python3 tools/readme.py --check`
 - Web: `npm run -w web <script>` dengan `dev` (port 3100; butuh env, lihat `web/README.md`), `build`, `test`, `test:coverage`, `e2e`, `lint`, `typecheck`, `check:contract`, `depcruise`

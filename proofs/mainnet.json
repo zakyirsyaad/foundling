@@ -1,0 +1,108 @@
+{
+  "note": "The final Foundling vault on NEAR mainnet. Every value here can be checked with a public RPC; no key is needed. Strategy parameters and salt stay sealed until reveal_after.",
+  "network": "mainnet",
+  "vault": "vault.foundling.near",
+  "website": "https://foundling.xyz",
+  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "code_hash_base58": "BQwNyNHU8u9D7SCEcfGcuFrSvqVRQLB4VdiZxQjcgK6R",
+  "init_args": "proofs/mainnet-init-args.json",
+  "init_args_sha256": "c8f5e1f5d53fd7c0da59fb3f2b0e2e5196624012e7f60ea2d26297db72a7b594",
+  "strategy": {
+    "wasm_hash": "b15a66b4b07a45a1d5f6fd4ca00c870a4d68b58c862f8795fff8702e316da142",
+    "wasm_url": "https://raw.githubusercontent.com/zakyirsyaad/sp1a-wasm/79a27502738a8413792378c2ab6cc5e6a5f41d28/foundling-strategy-risk-manager.wasm",
+    "verifier_commit": "5294acbf077f0119fcc85e1d0fede04ed0d9f1aa",
+    "secrets_owner": "sec.foundling.near",
+    "secrets_profile": "final"
+  },
+  "commitment": "80493d3259005a95b9c327b9491f48b18c5d84d82650a9dfc361493c5cf243e1",
+  "reveal_after": 1794571200,
+  "reveal_after_utc": "2026-11-13T12:00:00Z",
+  "roles": {
+    "governor": "gov.foundling.near",
+    "keeper": "keeper.foundling.near",
+    "guardian": "guard.foundling.near"
+  },
+  "access_keys": {
+    "vault.foundling.near": "none",
+    "guard.foundling.near": "one function-call key held by the partner: freeze, cancel_keeper_change on vault.foundling.near; no full-access key",
+    "keeper.foundling.near": "one function-call key on the keeper server (trigger_cycle, execute_decision, advance, abort_stale_cycle, expire_decision on vault.foundling.near) and one full-access key held by the lead"
+  },
+  "transactions": {
+    "store_secrets": {
+      "tx": "56CtPZcGBfZn9PCtGRKTnJnHaJZZpZom2qexnzXaJLPo",
+      "signer": "sec.foundling.near"
+    },
+    "birth": {
+      "tx": "2cD84UWazjPhLEgXZXPFzgssMqwEx6rNT7mqf3LvpGLH",
+      "signer": "foundling.near",
+      "actions": "CreateAccount, Transfer 4.4 NEAR, DeployContract, FunctionCall init; no AddKey"
+    },
+    "setup_storage": [
+      {
+        "target": "Usdc",
+        "tx": "oKaVCciNrPdBUEPTnrnJx46kNnPPjwFAXrzqrErFr2h"
+      },
+      {
+        "target": "Wnear",
+        "tx": "GuCmsKoHRjLNWzhtZiK6nDbg2CAcu3uaTLSLopFwkfKS"
+      },
+      {
+        "target": "Rhea",
+        "tx": "BKFXKBhPLFTvP9gjRYDVCGxCg5YidTf86s5MDbERss9A"
+      },
+      {
+        "target": "RheaTokens",
+        "tx": "3rDLZY4Vvx78AFBDUuuDpdtDpgdmqdMkk2BGz53TqV5z"
+      }
+    ],
+    "selftest": {
+      "tx": "24QLdrVwwXfQsvw1M85ptXeXs1bGfxJZZtMa7RCVLcV5",
+      "signer": "foundling.near"
+    },
+    "first_deposit": {
+      "tx": "6pA8WpYrKEnxADg26RBWfhtEUWCEzXAHDwYuujsjCSdP",
+      "signer": "eb8c5164b4a85dedd6d150c4d4d7fde7836496e66cf86ff4f14b3103655ee978",
+      "usdc": "5000000"
+    },
+    "first_cycle": {
+      "tx": "AoW2epeLpgbjjQa9p9bhiyhwHaCJvZUAvo6Vt49oYifW",
+      "signer": "keeper.foundling.near",
+      "nonce": 1,
+      "result": "Hold(NO_DECISION)"
+    },
+    "first_bot_cycle": {
+      "tx": "8AZPfWinSRdk5aVQgZCaVb6vzR5TbWbgfRecpcHfxZUi",
+      "signer": "keeper.foundling.near",
+      "nonce": 2,
+      "result": "Hold(NO_DECISION)"
+    },
+    "keeper_function_call_key": {
+      "tx": "3zfkZq7yJ7WSc9ikwUjyBTLdR2RzegiagzpSWQEDJTtk",
+      "signer": "keeper.foundling.near"
+    },
+    "freeze": {
+      "tx": "FiaMF4Af2vJbUTUREYdi5fh8gdSYnM3TAvcUWF2xw4zn",
+      "signer": "guard.foundling.near"
+    },
+    "redeem_while_frozen": {
+      "tx": "PSkRm7VtL2Pe8HQws1Eaqqk15rSmr6C4J2MCtCAkaLD",
+      "signer": "eb8c5164b4a85dedd6d150c4d4d7fde7836496e66cf86ff4f14b3103655ee978",
+      "shares": "1000000000000",
+      "usdc": "1000000"
+    },
+    "unfreeze": {
+      "tx": "3Caa4N5G3gz5e7BFYskLH4NsrkHW4e8TCN3TNYKPhf4L",
+      "signer": "gov.foundling.near"
+    },
+    "guardian_function_call_key": {
+      "tx": "AUjtfwgqQAVVWvxNviqXUzmv497CGRujfqibBu4ZGE3L",
+      "signer": "guard.foundling.near"
+    },
+    "guardian_full_key_deleted": {
+      "tx": "5aMBJgsySNBE4hc2tkBS3SERc8kh8CdVwV7FaHmnMmmb",
+      "signer": "guard.foundling.near"
+    }
+  },
+  "check": "python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "reveal": null
+}

@@ -8,21 +8,25 @@
     "code_refs": [
       "contracts/vault/src/lib.rs"
     ],
-    "test_refs": [],
-    "evidence": [],
+    "test_refs": [
+      "tests/test_verify_live.py"
+    ],
+    "evidence": [
+      "proofs/mainnet.json"
+    ],
     "checks": [
       {
         "tier": "1",
-        "cmd": "near account list-keys <vault> network-config <network> now",
+        "cmd": "python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
         "requires": [
-          "near-cli-rs"
+          "python3"
         ],
         "network": "live",
-        "seconds": 5,
-        "expect": "no access keys"
+        "seconds": 10,
+        "expect": "PASS keys"
       }
     ],
-    "status": "skip",
+    "status": "pass",
     "downgrade": "The vault is meant to be born without keys. That check has not run on the final vault yet, and the testnet rehearsal vault still has one key."
   },
   {
