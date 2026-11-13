@@ -46,3 +46,10 @@ export const RHEA_NOTE =
 
 export const WINDOW_FORMULA =
   "A swap step that gets no answer for stuck_after seconds can be advanced by anyone. If it is still stuck halt_after seconds after it first stalled, the next advance halts the vault until the governor clears it. Redeem stays open throughout.";
+
+/** The page in three lines, before the tables. Each line is backed by a table or a note further down. */
+export const TRUST_SHORT = [
+  { tag: "Cannot happen", title: "No role can move your funds", body: "Governor, guardian, keeper and agent can stop, start or propose. The contract sends tokens only to share holders, and to Rhea for a capped swap." },
+  { tag: "Can happen", title: "Trades can lose money", body: "Inside caps per trade and per epoch. Windows add up over time, and only the book value bounds the total." },
+  { tag: "Still trusted", title: "Code, hardware, Rhea, USDC", body: "Vault code no third party has audited, the enclave hardware and OutLayer, Rhea and its oracle, and the USDC issuer. Each one is listed below." },
+] as const;

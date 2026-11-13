@@ -158,3 +158,10 @@ test("a closed trading window shows no bar, so it does not read as a full one", 
   expect(within(card).queryByRole("meter")).toBeNull();
   expect(card).toHaveTextContent("The trading window is closed right now.");
 });
+test("a downgraded exit claim is downgraded in the hero card too", async () => {
+  const snapshot = await fixtureSnapshot({}, 0);
+  const downgraded = claims.map((c) => (c.id === "g3-exit" ? { ...c, status: "skip" as const } : c));
+  const { container } = render(<Home claims={downgraded} keysLine="x" source={{ kind: "sample", label: "Testnet rehearsal vault (m12)", snapshot }} />);
+  const tile = container.querySelector("[data-claim=g3-exit] > p")!.textContent!;
+  expect(screen.getByTestId("hero-vault").querySelector("[data-fact=exit]")).toHaveTextContent(tile);
+});

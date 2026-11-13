@@ -30,6 +30,34 @@ function cyclesHref(filter: CycleFilter, cursor?: string): string {
   return text ? `/app/cycles?${text}` : "/app/cycles";
 }
 
+/** Every cycle word in the status table, each with one plain sentence: the six endings, then the two states before one. */
+const RESULT_MEANING = [
+  { word: "Executed", text: "The decision passed every limit check and the swap went through." },
+  { word: "Hold", text: "The strategy chose not to trade this cycle. Nothing moved." },
+  { word: "Rejected", text: "The contract refused the decision because it broke a limit. Nothing moved." },
+  { word: "Reversed", text: "The swap started and was undone. The funds went back to the vault." },
+  { word: "Failed", text: "The cycle ended without a usable decision. Nothing moved." },
+  { word: "Aborted", text: "The cycle waited too long and was closed, so the next one could start." },
+  { word: "Running", text: "The cycle has started and has not ended yet." },
+  { word: "Stuck", text: "A swap has not finished in time. Anyone can move it forward from the Overview." },
+] as const;
+
+export function ResultLegend() {
+  return (
+    <details className="fold">
+      <summary>What the results mean</summary>
+      <dl className="fold__body fold__grid">
+        {RESULT_MEANING.map((r) => (
+          <div key={r.word} className="grid gap-1">
+            <dt><Status group="cycle" word={r.word} /></dt>
+            <dd className="fm-small m-0">{r.text}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
 export function CycleFilterBar({ active }: { active: CycleFilter }) {
   return (
     <nav aria-label="Filter cycles" className="fm-seg">
