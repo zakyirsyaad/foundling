@@ -33,6 +33,37 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 - **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash` and `PASS decision`. `commitment` is `SKIP` until the parameters are revealed after `reveal_after` (2026-11-13 12:00 UTC).
 - Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
 
+## Try the website
+
+- **Do** open https://foundling.xyz/app (no wallet needed). **See** the vault's stage, its book in USDC and wNEAR, the limits the contract enforces, and the footer line `0 access keys · code hash 9ab6b6…`.
+- **Do** open https://foundling.xyz/app/cycles and pick a cycle. **See** its timeline, the decision the strategy returned, the advisor's risk score with its one-sentence reason, and the transaction hashes.
+- **Do** open https://foundling.xyz/proof. **See** four facts read from the chain (access keys, vault code hash, strategy WASM hash, commitment), each with a command that needs no key.
+- The website only reads. It serves from Vercel, reads chain state from public RPC nodes, and reads cycle history from our indexer; deposits and redeems are signed in your own wallet.
+
+## One cycle, end to end
+
+Cycle 1 on mainnet, transaction `AoW2epeLpgbjjQa9p9bhiyhwHaCJvZUAvo6Vt49oYifW` (signer `keeper.foundling.near`, 2026-11-13 03:29 UTC):
+
+1. The keeper calls `trigger_cycle`. The vault checks stage, cooldown and budget, mints the queued 5 USDC deposit into shares, and records nonce 1.
+2. The vault, not the keeper, calls OutLayer with the strategy's URL and hash, its book (5 USDC, 0 wNEAR), its limits, and 0.05 NEAR attached from its own balance.
+3. OutLayer runs the strategy WASM `b15a66b4…` in a TEE. The strategy opens the sealed parameters, reads the NEAR price from Rhea pool 4512 (3.3724 USD) and from Kraken (3.3747 USD, a gap of 0.07%), and asks a NEAR AI Cloud model for a risk score.
+4. The model answers risk 15 of 100, confidence 85: "No direct NEAR/Rhea/USDC threat; only broad market dip and unrelated exchange/regulatory news".
+5. The price rule reads risk-off and calls for a sell, but the vault holds no wNEAR, so the strategy returns `action: none`. The vault stores the full decision, with the commitment and a digest of the inputs, and emits `hold`. No funds move.
+6. OutLayer charges 0.00163 NEAR for 5.8 seconds of compute and refunds 0.04837 NEAR to the vault.
+
+As of 2026-11-13 07:46 UTC the keeper bot had run cycles 2 to 9 unattended, and every cycle ended in `Hold`: no swap has executed on mainnet yet. The swap path is exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
+
+## Tracks
+
+Keywords from the hackathon tracks are named only where this repository has code and evidence for them.
+
+| Track | What is built | Evidence | Not claimed |
+| --- | --- | --- | --- |
+| `security` | AGENT SECURITY, FUNCTION CALL KEYS, TEE ATTESTATION. The contract enforces the caps, the vault account has no keys, the keeper and guardian sign with function-call keys limited to named vault methods, and the guardian can freeze trading. | `python3 verify.py --live …` above; `make attack-lab-full`; key state and transactions in [`proofs/mainnet.json`](proofs/mainnet.json) | A third-party audit. |
+| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json` | Reveal and replay on the mainnet vault, until it has run (see "Not proven yet"). |
+| `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | Sandbox tests and the Attack Lab; redeem on mainnet in [`proofs/mainnet.json`](proofs/mainnet.json) | A swap on mainnet (none has executed yet), NEAR INTENTS (in testing), CHAIN SIGNATURES. |
+| `agents` | AGENT COMMERCE, in one narrow sense: each cycle the vault pays for the agent's compute from an on-chain budget (`ops_budget`), with a receipt. | Step 6 above; `first_cycle` in [`proofs/mainnet.json`](proofs/mainnet.json) | Hiring other agents, revenue, NEAR INTENTS, CHAIN SIGNATURES. |
+
 ## Try to rob it
 
 ```
@@ -76,6 +107,21 @@ Foundling is a technical demo made for the NEAR Hackathon. It has not been audit
 ## Team
 
 Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner (GitHub: maziazi). The lead holds the governor and keeper roles; the partner holds the guardian role.
+
+## Repository map
+
+| Path | What it is |
+| --- | --- |
+| `contracts/vault/src/` | The vault contract: deposits, redeem, cycles, swaps, limits, recovery, roles, reveal. |
+| `strategy/` | The strategy and the NEAR AI advisor, built to WASM for OutLayer. |
+| `cli/` | `foundling-verify`: checks a cycle's proof bundle (attestation, AI signature, replay). |
+| `verify.py`, `verify_live.py` | Standard-library verifiers: offline fixtures, and read-only checks of a live vault. |
+| `sandbox/` | Tests against a local NEAR node with mock oracle, Rhea, OutLayer and tokens. |
+| `tools/attacks/`, `tools/keeper/` | The Attack Lab and the keeper bot. |
+| `web/`, `api/`, `indexer/`, `packages/db/`, `deploy/` | The website, its read-only API, the indexer and its database, and the server setup. |
+| `proofs/` | Committed evidence: the mainnet record, Attack Lab results, verifier fixtures. |
+
+Needed to build everything: Rust 1.97.1 with the wasm targets, `cargo-near` 0.22.0, Node 24 and Python 3.9 or newer. `python3 verify.py` needs Python only. The commands are in [AGENTS.md](AGENTS.md).
 
 ## More
 
