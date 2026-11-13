@@ -31,22 +31,35 @@
   },
   {
     "id": "g1-confidentiality",
-    "claim": "The strategy parameters stay sealed until reveal.",
+    "claim": "The strategy parameters stayed sealed until the reveal. The revealed values match the commitment made at birth and reproduce each decision.",
     "tracks": [
       "privacy"
     ],
     "code_refs": [
       "strategy/src/lib.rs",
-      "contracts/vault/src/reveal.rs"
+      "contracts/vault/src/reveal.rs",
+      "cli/src"
     ],
     "test_refs": [
       "strategy/src/tests.rs",
       "contracts/vault/src/tests/reveal.rs"
     ],
     "evidence": [
+      "proofs/mainnet.json",
+      "cli/fixtures/mainnet-cycle-17-proof.json",
       "proofs/commitment.json"
     ],
     "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 300,
+        "expect": "PASS nonce 17 replay"
+      },
       {
         "tier": "0a",
         "cmd": "python3 verify.py",
@@ -58,8 +71,8 @@
         "expect": "PASS commitment"
       }
     ],
-    "status": "skip",
-    "downgrade": "Sealing is designed. It is checked on this vault once the parameters are revealed and replayed."
+    "status": "pass",
+    "downgrade": "Before the reveal only the commitment can be checked; the replay needs the revealed parameters."
   },
   {
     "id": "g2-bounded-loss",
@@ -171,25 +184,38 @@
   },
   {
     "id": "near-ai-advisor",
-    "claim": "A NEAR AI model in a TEE reads the latest crypto headlines and can only hold back a buy. Its signed answer is checked offline.",
+    "claim": "A NEAR AI model in a TEE reads the latest crypto headlines and the market, and can only lower exposure: it shrinks or holds back a buy, or sells to USDC on a severe risk. Its signed answer is checked offline.",
     "tracks": [
       "privacy",
       "agents"
     ],
     "code_refs": [
       "strategy/src/advisor.rs",
+      "strategy/src/lib.rs",
       "tools/fetch_proof.py",
       "cli/src/ai_signature.rs"
     ],
     "test_refs": [
       "strategy/src/advisor_tests.rs",
+      "strategy/src/tests.rs",
       "tests/test_fetch_proof.py",
       "cli/tests/ai_signature.rs"
     ],
     "evidence": [
+      "cli/fixtures/testnet-risk-manager-proof.json",
       "cli/fixtures/testnet-advisor-proof.json"
     ],
     "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 300,
+        "expect": "SUMMARY pass=21 skip=0 fail=0"
+      },
       {
         "tier": "0b",
         "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json",
@@ -202,12 +228,12 @@
       },
       {
         "tier": "0b",
-        "cmd": "cargo test --manifest-path strategy/Cargo.toml advisor",
+        "cmd": "cargo test --manifest-path strategy/Cargo.toml",
         "requires": [
           "cargo"
         ],
         "network": "offline",
-        "seconds": 120,
+        "seconds": 180,
         "expect": "test result: ok"
       }
     ],
