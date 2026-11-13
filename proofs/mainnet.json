@@ -115,6 +115,20 @@
       "result": "Executed",
       "fixture": "cli/fixtures/mainnet-cycle-21-proof.json",
       "check": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json"
+    },
+    "guardian_freeze_by_partner": {
+      "tx": "EWSwQQ92G4V14fuDzYfK2rwKsAtBquRr5VBtbebV9Hjb",
+      "signer": "guard.foundling.near",
+      "public_key": "ed25519:6N6h3GX1uwY2JiC1UfB5QAkeojeHmSZUMDcbgf5FD71k",
+      "key": "function-call key limited to freeze and cancel_keeper_change, held by the partner",
+      "date_utc": "2026-11-13T16:18:20Z",
+      "event": "frozen"
+    },
+    "unfreeze_after_guardian_freeze": {
+      "tx": "6psZAQVc3fUemb9YpvdJKMYXwZ8cm9Htm9Z2j2RTEU4y",
+      "signer": "gov.foundling.near",
+      "date_utc": "2026-11-13T18:19:33Z",
+      "event": "unfrozen"
     }
   },
   "check": "python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
