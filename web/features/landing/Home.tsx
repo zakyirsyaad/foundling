@@ -20,7 +20,7 @@ export function Home({ claims, keysLine, source = null }: { claims: Claim[]; key
   const advisor = claimText(claims, "near-ai-advisor");
   return (
     <main className="text-[14px] leading-[1.5]">
-      <Hero keyless={claimText(claims, "born-without-keys")} keysLine={keysLine} source={source} />
+      <Hero keyless={claimText(claims, "born-without-keys")} exit={claimText(claims, "g3-exit")} keysLine={keysLine} source={source} />
       <BuiltOn advisor={advisor} intents={claimText(claims, "near-intents")} />
       <Guarantees claims={claims} keys={source ? source.snapshot.accessKeys : null} />
       <HowItWorks advisor={advisor} />
@@ -34,7 +34,7 @@ export function Home({ claims, keysLine, source = null }: { claims: Claim[]; key
   );
 }
 
-function Hero({ keyless, keysLine, source }: { keyless: ClaimLine; keysLine: string; source: SnapshotSource | null }) {
+function Hero({ keyless, exit, keysLine, source }: { keyless: ClaimLine; exit: ClaimLine; keysLine: string; source: SnapshotSource | null }) {
   const title = keyless.downgraded ? HERO.titleUnchecked : HERO.title;
   const lead = title.endsWith(HERO.accent) ? title.slice(0, -HERO.accent.length) : title;
   return (
@@ -51,7 +51,7 @@ function Hero({ keyless, keysLine, source }: { keyless: ClaimLine; keysLine: str
           <Link href="/proof" className="fm-btn fm-btn--outline fm-btn--lg">Read the proof</Link>
         </div>
         <div className="mt-6 grid w-full max-w-[920px] gap-3">
-          <HeroVault source={source} />
+          <HeroVault source={source} exit={exit} />
           <p data-testid="keys-line" className="mono text-[13px] text-muted-foreground">{keysLine}</p>
         </div>
       </div>
@@ -60,7 +60,7 @@ function Hero({ keyless, keysLine, source }: { keyless: ClaimLine; keysLine: str
 }
 
 /** The vault as the hero picture: three facts read from the chain on the server, never a number we made up. */
-function HeroVault({ source }: { source: SnapshotSource | null }) {
+function HeroVault({ source, exit }: { source: SnapshotSource | null; exit: ClaimLine }) {
   if (!source) {
     return (
       <div data-testid="hero-vault" className="hero-vault">
@@ -97,7 +97,8 @@ function HeroVault({ source }: { source: SnapshotSource | null }) {
         <div data-fact="exit">
           <p className="fm-label">Exit</p>
           <p className="hero-vault__value">Redeem</p>
-          <p className="fm-small">Built to stay open when trading is frozen, halted or stuck.</p>
+          {/* The claim text, so a downgraded exit claim is downgraded here too. */}
+          <p className="fm-small">{exit.text}</p>
         </div>
       </div>
     </div>

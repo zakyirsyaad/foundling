@@ -27,9 +27,13 @@ export function PositionCard({ s, nav }: { s: VaultSnapshot; nav: bigint | null 
   }
   if (!p) {
     return (
-      <section aria-labelledby="position-title" data-testid="position-card" className="fm-card grid gap-1 p-5">
-        <h2 id="position-title" className="fm-label">Your position</h2>
-        <p className="fm-small">Reading your position.</p>
+      <section aria-labelledby="position-title" data-testid="position-card" className="fm-card flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-5">
+        <div className="grid gap-1">
+          <h2 id="position-title" className="fm-label">Your position</h2>
+          {/* A failed read and a pending one look the same here, so the way forward is always shown. */}
+          <p className="fm-small">Reading your position. If it does not appear, Portfolio reads it again.</p>
+        </div>
+        <Link href="/app/portfolio" className="fm-btn fm-btn--outline">Open Portfolio</Link>
       </section>
     );
   }
@@ -45,8 +49,8 @@ export function PositionCard({ s, nav }: { s: VaultSnapshot; nav: bigint | null 
         </p>
       </div>
       <div className="flex flex-wrap gap-3">
-        <Link href="/app/portfolio" className="fm-btn fm-btn--primary">Deposit</Link>
-        <Link href="/app/portfolio" className="fm-btn fm-btn--outline">Redeem</Link>
+        <Link href="/app/portfolio#deposit-title" className="fm-btn fm-btn--primary">Deposit</Link>
+        <Link href="/app/portfolio#redeem-title" className="fm-btn fm-btn--outline">Redeem</Link>
       </div>
     </section>
   );

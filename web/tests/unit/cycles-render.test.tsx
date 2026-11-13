@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { CycleDetail } from "@/features/cycles/CycleDetail";
 import { CycleFilterBar, CycleMap, ResultLegend, CyclePager, CycleTable, OlderPageUnreadable, PartialTable, cycleCursor } from "@/features/cycles/CycleList";
 import type { CycleRow } from "@/lib/history/client";
+import { STATUS } from "@/lib/status/table";
 
 import { HELD_DECISION } from "../fixtures/decision";
 
@@ -163,6 +164,6 @@ test("the legend says in plain words what each cycle result means, closed until 
   const { container } = render(<ResultLegend />);
   const fold = container.querySelector("details")!;
   expect(fold.open).toBe(false);
-  for (const word of ["Executed", "Hold", "Rejected", "Reversed", "Failed", "Aborted"]) expect(within(fold).getByText(word)).toBeInTheDocument();
+  for (const word of Object.keys(STATUS.cycle)) expect(within(fold).getByText(word)).toBeInTheDocument();
   expect(fold).toHaveTextContent("The strategy chose not to trade this cycle. Nothing moved.");
 });

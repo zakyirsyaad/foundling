@@ -56,7 +56,7 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
       <div id="deposit-help" className="grid gap-1 text-[13px] text-muted-foreground">
         <p>Token: <span className="mono">{s.assets.usdc}</span>. Balance {formatUnits(p.balances.usdc, d, 2)} USDC.</p>
         {p.balances.usdcE > 0n && p.balances.usdc === 0n ? <p>This account holds only bridged USDC.e. The vault takes native USDC only.</p> : null}
-        <p>You can still add {formatUnits(checks?.remainingUserCap ?? (s.policy.perUserCap > p.netDeposit ? s.policy.perUserCap - p.netDeposit : 0n), d, 2)} USDC. Minimum {formatUnits(s.policy.minDeposit, d, 2)} USDC.</p>
+        <p>You can still add {formatUnits(checks?.remainingUserCap ?? room, d, 2)} USDC. Minimum {formatUnits(s.policy.minDeposit, d, 2)} USDC.</p>
         <p>The vault has room for about {formatUnits(checks?.tvlRemainingEstimate ?? 0n, d, 2)} USDC more. This is an estimate; if the vault is full, the deposit is refunded in full.</p>
         {p.registered.vault ? null : <p>First deposit: a one-time, non-refundable registration of {formatUnits(s.storageMin, NEAR, 4)} NEAR.</p>}
         {checks && checks.nearShortfall > 0n ? <p data-testid="near-shortfall">You need {formatUnits(checks.nearShortfall, NEAR, 5)} more NEAR for this.</p> : null}

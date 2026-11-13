@@ -30,7 +30,7 @@ function cyclesHref(filter: CycleFilter, cursor?: string): string {
   return text ? `/app/cycles?${text}` : "/app/cycles";
 }
 
-/** The six ways a cycle ends, in the words of the status table, each with one plain sentence. */
+/** Every cycle word in the status table, each with one plain sentence: the six endings, then the two states before one. */
 const RESULT_MEANING = [
   { word: "Executed", text: "The decision passed every limit check and the swap went through." },
   { word: "Hold", text: "The strategy chose not to trade this cycle. Nothing moved." },
@@ -38,6 +38,8 @@ const RESULT_MEANING = [
   { word: "Reversed", text: "The swap started and was undone. The funds went back to the vault." },
   { word: "Failed", text: "The cycle ended without a usable decision. Nothing moved." },
   { word: "Aborted", text: "The cycle waited too long and was closed, so the next one could start." },
+  { word: "Running", text: "The cycle has started and has not ended yet." },
+  { word: "Stuck", text: "A swap has not finished in time. Anyone can move it forward from the Overview." },
 ] as const;
 
 export function ResultLegend() {
