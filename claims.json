@@ -31,22 +31,35 @@
   },
   {
     "id": "g1-confidentiality",
-    "claim": "The strategy parameters stay sealed until reveal.",
+    "claim": "The strategy parameters stayed sealed until the reveal. The revealed values match the commitment made at birth and reproduce each decision.",
     "tracks": [
       "privacy"
     ],
     "code_refs": [
       "strategy/src/lib.rs",
-      "contracts/vault/src/reveal.rs"
+      "contracts/vault/src/reveal.rs",
+      "cli/src"
     ],
     "test_refs": [
       "strategy/src/tests.rs",
       "contracts/vault/src/tests/reveal.rs"
     ],
     "evidence": [
+      "proofs/mainnet.json",
+      "cli/fixtures/mainnet-cycle-17-proof.json",
       "proofs/commitment.json"
     ],
     "checks": [
+      {
+        "tier": "0b",
+        "cmd": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json",
+        "requires": [
+          "cargo"
+        ],
+        "network": "offline",
+        "seconds": 300,
+        "expect": "PASS nonce 17 replay"
+      },
       {
         "tier": "0a",
         "cmd": "python3 verify.py",
@@ -58,8 +71,8 @@
         "expect": "PASS commitment"
       }
     ],
-    "status": "skip",
-    "downgrade": "Sealing is designed. It is checked on this vault once the parameters are revealed and replayed."
+    "status": "pass",
+    "downgrade": "Before the reveal only the commitment can be checked; the replay needs the revealed parameters."
   },
   {
     "id": "g2-bounded-loss",

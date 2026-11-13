@@ -1,5 +1,5 @@
 {
-  "note": "The final Foundling vault on NEAR mainnet. Every value here can be checked with a public RPC; no key is needed. Strategy parameters and salt stay sealed until reveal_after.",
+  "note": "The final Foundling vault on NEAR mainnet. Every value here can be checked with a public RPC; no key is needed. Strategy parameters and salt were revealed on 2026-11-13, after reveal_after; see `reveal`.",
   "network": "mainnet",
   "vault": "vault.foundling.near",
   "website": "https://foundling.xyz",
@@ -104,5 +104,14 @@
     }
   },
   "check": "python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
-  "reveal": null
+  "reveal": {
+    "tx": "8KVToKUVS9NezbnfyoN2YQWTGWMrbgEHDJ5rBgsXqENc",
+    "signer": "foundling.near",
+    "date_utc": "2026-11-13",
+    "salt": "50c42f7b08dd007c859e10cdfc62a17ebccede0a6ad48404475d2437a0ed252b",
+    "params": "Read them with the vault's `revealed` view; the salt with `revealed_salt`.",
+    "replay": "Cycles 1 to 17 were reproduced from the revealed parameters by foundling-verify at commit 5294acbf077f0119fcc85e1d0fede04ed0d9f1aa.",
+    "fixture": "cli/fixtures/mainnet-cycle-17-proof.json",
+    "check": "cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json"
+  }
 }

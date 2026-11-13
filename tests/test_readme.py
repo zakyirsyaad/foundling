@@ -157,12 +157,23 @@ class ClaimsTest(Workspace):
         self.assertEqual(self.tool().returncode, 2)
 
     def test_a_skip_claim_turned_pass_moves_into_the_table(self):
-        skipped = next(c for c in CLAIMS if c["status"] == "skip" and c["checks"] and (c["evidence"] or c["test_refs"]))
-        self.edit_claims(lambda claims: next(c for c in claims if c["id"] == skipped["id"]).update(status="pass"))
-        self.assertEqual(self.tool().returncode, 0)
-        text = self.out.read_text(encoding="utf-8")
-        self.assertTrue(any(line.startswith("| ") and skipped["claim"] in line for line in text.splitlines()))
-        self.assertNotIn(skipped["downgrade"], text)
+        """The committed file may hold no skip claim that has checks and evidence, so the test makes one first."""
+        chosen = next(c for c in CLAIMS if c["status"] == "pass" and c["checks"] and (c["evidence"] or c["test_refs"]))
+
+        def build(status):
+            self.edit_claims(lambda claims: next(c for c in claims if c["id"] == chosen["id"]).update(status=status))
+            self.assertEqual(self.tool().returncode, 0)
+            return self.out.read_text(encoding="utf-8")
+
+        def in_table(text):
+            return any(line.startswith("| ") and chosen["claim"] in line for line in text.splitlines())
+
+        skipped = build("skip")
+        self.assertFalse(in_table(skipped))
+        self.assertIn(chosen["downgrade"], skipped)
+        passed = build("pass")
+        self.assertTrue(in_table(passed))
+        self.assertNotIn(chosen["downgrade"], passed)
 
 
 class FirstScreenTest(unittest.TestCase):

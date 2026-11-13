@@ -51,7 +51,13 @@ Cycle 1 on mainnet, transaction `AoW2epeLpgbjjQa9p9bhiyhwHaCJvZUAvo6Vt49oYifW` (
 5. The price rule reads risk-off and calls for a sell, but the vault holds no wNEAR, so the strategy returns `action: none`. The vault stores the full decision, with the commitment and a digest of the inputs, and emits `hold`. No funds move.
 6. OutLayer charges 0.00163 NEAR for 5.8 seconds of compute and refunds 0.04837 NEAR to the vault.
 
-As of 2026-11-13 07:46 UTC the keeper bot had run cycles 2 to 9 unattended, and every cycle ended in `Hold`: no swap has executed on mainnet yet. The swap path is exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
+As of 2026-11-13 12:10 UTC the keeper bot had run cycles 2 to 17 unattended, and every cycle ended in `Hold`: no swap has executed on mainnet yet. The revealed rule buys only when Kraken's price is above 3.55 USD per NEAR; over these cycles it moved between 3.27 and 3.54. The swap path is exercised by unit tests ([`contracts/vault/src/tests/swap.rs`](contracts/vault/src/tests/swap.rs)), in the sandbox ([`sandbox/tests/recovery.rs`](sandbox/tests/recovery.rs)) and by the Attack Lab.
+
+### The reveal
+
+The parameters and the salt were revealed on 2026-11-13, after `reveal_after` (tx `8KVToKUVS9NezbnfyoN2YQWTGWMrbgEHDJ5rBgsXqENc`). The vault accepted them only because their hash equals the commitment stored at birth. Anyone can now read them with the `revealed` view, and `foundling-verify` reproduces the decision of each of the 17 cycles from them.
+
+- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json`. **See** `PASS commitment`, `PASS nonce 17 replay` and `SUMMARY pass=14 skip=1 fail=0`. The one skip is the advisor's signature: the worker did not archive it for the mainnet cycles, so that check runs on the testnet fixture below.
 
 ### A cycle where the model changed the trade
 
@@ -70,7 +76,7 @@ Keywords from the hackathon tracks are named only where this repository has code
 | Track | What is built | Evidence | Not claimed |
 | --- | --- | --- | --- |
 | `security` | AGENT SECURITY, FUNCTION CALL KEYS, TEE ATTESTATION. The contract enforces the caps, the vault account has no keys, the keeper and guardian sign with function-call keys limited to named vault methods, and the guardian can freeze trading. | `python3 verify.py --live …` above; `make attack-lab-full`; key state and transactions in [`proofs/mainnet.json`](proofs/mainnet.json) | A third-party audit. |
-| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json` | Reveal and replay on the mainnet vault, until it has run (see "Not proven yet"). |
+| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment and reveal in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-17-proof.json`; `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-advisor-proof.json` | The advisor's signature on the mainnet cycles: it was not archived, so it is checked on the testnet fixture only. |
 | `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | Sandbox tests and the Attack Lab; redeem on mainnet in [`proofs/mainnet.json`](proofs/mainnet.json) | A swap on mainnet (none has executed yet), NEAR INTENTS (in testing), CHAIN SIGNATURES. |
 | `agents` | AGENT COMMERCE, in one narrow sense: each cycle the vault pays for the agent's compute from an on-chain budget (`ops_budget`), with a receipt. | Step 6 above; `first_cycle` in [`proofs/mainnet.json`](proofs/mainnet.json) | Hiring other agents, revenue, NEAR INTENTS, CHAIN SIGNATURES. |
 
