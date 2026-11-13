@@ -8,7 +8,9 @@
     "code_refs": [
       "contracts/vault/src/lib.rs"
     ],
-    "test_refs": [],
+    "test_refs": [
+      "tests/test_verify_live.py"
+    ],
     "evidence": [
       "proofs/mainnet.json"
     ],
