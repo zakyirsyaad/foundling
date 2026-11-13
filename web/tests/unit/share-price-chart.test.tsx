@@ -40,7 +40,8 @@ test("the axis shows the time of day, since one day holds many cycles", () => {
 });
 
 test("the tooltip names the cycle and its time, read from the point under the cursor", () => {
-  const [, second] = chartPoints(sameDay, 6);
+  const second = chartPoints(sameDay, 6)[1];
+  if (!second) throw new Error("the fixture should give a second point");
   render(<PriceTip active label={second.at} payload={[{ value: second.price, payload: second }]} />);
   const tip = screen.getByTestId("price-tip");
   expect(tip).toHaveTextContent("Cycle 22 · 2026-11-13 14:21 UTC");
