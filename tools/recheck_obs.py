@@ -30,6 +30,7 @@ TRADES_URL = "https://api.kraken.com/0/public/Trades?pair=NEARUSD&since={since}&
 TRADE_PAIR = "NEARUSD"
 TRADE_WINDOW = 20
 TRADE_PAGE = 1000
+TRADE_ID = 6
 TRADE_LOOKBACK_SECONDS = 24 * 60 * 60
 REF = "v2.ref-finance.near"
 USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
@@ -171,6 +172,8 @@ class PublicSources:
         return json.loads(bytes(reply["result"]["result"]))
 
     def trades(self, since, until):
+        """Each trade once, in order. Kraken's `since` includes the trade at that instant, so a
+        page opens with rows the page before it already gave; they are dropped by trade id."""
         rows = []
         cursor = since * NANOS_PER_SECOND
         while True:
@@ -179,8 +182,9 @@ class PublicSources:
             if reply.get("error"):
                 raise SourceDown(f"kraken: {reply['error']}")
             page = reply["result"][TRADE_PAIR]
-            rows.extend(page)
-            if len(page) < TRADE_PAGE or trade_seconds(page[-1]) > until:
+            fresh = [row for row in page if not rows or row[TRADE_ID] > rows[-1][TRADE_ID]]
+            rows.extend(fresh)
+            if not fresh or len(page) < TRADE_PAGE or trade_seconds(page[-1]) > until:
                 return rows
             cursor = int(reply["result"]["last"])
 

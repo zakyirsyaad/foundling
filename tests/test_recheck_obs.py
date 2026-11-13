@@ -231,6 +231,67 @@ class Reading(unittest.TestCase):
         self.assertEqual(waits, [2, 4, 8, 16])
 
 
+class FakeKraken:
+    """Kraken's trade history as it answers: `since` includes the trade at that instant, and
+    `last` is the time of the page's last trade, so every page opens with the row before it."""
+
+    def __init__(self, trades):
+        self.trades = trades
+        self.requests = 0
+
+    def read(self, request):
+        self.requests += 1
+        since = int(request.full_url.split("since=")[1].split("&")[0])
+        page = [t for t in self.trades if t["nanos"] >= since][: recheck.TRADE_PAGE]
+        rows = [[t["price"], t["volume"], t["nanos"] / recheck.NANOS_PER_SECOND, "b", "l", "", t["id"]] for t in page]
+        return {"error": [], "result": {recheck.TRADE_PAIR: rows, "last": str(page[-1]["nanos"])}}
+
+
+def history(count, first_second, same_instant_at=()):
+    """One trade a second with rising ids; the ids in `same_instant_at` share the time of the one before."""
+    trades, nanos = [], first_second * recheck.NANOS_PER_SECOND
+    for number in range(count):
+        if number and number not in same_instant_at:
+            nanos += recheck.NANOS_PER_SECOND
+        trades.append({"id": number, "nanos": nanos, "price": f"{3 + number % 7 / 100:.5f}", "volume": f"{1 + number % 5}.00000000"})
+    return trades
+
+
+class TradePages(unittest.TestCase):
+    def read_all(self, trades, until):
+        kraken = FakeKraken(trades)
+        sources = recheck.PublicSources()
+        sources.read = kraken.read
+        return sources.trades(trades[0]["nanos"] // recheck.NANOS_PER_SECOND, until), kraken
+
+    def test_a_trade_on_a_page_edge_is_read_once(self):
+        trades = history(2 * recheck.TRADE_PAGE + 500, TB - 2600)
+        rows, _ = self.read_all(trades, TB)
+        self.assertEqual([row[6] for row in rows], [t["id"] for t in trades])
+
+    def test_trades_sharing_the_instant_of_a_page_edge_are_read_once(self):
+        edge = recheck.TRADE_PAGE
+        trades = history(2 * recheck.TRADE_PAGE, TB - 2600, same_instant_at=(edge - 1, edge))
+        rows, _ = self.read_all(trades, TB)
+        self.assertEqual([row[6] for row in rows], [t["id"] for t in trades])
+
+    def test_a_window_across_a_page_edge_gives_the_price_of_twenty_distinct_trades(self):
+        trades = history(recheck.TRADE_PAGE + 10, TB - recheck.TRADE_PAGE - 9)
+        last = trades[-1]["nanos"] // recheck.NANOS_PER_SECOND
+        window = [[t["price"], t["volume"]] for t in trades[-recheck.TRADE_WINDOW :]]
+        kraken = FakeKraken(trades)
+        sources = recheck.PublicSources()
+        sources.read = kraken.read
+        with mock.patch.object(recheck, "TRADE_LOOKBACK_SECONDS", recheck.TRADE_PAGE + 9):
+            self.assertEqual(recheck.trade_prices_in_second(sources, last), [recheck.vwap(window)])
+
+    def test_a_page_with_nothing_new_ends_the_read(self):
+        trades = history(recheck.TRADE_PAGE, TB - 5000, same_instant_at=range(1, recheck.TRADE_PAGE))
+        rows, kraken = self.read_all(trades, TB)
+        self.assertEqual(len(rows), recheck.TRADE_PAGE)
+        self.assertEqual(kraken.requests, 2)
+
+
 class BlockTimes(unittest.TestCase):
     def test_a_block_is_read_once(self):
         sources = recheck.PublicSources()
