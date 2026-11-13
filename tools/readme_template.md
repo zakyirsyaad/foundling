@@ -32,6 +32,7 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 - **Vault:** `vault.foundling.near`, live since 2026-11-13 with 4 USDC from the lead. **Website:** https://foundling.xyz
 - **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash`, `PASS commitment` and `PASS decision`, then `SUMMARY pass=4 skip=0 fail=0`. `PASS commitment` means the parameters and salt revealed on 2026-11-13 open the commitment stored at birth.
 - Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
+- The guardian key was exercised on mainnet by the partner. On 2026-11-13 at 16:18 UTC the partner called `freeze`, signed with the function-call key that can call only `freeze` and `cancel_keeper_change`; the guardian account has no other key. The keeper bot skipped its cycles while the vault was frozen. Two hours later the lead called `unfreeze` from the governor account, and the next cycle ran within a minute. Both transactions are in [`proofs/mainnet.json`](proofs/mainnet.json) as `guardian_freeze_by_partner` and `unfreeze_after_guardian_freeze`.
 
 ## Try the website
 
