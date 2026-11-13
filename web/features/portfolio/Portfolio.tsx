@@ -60,7 +60,7 @@ export function Portfolio({ slots = {} }: { slots?: PortfolioSlots }) {
         <>
           <Positions s={s} p={p}>
             {p.pending > 0n && ctx ? (
-              <button type="button" disabled={busy} onClick={() => run([{ name: "cancel_deposit", args: {} }])} className="justify-self-start rounded-md border border-input px-3 py-1.5">
+              <button type="button" disabled={busy} onClick={() => run([{ name: "cancel_deposit", args: {} }])} className="justify-self-start fm-btn fm-btn--outline">
                 Cancel queued deposit
               </button>
             ) : null}

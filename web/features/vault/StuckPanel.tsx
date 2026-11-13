@@ -56,7 +56,7 @@ export function StuckPanel({ s, fresh, run, busy, canSign, ctx = null, near = nu
         <p>{a.abortStale ? "The cycle waited too long for its decision or price. Clearing it unlocks nobody's funds; it only lets the next cycle start." : "The decision expired before it ran. Expiring it lets the next cycle start."}</p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" disabled={disabled} data-variant={a.advance ? "primary" : "plain"} onClick={() => run([{ name: action.name, args: action.args }])} className={a.advance ? "rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50" : "rounded-md border border-input px-4 py-2 disabled:opacity-50"}>
+        <button type="button" disabled={disabled} data-variant={a.advance ? "primary" : "plain"} onClick={() => run([{ name: action.name, args: action.args }])} className={a.advance ? "fm-btn fm-btn--primary" : "fm-btn fm-btn--outline disabled:opacity-50"}>
           {action.label}
         </button>
         {!fresh ? <span className="text-[13px]">Waiting for a fresh read</span> : null}
