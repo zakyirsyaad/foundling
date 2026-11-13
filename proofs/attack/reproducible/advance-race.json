@@ -83,7 +83,7 @@
   },
   "refusal_texts": [],
   "result": "PASS",
-  "source_commit": "8234c1490116320070803c7277efcc98823f8ab1",
+  "source_commit": "3ea784764a9f74b6cdaecafff924d41e74f1cf44",
   "source_dirty": false,
   "steps": [
     {
@@ -201,6 +201,6 @@
   ],
   "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
   "unexpected_codes": [],
-  "vault_wasm_sha256": "9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a",
+  "vault_wasm_sha256": "b8fbbf8ee047cb370d052261cd48f0e0a5965eba9cd2843ed6ebd82e5559aa2b",
   "verdict": "held"
 }

@@ -8,6 +8,7 @@ export const ATTACK_EXPECTED: Readonly<Record<string, string>> = {
   replay: "NONCE_MISMATCH, EXPIRED, FROZEN, or CycleFailed; no trade",
   "bad-route": "No way out: Decision v1 has no route, asset or recipient field; extra agent fields are ignored and trades only go through the registered pool (I9); an unknown action is CycleFailed(MALFORMED)",
   "stale-price": "Rejected(PRICE_UNAVAILABLE) (or PRICE_STALE with a mocked publish_time)",
+  "headline-injection": "One SellRisk lands, bounded by the wNEAR book; the same SellRisk inside the cooldown is refused COOLDOWN before it reaches OutLayer; after the cooldown the same amount finds an empty book, Rejected(OVER_BOOK); once the book is refilled the next sell lands once more and the total sold equals the total bought; a further refill that takes the rolling buy window past its epoch limit is Rejected(OVER_EPOCH_CAP). This is vault-side containment of an already-poisoned decision; the advisor itself is not exercised",
   "kill-agent": "No new cycle from any account but the keeper; in-kind redeem still works",
   "governor-loosen": "The method does not exist or is refused; a keeper rotation is only scheduled and the guardian can cancel it",
   "double-redeem": "No double payment; the balance becomes claimable",

@@ -1,0 +1,152 @@
+{
+  "attack": "headline-injection",
+  "expected_codes": [
+    "COOLDOWN",
+    "OVER_BOOK",
+    "OVER_EPOCH_CAP"
+  ],
+  "ledger_after": {
+    "book": {
+      "usdc": "19999998",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "19999998",
+    "wallet_wnear": "0",
+    "window_usdc": "3000000",
+    "window_wnear": "666666666666666666666666"
+  },
+  "ledger_before": {
+    "book": {
+      "usdc": "20000000",
+      "wnear": "0"
+    },
+    "rhea_book": {
+      "usdc": "0",
+      "wnear": "0"
+    },
+    "total_shares": "20000000000000",
+    "wallet_usdc": "20000000",
+    "wallet_wnear": "0",
+    "window_usdc": "0",
+    "window_wnear": "0"
+  },
+  "not_exercised": [
+    {
+      "code": "ADVISOR",
+      "note": "no headline is passed through strategy/src/advisor.rs or the NEAR AI model; the SellRisk decision is staged directly through the mock OutLayer, so this proves vault-side containment of an already-poisoned decision, not prompt-injection resilience of the advisor"
+    }
+  ],
+  "observed_codes": [
+    "COOLDOWN",
+    "OVER_BOOK",
+    "OVER_EPOCH_CAP"
+  ],
+  "policy": {
+    "abort_after_blocks": 450,
+    "cap_bps": 1000,
+    "cap_sell_bps": 5000,
+    "cap_usdc": "15000000",
+    "cap_wnear": "4000000000000000000000000",
+    "cooldown": 60,
+    "decision_ttl": 600,
+    "dust_wnear": "10000000000000000000000",
+    "epoch_cap_bps": 2000,
+    "epoch_cap_usdc": "30000000",
+    "epoch_cap_wnear": "8000000000000000000000000",
+    "epoch_len": 600,
+    "halt_after": 3600,
+    "max_execution_seconds": 45,
+    "max_mint_per_cycle": 8,
+    "max_risk_bps": 5000,
+    "min_deposit": "1000000",
+    "near_reserve": "300000000000000000000000",
+    "open_deposits": false,
+    "ops_budget": "600000000000000000000000",
+    "per_user_cap": "50000000",
+    "price_max_age": 120,
+    "price_max_conf_bps": 50,
+    "ref_dev_bps": 200,
+    "slippage_bps": 150,
+    "stuck_after": 600,
+    "timelock": 86400,
+    "tvl_cap": "100000000"
+  },
+  "result": "PASS",
+  "source_commit": "3ea784764a9f74b6cdaecafff924d41e74f1cf44",
+  "source_dirty": false,
+  "steps": [
+    {
+      "detail": {
+        "nonce": 2
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a buy within cap puts wNEAR in the book, for the headline to target"
+    },
+    {
+      "detail": {
+        "amount_in": "444444444444444444444444",
+        "nonce": 3
+      },
+      "held": true,
+      "observed": null,
+      "step": "a poisoned advisor's first protective sell, for the whole book"
+    },
+    {
+      "detail": {
+        "answers_left_unread_in_outlayer": 1,
+        "seen_as": "panic of trigger_cycle, not a Rejected event"
+      },
+      "held": true,
+      "observed": "COOLDOWN",
+      "step": "the same headline, repeated inside the cooldown the first sell just spent"
+    },
+    {
+      "detail": {
+        "nonce": 4
+      },
+      "held": true,
+      "observed": "OVER_BOOK",
+      "step": "past the cooldown, the same amount finds an empty book"
+    },
+    {
+      "detail": {
+        "nonce": 5,
+        "refilled_wnear": "222222222222222222222222"
+      },
+      "held": null,
+      "observed": null,
+      "step": "setup: a second, smaller buy refills the book after the first sell emptied it"
+    },
+    {
+      "detail": {
+        "amount_in": "222222222222222222222222",
+        "bought_and_sold": "666666666666666666666666",
+        "nonce": 6,
+        "window_wnear": "666666666666666666666666"
+      },
+      "held": true,
+      "observed": null,
+      "step": "the book refilled, the next cooldown lets the same headline sell once more, no more than the refill"
+    },
+    {
+      "detail": {
+        "amount_in": "1500000",
+        "nonce": 7,
+        "window_usdc_before": "3000000"
+      },
+      "held": true,
+      "observed": "OVER_EPOCH_CAP",
+      "step": "a third refill that takes the rolling buy window past its epoch limit is refused"
+    }
+  ],
+  "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
+  "unexpected_codes": [],
+  "vault_wasm_sha256": "b8fbbf8ee047cb370d052261cd48f0e0a5965eba9cd2843ed6ebd82e5559aa2b",
+  "verdict": "held"
+}

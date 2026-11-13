@@ -45,6 +45,16 @@
       "test_binary": "attacks_batch1"
     },
     {
+      "name": "headline-injection",
+      "expected": "Satu `SellRisk` lolos, dibatasi buku wNEAR; pengulangan `SellRisk` dalam `cooldown` yang sama ditolak `COOLDOWN` sebelum sampai ke OutLayer; sesudah `cooldown`, jumlah yang sama menemukan buku kosong, `Rejected(OVER_BOOK)`; bila buku diisi ulang, jual berikutnya lolos sekali lagi dan total yang terjual sama dengan yang dibeli; pengisian ketiga yang membuat total beli dalam jendela epoch yang bergulir melewati batas epoch beli ditolak `Rejected(OVER_EPOCH_CAP)`",
+      "codes": [
+        "COOLDOWN",
+        "OVER_BOOK",
+        "OVER_EPOCH_CAP"
+      ],
+      "test_binary": "attacks_batch1"
+    },
+    {
       "name": "kill-agent",
       "expected": "Tidak ada siklus baru dari akun selain id keeper; `redeem` in-kind tetap berhasil",
       "codes": [
