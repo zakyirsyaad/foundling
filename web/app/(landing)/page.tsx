@@ -21,7 +21,7 @@ export default async function HomePage() {
   return (
     <>
       {config.siteUrl ? <WebsiteJsonLd siteUrl={config.siteUrl} nonce={nonce} /> : null}
-      <Home claims={webClaims(config)} keysLine={keysLine(result.ok ? result.source : null, config.network)} />
+      <Home claims={webClaims(config)} keysLine={keysLine(result.ok ? result.source : null, config.network)} source={result.ok ? result.source : null} />
     </>
   );
 }

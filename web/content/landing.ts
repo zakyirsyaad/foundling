@@ -1,6 +1,8 @@
 import type { WebClaimId } from "@/lib/claims";
 
 export const HERO = {
+  /** The words the headline ends on; the hero sets them in the accent colour. */
+  accent: "without keys.",
   title: "A vault born without keys.",
   /** Until the born-without-keys claim passes, the headline does not state it as done. */
   titleUnchecked: "A vault meant to be born without keys.",
@@ -22,17 +24,17 @@ export interface Guarantee {
   tag: string;
   title: string;
   limit: string;
-  /** The two guarantees a depositor leans on most take half a row; the rest take a third. */
-  wide: boolean;
+  /** Columns out of six: the first row holds three tiles, the second two. */
+  span: 2 | 3;
 }
 
-/** Card order follows the design canvas: keys and exit first, then G2, G1 and G4. */
+/** Tile order follows the redesign canvas: keys, limits and exit on the first row, then secrecy and trace. */
 export const GUARANTEES: readonly Guarantee[] = [
-  { id: "born-without-keys", tag: "Keys", title: "Born without keys", wide: true, limit: "The governor still holds roles on the contract. It cannot move funds, but it can unfreeze and rotate the guardian." },
-  { id: "g3-exit", tag: "G3 · Exit", title: "A way out", wide: true, limit: "Leaving still depends on the USDC and wNEAR contracts." },
-  { id: "g2-bounded-loss", tag: "G2 · Limits", title: "Bounded per trade", wide: false, limit: "Losses add up across cycles. Only the book value bounds the total." },
-  { id: "g1-confidentiality", tag: "G1 · Secrecy", title: "Sealed parameters", wide: false, limit: "Trades are public, so the rules leak a little with every cycle." },
-  { id: "g4-traceability", tag: "G4 · Trace", title: "Traceable", wide: false, limit: "A proof shown here is a claim. The command is the answer." },
+  { id: "born-without-keys", tag: "Keys", title: "Born without keys", span: 2, limit: "The governor still holds roles on the contract. It cannot move funds, but it can unfreeze and rotate the guardian." },
+  { id: "g2-bounded-loss", tag: "G2 · Limits", title: "Bounded per trade", span: 2, limit: "Losses add up across cycles. Only the book value bounds the total." },
+  { id: "g3-exit", tag: "G3 · Exit", title: "A way out", span: 2, limit: "Leaving still depends on the USDC and wNEAR contracts." },
+  { id: "g1-confidentiality", tag: "G1 · Secrecy", title: "Sealed parameters", span: 3, limit: "Trades are public, so the rules leak a little with every cycle." },
+  { id: "g4-traceability", tag: "G4 · Trace", title: "Traceable", span: 3, limit: "A proof shown here is a claim. The command is the answer." },
 ];
 
 /** Section heads: eyebrow, title, lead and the short note on the right, as on the design canvas. */
@@ -40,6 +42,7 @@ export const HEADS = {
   how: { eyebrow: "How it works", title: "One cycle, four steps.", lead: "Every step leaves something on chain that you can read.", aside: "The mono line under each step is the record it leaves behind." },
   demo: { eyebrow: "Demo", title: "One cycle, start to finish." },
   guarantees: { eyebrow: "Guarantees", title: "What holds, and where it stops.", lead: "Each guarantee names where it stops. Nothing here goes beyond what the contract and the record can show." },
+  faq: { eyebrow: "Questions", title: "Asked first.", lead: "Short answers. The longer ones are on the Proof and Trust pages." },
   notClaimed: { eyebrow: "What we don't claim", title: "The limits, in writing.", lead: "A hackathon build that will hold real money should say what it is not." },
 } as const;
 
