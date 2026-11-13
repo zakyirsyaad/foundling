@@ -38,7 +38,7 @@ export function RedeemForm({ s, p, ctx, run, busy, unreadable, gasPrice = 0n }: 
       {unreadable ? <Banner tone="warning" title="Data may be old">Redeem still works. The estimate may be out of date.</Banner> : null}
       <label className="grid gap-1">
         <span className="fm-label">Shares to redeem (all {p.shares.toString()} if empty)</span>
-        <input inputMode="numeric" value={text} onChange={(e) => setText(e.target.value)} className="mono rounded-md border border-input bg-transparent px-3 py-2" />
+        <input inputMode="numeric" value={text} onChange={(e) => setText(e.target.value)} className="fm-input mono" />
       </label>
       <p className="mono text-[13px]" data-testid="redeem-estimate">
         {est ? `About ${formatUnits(est.usdc, s.assets.usdcDecimals, 2)} USDC and ${formatUnits(est.wnear, s.assets.wnearDecimals, 4)} wNEAR` : "Enter a share amount you hold."}
@@ -47,7 +47,7 @@ export function RedeemForm({ s, p, ctx, run, busy, unreadable, gasPrice = 0n }: 
       <NearNeed txs={steps.map((st) => buildTx(st.name, st.args, ctx))} near={p.balances.near} gasPrice={gasPrice} />
       {prereqs.length ? <p className="text-[13px]">Your account is first registered with the token contracts, so the payout cannot get stuck in claimable.</p> : null}
       <p className="text-[13px] text-muted-foreground">Redeem works while the vault is frozen, halted or stuck. It still depends on the USDC and wNEAR contracts. You receive USDC and wNEAR; unwrap wNEAR to NEAR in your wallet or with `near contract call-function as-transaction wrap.near near_withdraw`.</p>
-      <button type="button" disabled={busy || !est || !canRedeem(est)} onClick={() => run(steps, () => (swapping ? "claim-pending" : undefined))} className="justify-self-start rounded-md border border-input px-4 py-2 font-medium disabled:opacity-50" data-variant="exit">
+      <button type="button" disabled={busy || !est || !canRedeem(est)} onClick={() => run(steps, () => (swapping ? "claim-pending" : undefined))} className="justify-self-start fm-btn fm-btn--outline disabled:opacity-50" data-variant="exit">
         Redeem
       </button>
       <CliCommand tx={buildTx("redeem", { shares: (shares ?? 0n).toString() }, ctx)} signer={p.account} network={config.network} />
@@ -107,7 +107,7 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
               nonce === null ? (
                 <span className="text-[13px] text-danger">This cycle number is too large for this browser to claim exactly. Use the CLI.</span>
               ) : (
-                <button type="button" disabled={busy} onClick={() => run([{ name: "claim_bucket", args: { nonce } }])} className="rounded-md border border-input px-3 py-1.5">
+                <button type="button" disabled={busy} onClick={() => run([{ name: "claim_bucket", args: { nonce } }])} className="fm-btn fm-btn--outline">
                   Claim
                 </button>
               )
@@ -120,7 +120,7 @@ export function Claims({ s, p, ctx, run, busy }: { s: VaultSnapshot; p: Position
       {tokens.map((t) => (
         <div key={t.token} className="flex flex-wrap items-center gap-3">
           <span className="mono">{formatUnits(t.amount, t.decimals, 4)} {t.label} claimable</span>
-          <button type="button" disabled={busy} onClick={() => run([...redeemPrereqs(p).map((name) => ({ name, args: {} })), { name: "withdraw_claimable", args: { token: t.token } }])} className="rounded-md border border-input px-3 py-1.5">
+          <button type="button" disabled={busy} onClick={() => run([...redeemPrereqs(p).map((name) => ({ name, args: {} })), { name: "withdraw_claimable", args: { token: t.token } }])} className="fm-btn fm-btn--outline">
             Withdraw {t.label}
           </button>
         </div>

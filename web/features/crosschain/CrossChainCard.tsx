@@ -194,7 +194,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
         ) : blocking ? (
           <div className="grid gap-2">
             <p>A {x.oc.chains.find((c) => c.id === blocking.chainId)?.label ?? ""} swap for this account, started {new Date(blocking.createdAtMs).toLocaleString()}, may still be waiting for funds. A second quote now risks a second send.</p>
-            <button type="button" className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={() => x.save({ ...blocking, declaredNotSent: true })}>I have not sent anything to it</button>
+            <button type="button" className="justify-self-start fm-btn fm-btn--outline" onClick={() => x.save({ ...blocking, declaredNotSent: true })}>I have not sent anything to it</button>
           </div>
         ) : (
           <div className="grid gap-3">
@@ -206,11 +206,11 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
                 </label>
               ))}
             </fieldset>
-            <label className="grid gap-1"><span className="fm-label">USDC to send</span><input inputMode="decimal" value={amountText} disabled={requesting} onChange={(e) => setAmountText(e.target.value)} className="mono rounded-md border border-input bg-transparent px-3 py-2 disabled:opacity-50" /></label>
+            <label className="grid gap-1"><span className="fm-label">USDC to send</span><input inputMode="decimal" value={amountText} disabled={requesting} onChange={(e) => setAmountText(e.target.value)} className="fm-input mono disabled:opacity-50" /></label>
             <div className="grid gap-1">
               <label className="grid gap-1">
                 <span className="fm-label">Refund address on {chain.label}</span>
-                <input value={refundTo} disabled={requesting} onChange={(e) => setRefundTo(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2 disabled:opacity-50" aria-invalid={refundTo !== "" && !refundOk} aria-describedby="refund-help" />
+                <input value={refundTo} disabled={requesting} onChange={(e) => setRefundTo(e.target.value.trim())} className="fm-input mono disabled:opacity-50" aria-invalid={refundTo !== "" && !refundOk} aria-describedby="refund-help" />
               </label>
               <div id="refund-help" className="grid gap-1">
                 {refundTo !== "" && !refundOk ? <span className="text-[13px] text-danger">Not a valid EVM address. Check it, including upper and lower case.</span> : null}
@@ -218,7 +218,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               </div>
             </div>
             {chain.id === "eth" ? <p className="text-[13px]">Network fees on Ethereum can be more than a small deposit.</p> : null}
-            <button type="button" disabled={requesting || amount === null || !refundOk} onClick={getQuote} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">{requesting ? "Asking 1Click…" : "Get a quote"}</button>
+            <button type="button" disabled={requesting || amount === null || !refundOk} onClick={getQuote} className="justify-self-start fm-btn fm-btn--primary">{requesting ? "Asking 1Click…" : "Get a quote"}</button>
           </div>
         )
       ) : null}
@@ -236,10 +236,10 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
             <div className="grid gap-2">
               {ctx ? <NearNeed txs={[...(!p.registered.vault ? [buildTx("register_vault", {}, ctx)] : []), ...(!p.registered.usdc ? [buildTx("register_usdc", {}, ctx)] : [])]} near={p.balances.near} gasPrice={gasPrice} /> : null}
               <p>Before any money moves, register this account{!p.registered.vault ? " with the vault (one-time, non-refundable)" : ""}{!p.registered.usdc ? " and with USDC on NEAR" : ""}.</p>
-              <button type="button" disabled={busy} onClick={() => run([...(!p.registered.vault ? [{ name: "register_vault" as const, args: {} }] : []), ...(!p.registered.usdc ? [{ name: "register_usdc" as const, args: {} }] : [])])} className="justify-self-start rounded-md border border-input px-3 py-1.5">Register</button>
+              <button type="button" disabled={busy} onClick={() => run([...(!p.registered.vault ? [{ name: "register_vault" as const, args: {} }] : []), ...(!p.registered.usdc ? [{ name: "register_usdc" as const, args: {} }] : [])])} className="justify-self-start fm-btn fm-btn--outline">Register</button>
             </div>
           ) : (
-            <button type="button" onClick={() => dispatch({ type: "prepared" })} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">Continue</button>
+            <button type="button" onClick={() => dispatch({ type: "prepared" })} className="justify-self-start fm-btn fm-btn--primary">Continue</button>
           )}
         </div>
       ) : null}
@@ -248,7 +248,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
         <div className="grid gap-2">
           <p>The next quote is final: prices can move, so the numbers may change. Check them before you send.</p>
           <p className="text-[13px]">By sending you accept the <Link href="/terms#cross-chain" className="underline underline-offset-4">terms for deposits from another chain</Link>.</p>
-          <button type="button" disabled={requesting} onClick={getAddress} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">{requesting ? "Asking 1Click…" : "Get the deposit address"}</button>
+          <button type="button" disabled={requesting} onClick={getAddress} className="justify-self-start fm-btn fm-btn--primary">{requesting ? "Asking 1Click…" : "Get the deposit address"}</button>
         </div>
       ) : null}
 
@@ -268,21 +268,21 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
           ) : live.confirmNotSent ? (
             <div className="grid gap-2">
               <p>Already sent? Paste the tx hash below. If you have not sent anything yet, say so to see the address again.</p>
-              <button type="button" className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={() => x.setLive({ ...live, confirmNotSent: false })}>I have not sent anything yet</button>
+              <button type="button" className="justify-self-start fm-btn fm-btn--outline" onClick={() => x.setLive({ ...live, confirmNotSent: false })}>I have not sent anything yet</button>
             </div>
           ) : live.needsReanchor ? (
             <div className="grid gap-2">
               <p>The address is hidden until the remaining time is checked again.</p>
-              <button type="button" disabled={unreadable} className="justify-self-start rounded-md border border-input px-3 py-1.5" onClick={() => void x.reanchor()}>Check the time</button>
+              <button type="button" disabled={unreadable} className="justify-self-start fm-btn fm-btn--outline" onClick={() => void x.reanchor()}>Check the time</button>
             </div>
           ) : x.status === null ? (
             <p>Checking 1Click for the first status of this address. The address appears only after 1Click answers.</p>
           ) : (
             <p>The address is hidden while 1Click cannot confirm the status of the swap.</p>
           )}
-          <label className="grid gap-1"><span className="fm-label">Origin tx hash (optional, speeds things up)</span><input value={txHash} onChange={(e) => setTxHash(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-2" /></label>
+          <label className="grid gap-1"><span className="fm-label">Origin tx hash (optional, speeds things up)</span><input value={txHash} onChange={(e) => setTxHash(e.target.value.trim())} className="fm-input mono" /></label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!txHash} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(
+            <button type="button" disabled={!txHash} className="fm-btn fm-btn--outline" onClick={() => void x.client.submit(txHash, String(live.swap.depositAddress)).then(
               () => {
                 const swap = { ...live.swap, txHashes: live.swap.txHashes.includes(txHash) ? live.swap.txHashes : [...live.swap.txHashes, txHash] };
                 x.save(swap);
@@ -290,7 +290,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
               },
               (err: unknown) => dispatch({ type: "problem", message: `1Click did not take the tx hash: ${err instanceof Error ? err.message : String(err)}` }),
             )}>Submit tx hash</button>
-            <button type="button" className="rounded-md border border-input px-3 py-1.5" onClick={() => download(`1click-quote-${live.swap.depositAddress}.json`, live.signed)}>Download the signed quote</button>
+            <button type="button" className="fm-btn fm-btn--outline" onClick={() => download(`1click-quote-${live.swap.depositAddress}.json`, live.signed)}>Download the signed quote</button>
           </div>
         </div>
       ) : null}
@@ -313,7 +313,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
             return (
               <div className="grid gap-2">
                 <p>{usdc(out.toString())} arrived in your NEAR account.{d.excess > 0n ? ` ${usdc(d.excess.toString())} stays there, over what this account can deposit.` : ""}</p>
-                <button type="button" disabled={busy} onClick={() => run([{ name: "deposit", args: { amount: d.amount.toString() } }])} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">Deposit {usdc(d.amount.toString())}</button>
+                <button type="button" disabled={busy} onClick={() => run([{ name: "deposit", args: { amount: d.amount.toString() } }])} className="justify-self-start fm-btn fm-btn--primary">Deposit {usdc(d.amount.toString())}</button>
               </div>
             );
           })()
@@ -329,8 +329,8 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
       <details className="text-[13px]">
         <summary className="cursor-pointer text-muted-foreground">Look up a swap by deposit address</summary>
         <div className="mt-2 flex flex-wrap gap-2">
-          <input aria-label="Deposit address" value={lookup} onChange={(e) => setLookup(e.target.value.trim())} className="mono rounded-md border border-input bg-transparent px-3 py-1.5" />
-          <button type="button" disabled={!lookup} className="rounded-md border border-input px-3 py-1.5" onClick={() => void x.client.status(lookup).then((r) => setLookupResult(r === "not-found" ? "Not known to 1Click yet." : r.status), () => setLookupResult("1Click did not answer."))}>Look up</button>
+          <input aria-label="Deposit address" value={lookup} onChange={(e) => setLookup(e.target.value.trim())} className="fm-input mono" />
+          <button type="button" disabled={!lookup} className="fm-btn fm-btn--outline" onClick={() => void x.client.status(lookup).then((r) => setLookupResult(r === "not-found" ? "Not known to 1Click yet." : r.status), () => setLookupResult("1Click did not answer."))}>Look up</button>
           {lookupResult ? <span data-testid="lookup-result">{lookupResult}</span> : null}
         </div>
       </details>
@@ -345,7 +345,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
                   <details className="mt-1">
                     <summary className="cursor-pointer text-muted-foreground">Expired record</summary>
                     <p className="mt-1">Do not send to this address. It is kept only for looking up the old transfer: <span className="break-all">{w.depositAddress}</span></p>
-                    <button type="button" className="mt-1 rounded-md border border-input px-2 py-1" onClick={() => { if (w.depositAddress) x.remove(w.depositAddress); }}>Forget this record</button>
+                    <button type="button" className="mt-1 fm-btn fm-btn--outline fm-btn--sm" onClick={() => { if (w.depositAddress) x.remove(w.depositAddress); }}>Forget this record</button>
                   </details>
                 ) : null}
               </li>

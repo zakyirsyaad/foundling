@@ -12,7 +12,7 @@ export function ConnectButton() {
     return (
       <span className="flex items-center gap-2">
         <span className="mono text-[12px]" title={account} data-testid="account">{truncateMiddle(account)}</span>
-        <button type="button" className="rounded-md border border-input px-3 py-1.5 text-[13px]" onClick={() => void wallet?.disconnect()}>Disconnect</button>
+        <button type="button" className="fm-btn fm-btn--outline" onClick={() => void wallet?.disconnect()}>Disconnect</button>
       </span>
     );
   }
@@ -20,7 +20,7 @@ export function ConnectButton() {
     <button
       type="button"
       disabled={!wallet || busy}
-      className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50"
+      className="fm-btn fm-btn--primary"
       onClick={async () => {
         setBusy(true);
         try {

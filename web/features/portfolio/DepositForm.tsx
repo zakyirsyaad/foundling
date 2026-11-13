@@ -43,7 +43,7 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
       <h2 id="deposit-title" className="text-lg font-semibold">Deposit</h2>
       <label className="grid gap-1">
         <span className="fm-label">Amount in USDC</span>
-        <input inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} className="mono rounded-md border border-input bg-transparent px-3 py-2" aria-describedby="deposit-help" />
+        <input inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} className="fm-input mono" aria-describedby="deposit-help" />
       </label>
       <div id="deposit-help" className="grid gap-1 text-[13px] text-muted-foreground">
         <p>Token: <span className="mono">{s.assets.usdc}</span>. Balance {formatUnits(p.balances.usdc, d, 2)} USDC.</p>
@@ -60,7 +60,7 @@ export function DepositForm({ s, p, gasPrice, reasons, ctx, network, busy, onSub
       <p className="text-[13px] font-medium">
         Not audited. You can lose money. <Link href="/trust" className="underline underline-offset-4">Read the risks</Link>
       </p>
-      <button type="button" disabled={disabled} onClick={() => onSubmit(steps)} className="justify-self-start rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">
+      <button type="button" disabled={disabled} onClick={() => onSubmit(steps)} className="justify-self-start fm-btn fm-btn--primary">
         Deposit
       </button>
       <CliCommand tx={buildTx("deposit", { amount: (amount ?? 0n).toString() }, ctx)} signer={p.account} network={network} />

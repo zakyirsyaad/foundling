@@ -27,6 +27,8 @@
       {"name": "warning-bg", "value": {"light": "#fef9c3", "dark": "#422006"}, "usage": "Chip and panel fill behind warning text."},
       {"name": "danger", "value": {"light": "#b91c1c", "dark": "#f87171"}, "usage": "Status text and dot for Failed, Fail, Halted, FAILED; field errors. 6:1 on background in light, 7:1 in dark. Always next to a word."},
       {"name": "danger-bg", "value": {"light": "#fef2f2", "dark": "#450a0a"}, "usage": "Chip and banner fill behind danger text, the Halted banner."},
+      {"name": "brand", "value": {"light": "#2747d6", "dark": "#8b9df2"}, "usage": "The one accent. Standalone links, the active tab, meter fills, the current step. Never a status, and never the primary button. 6.9:1 on background in light, 7:1 or more in dark."},
+      {"name": "brand-bg", "value": {"light": "#eef1fd", "dark": "#131a3d"}, "usage": "Quiet fill behind brand text."},
       {"name": "destructive", "value": "{danger}", "usage": "shadcn's destructive slot, aliased to danger so the system has one red."},
       {"name": "terminal-bg", "value": {"light": "oklch(0.145 0 0)", "dark": "oklch(0.205 0 0)"}, "usage": "Terminal surface. Dark in both themes so commands read as commands."},
       {"name": "terminal-fg", "value": {"light": "oklch(0.985 0 0)", "dark": "oklch(0.985 0 0)"}, "usage": "Command and output text on terminal-bg."},
@@ -74,10 +76,15 @@
     {"name": "space-24", "value": "96px", "usage": "Landing section padding top and bottom (64px on phones)."}
   ]},
   "radius": {"tokens": [
-    {"name": "radius-sm", "value": "4px", "usage": "Status chips, inline code, icon buttons."},
-    {"name": "radius-md", "value": "6px", "usage": "Buttons, inputs, selects."},
-    {"name": "radius-lg", "value": "8px", "usage": "Cards, panels, terminal, banners."},
-    {"name": "radius-full", "value": "9999px", "usage": "Status dots and meter tracks only."}
+    {"name": "radius-sm", "value": "6px", "usage": "Status chips, swatches, the button inside a segmented control."},
+    {"name": "radius-md", "value": "8px", "usage": "Every control: buttons of any size, inputs, selects, segmented controls. Also boxes inside a card: notes, code, step lists."},
+    {"name": "radius-lg", "value": "12px", "usage": "Every container: cards, panels, tables, dialogs, media."},
+    {"name": "radius-full", "value": "9999px", "usage": "Only circles and bars: status dots, step numbers, meter tracks."}
+  ]},
+  "size": {"note": "Control heights. Anything you can press or type in uses one of these.", "tokens": [
+    {"name": "control-sm", "value": "36px", "usage": "Dense rows only: copy buttons, the theme switch, filters above a table."},
+    {"name": "control-md", "value": "44px", "usage": "The default for buttons, inputs, selects and segmented controls."},
+    {"name": "control-lg", "value": "52px", "usage": "The main action of a screen and the amount field."}
   ]},
   "shadow": {"note": "Flat by default. Only floating layers get a shadow.", "tokens": [
     {"name": "shadow-popover", "value": {"light": "0 4px 12px #0000001a, 0 1px 2px #0000000f", "dark": "0 4px 12px #00000080, 0 1px 2px #00000066"}, "usage": "Dropdowns, tooltips, dialogs, sheets. Never on cards."}
