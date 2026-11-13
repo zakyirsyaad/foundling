@@ -68,7 +68,7 @@
     "tvl_cap": "100000000"
   },
   "result": "PASS",
-  "source_commit": "05fa2e471e8172ba7e0f997be789cfad2c8b3f07",
+  "source_commit": "3ea784764a9f74b6cdaecafff924d41e74f1cf44",
   "source_dirty": false,
   "steps": [
     {
@@ -105,6 +105,6 @@
   ],
   "target": "local near-workspaces sandbox: the vault under contracts/vault with the mocks under contracts/mock-*",
   "unexpected_codes": [],
-  "vault_wasm_sha256": "85c8e99f290307a30e8127a66c967e91ff08b6d9f7252bd89517ed12348e61de",
+  "vault_wasm_sha256": "b8fbbf8ee047cb370d052261cd48f0e0a5965eba9cd2843ed6ebd82e5559aa2b",
   "verdict": "held"
 }
