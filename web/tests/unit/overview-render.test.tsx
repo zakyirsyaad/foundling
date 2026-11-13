@@ -58,3 +58,13 @@ test("the ops meter keeps a cycle's NEAR spend visible", async () => {
   await act(async () => render(<Overview initial={s} nav={nav} />));
   expect(screen.getByText("0.0015 / 0.6 NEAR")).toBeInTheDocument();
 });
+
+test("Overview opens with one sentence about the vault and a card for the visitor's position", async () => {
+  const s = await fixtureSnapshot();
+  read.mockResolvedValue(s);
+  await act(async () => render(<Overview initial={s} nav={nav} />));
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Waiting for the next cycle.");
+  const card = screen.getByTestId("position-card");
+  expect(card).toHaveTextContent("Connect a wallet to see your shares.");
+  expect(card.querySelector('a[href="/app/portfolio"]')).not.toBeNull();
+});

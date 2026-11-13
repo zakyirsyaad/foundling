@@ -15,7 +15,8 @@ import { NEAR_DECIMALS, formatUnits } from "@/lib/format/units";
 import type { CycleRow, HistoryResult, NavPoint } from "@/lib/history/client";
 import { cycleWord } from "@/lib/cycles/outcome";
 import { base58ToHex } from "@/lib/proof/facts";
-import { limitMeters, sharePriceSinceStart, vaultWord } from "@/lib/vault/overview";
+import { limitMeters, sharePriceSinceStart, vaultHeadline, vaultWord } from "@/lib/vault/overview";
+import { PositionCard } from "./PositionCard";
 import { SharePriceChart } from "./SharePriceChart";
 import { StuckPanelLive } from "./StuckPanelLive";
 import { VaultBanner } from "./VaultBanner";
@@ -55,14 +56,17 @@ export function Overview({ initial, nav, lastCycle = null }: { initial: VaultSna
     <div className="grid gap-6">
       <VaultBanner s={s} unreadable={unreadable} />
       <StuckPanelLive s={s} fresh={fresh} onSettled={() => {}} />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="stage-bar">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em]">Overview</h1>
-        <Status group="vault" word={vaultWord(s)} />
-        <span className="fm-small">
-          <span className="mono">Stage: {s.stage.kind}</span> · {s.frozen ? "Frozen" : "Not frozen"} · {s.halted ? "Halted" : "Not halted"}
-        </span>
-        <span className="fm-small ml-auto">as of block #{s.blockHeight.toString()}</span>
+      <div className="grid gap-2" data-testid="stage-bar">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Status group="vault" word={vaultWord(s)} />
+          <span className="fm-small">
+            <span className="mono">Stage: {s.stage.kind}</span> · {s.frozen ? "Frozen" : "Not frozen"} · {s.halted ? "Halted" : "Not halted"}
+          </span>
+          <span className="fm-small ml-auto">as of block #{s.blockHeight.toString()}</span>
+        </div>
+        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.035em]">{vaultHeadline(s)}</h1>
       </div>
+      <PositionCard s={s} nav={nav0} />
       <section aria-label="Vault" className="stat-strip stat-strip--4">
         <Stat label="Book" value={usdc(nav0, d)} sub={`${formatUnits(s.book.usdc, d, 2)} USDC + ${formatUnits(s.book.wnear, s.assets.wnearDecimals, 4)} wNEAR`} />
         <Stat label="Share price" value={price === null ? "—" : `${formatUnits(price, d, 6)} USDC`} sub="USDC per share" />

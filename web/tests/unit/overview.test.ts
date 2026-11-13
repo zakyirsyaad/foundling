@@ -1,4 +1,4 @@
-import { dataAge, limitMeters, sharePriceSinceStart, vaultWord } from "@/lib/vault/overview";
+import { dataAge, limitMeters, positionValue, sharePriceSinceStart, vaultHeadline, vaultWord } from "@/lib/vault/overview";
 import { fixtureSnapshot } from "../fixtures/snapshot";
 
 test("halted outranks frozen and stuck", async () => {
@@ -41,4 +41,18 @@ test("meters that need a price say so when there is none", async () => {
   expect(m.exposure).toEqual({ used: null, cap: null, estimate: false });
   expect(m.epochWindow.cap).toBeNull();
   expect(m.opsBudget.cap).toBe(5_000_000n);
+});
+
+test("the headline says in one sentence what the vault is doing", async () => {
+  const s = await fixtureSnapshot();
+  expect(vaultHeadline(s)).toBe("Waiting for the next cycle.");
+  expect(vaultHeadline({ ...s, frozen: true })).toBe("Trading is paused. Redeem still works.");
+  expect(vaultHeadline({ ...s, halted: true, frozen: true })).toBe("Trading has stopped. Redeem still works.");
+  expect(vaultHeadline({ ...s, setupDone: false })).toBe("The vault is not ready for deposits yet.");
+});
+test("a position is worth its share of the book, rounded down", () => {
+  expect(positionValue(96_400_000n, 48n * 10n ** 12n, 96n * 10n ** 12n)).toBe(48_200_000n);
+  expect(positionValue(10n, 1n, 3n)).toBe(3n);
+  expect(positionValue(null, 1n, 3n)).toBeNull();
+  expect(positionValue(10n, 1n, 0n)).toBeNull();
 });
