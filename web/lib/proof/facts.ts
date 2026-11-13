@@ -38,8 +38,11 @@ const CODE_COMMAND = "cd contracts/vault && cargo near build reproducible-wasm &
 const CODE_NOTE = "The reproducible build runs in Docker, at the commit that built this vault.";
 const STRATEGY_NOTE = "To rebuild it from source, run strategy/build.sh at the commit that built this binary.";
 const COMMITMENT_COMMAND = "python3 verify.py commitment";
+/** After the reveal the vault itself can be asked: the live check opens the commitment with the revealed parameters and salt. */
+const REVEALED_NOTE = "Reads the revealed parameters and salt from the vault and prints PASS commitment when they open this hash.";
 const UNREADABLE = "Not readable right now";
 
+const liveCommand = (vaultId: string, network: Network) => `python3 verify.py --live --vault ${vaultId} --network ${network}`;
 const keysCommand = (vaultId: string, network: Network) => `near account list-keys ${vaultId} network-config ${network} now`;
 
 export function proofFacts(src: SnapshotSource, local: LocalProof, network: Network): Fact[] {
@@ -75,8 +78,8 @@ export function proofFacts(src: SnapshotSource, local: LocalProof, network: Netw
       id: "commitment",
       title: TITLES.commitment,
       value: `commitment ${s.agent.commitment}`,
-      command: COMMITMENT_COMMAND,
-      note: s.revealed ? undefined : local.synthetic ? "Sealed until reveal. The command checks the synthetic fixture in proofs/." : "Sealed until reveal.",
+      command: s.revealed ? liveCommand(s.vaultId, network) : COMMITMENT_COMMAND,
+      note: s.revealed ? REVEALED_NOTE : local.synthetic ? "Sealed until reveal. The command checks the synthetic fixture in proofs/." : "Sealed until reveal.",
     },
   ];
 }

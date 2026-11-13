@@ -105,7 +105,24 @@ const SHA = "b6339b3c0a8c5e2f1d4e7a9b0c3d6e9f2a5b8c1d";
 const code = () => screen.getByText((_, el) => el?.tagName === "CODE");
 test("the command checks out the verifier commit that built this proof", () => {
   render(<CycleDetail row={row(39n, "executed")} proof={{ verifier: done, obsRecheck: null, replay: "sealed", verifierCommit: SHA }} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
-  expect(code().textContent).toMatch(new RegExp(`^git checkout ${SHA} && python3 tools/fetch_proof.py `));
+  expect(code().textContent).toMatch(new RegExp(`^git checkout ${SHA} && cargo build --release --locked --features fetch --manifest-path cli/Cargo.toml && python3 tools/fetch_proof.py `));
+});
+test("the command builds the binary it needs, reads an archival node, and can be run as it is", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={{ verifier: done, obsRecheck: null, replay: "pass", verifierCommit: SHA }} decision={null} revealAfter={0n} chainTime={1n} network="mainnet" vaultId="vault.foundling.near" />);
+  const cmd = code().textContent ?? "";
+  expect(cmd).not.toContain("COLLATERAL.bin");
+  expect(cmd).toContain("--collateral-bin cli/target/release/foundling-verify");
+  expect(cmd).toContain("--rpc https://archival-rpc.mainnet.fastnear.com");
+  expect(cmd).toMatch(/&& cli\/target\/release\/foundling-verify check proof\.json$/);
+});
+test("a testnet cycle's command reads the testnet archival node", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={{ verifier: done, obsRecheck: null, replay: "sealed", verifierCommit: SHA }} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(code().textContent).toContain("--rpc https://archival-rpc.testnet.fastnear.com");
+});
+test("the proof note says what a proof fetched without our key will show", () => {
+  render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);
+  expect(screen.getByText(/A proof you fetch yourself carries no archived signature/)).toBeInTheDocument();
+  expect(screen.getByText(/The first build takes about five minutes/)).toBeInTheDocument();
 });
 test("without a known verifier commit the command names the one to check out", () => {
   render(<CycleDetail row={row(39n, "executed")} proof={null} decision={null} revealAfter={0n} chainTime={1n} network="testnet" vaultId="v.testnet" />);

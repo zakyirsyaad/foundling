@@ -16,9 +16,16 @@ import { proofWord, replayWord } from "@/lib/proof/tally";
 /** Shell-safe, like TRIGGER_TX: a `<…>` placeholder would be read as a redirect. */
 const COMMIT_PLACEHOLDER = "VERIFIER_COMMIT";
 
+/** `fetch_proof.py` needs the verifier built with its `fetch` feature, so the command builds it first. */
+const VERIFY_BIN = "cli/target/release/foundling-verify";
+/** Regular nodes drop a transaction after about a day; an archival node still has it when a reader runs this later. */
+const ARCHIVE_RPC: Record<Network, string> = { mainnet: "https://archival-rpc.mainnet.fastnear.com", testnet: "https://archival-rpc.testnet.fastnear.com" };
+
 /** Pinned to the verifier's commit: a newer verifier can replay a sealed rule differently and fail a good proof. */
 function verifyCommand(network: Network, vaultId: string, tx: string | undefined, commit: string | null): string {
-  return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin COLLATERAL.bin --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"} && cargo run --manifest-path cli/Cargo.toml -- check proof.json`;
+  const build = `cargo build --release --locked --features fetch --manifest-path cli/Cargo.toml`;
+  const fetch = `python3 tools/fetch_proof.py --chain ${network} --vault ${shellQuote(vaultId)} --collateral-bin ${VERIFY_BIN} --rpc ${ARCHIVE_RPC[network]} --out proof.json ${tx ? shellQuote(tx) : "TRIGGER_TX"}`;
+  return `git checkout ${commit ?? COMMIT_PLACEHOLDER} && ${build} && ${fetch} && ${VERIFY_BIN} check proof.json`;
 }
 
 /** Everything the decision cards need, or null when nothing was published or it is not Decision v1. */
@@ -110,7 +117,7 @@ function ProofCard({ row, proof, verifier, obs, revealAfter, chainTime, network,
           <dt>Replay</dt>
           <dd><Status group="proof" word={replayWord(revealAfter, chainTime, proof?.replay ?? "sealed")} /></dd>
         </dl>
-        <p className="fm-small">Newer verifiers also check the advisor&apos;s archived NEAR AI signature and count a missing one as a skip; the commit in the command decides which checks run. A result shown here is a claim; the command below is the answer.</p>
+        <p className="fm-small">Newer verifiers also check the advisor&apos;s archived NEAR AI signature and count a missing one as a skip; the commit in the command decides which checks run. A result shown here is a claim; the command below is the answer. A proof you fetch yourself carries no archived signature, because fetching one needs a NEAR AI key, so a newer verifier counts one skip in your run. The first build takes about five minutes.</p>
         {commit ? null : <p className="fm-small">{`Replace ${COMMIT_PLACEHOLDER} with the commit that built this vault's binary.`}</p>}
         <div className="fm-code fm-code--row fm-code--wrap">
           <pre><code>{cmd}</code></pre>

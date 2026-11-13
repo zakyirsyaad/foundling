@@ -42,6 +42,20 @@ test("a live vault with no keys has no note", async () => {
   expect(keys.value).toBe("0 access keys");
   expect(keys.note).toBeUndefined();
 });
+test("a sealed vault's commitment command checks the fixture and says so", async () => {
+  const live = await fixtureSnapshot();
+  const fact = proofFacts({ kind: "live", snapshot: { ...live, revealed: false } }, readLocalProofs(repoRoot), "mainnet").find((f) => f.id === "commitment")!;
+  expect(fact.command).toBe("python3 verify.py commitment");
+  expect(fact.note).toMatch(/Sealed until reveal/);
+});
+
+test("once the vault is revealed the commitment command reads the live vault, not the synthetic fixture", async () => {
+  const live = await fixtureSnapshot();
+  const fact = proofFacts({ kind: "live", snapshot: { ...live, revealed: true } }, readLocalProofs(repoRoot), "mainnet").find((f) => f.id === "commitment")!;
+  expect(fact.command).toBe(`python3 verify.py --live --vault ${live.vaultId} --network mainnet`);
+  expect(fact.note).toMatch(/PASS commitment/);
+});
+
 test("a snapshot survives serialization exactly", async () => {
   const s = await fixtureSnapshot();
   expect(deserializeSnapshot(serializeSnapshot(s))).toEqual(s);
