@@ -16,7 +16,7 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 [Depositor] <-> [Vault contract] <-> [OutLayer TEE: sealed strategy + NEAR AI advisor];  [Keeper bot] -> [Vault contract]
 ```
 
-- **Video:** not recorded yet. The video and a timestamped transcript will be added under docs/video.
+- **Video:** a one-minute demo is attached to the demo post, https://x.com/0xKayz_/status/2121447382101696649. The video file and a timestamped transcript are not in this repository.
 - **Try to rob it:** `make attack-lab-full` builds the contracts and runs 16 attacks against a local sandbox with throwaway keys. The last line should be `PASS=16 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
 
 ## Not proven yet

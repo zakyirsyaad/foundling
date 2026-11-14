@@ -194,9 +194,12 @@ class FirstScreenTest(unittest.TestCase):
         for box in ("[Depositor]", "[Vault contract]", "[Keeper bot]", "[OutLayer TEE"):
             self.assertIn(box, top)
 
-    def test_the_video_is_not_claimed_before_it_exists(self):
-        self.assertFalse((ROOT / "docs" / "video").exists(), "update the README when the video lands")
-        self.assertIn("not recorded yet", head(README))
+    def test_the_video_line_links_the_demo_post_and_claims_no_file_that_is_missing(self):
+        line = next(line for line in head(README).splitlines() if line.startswith("- **Video:**"))
+        self.assertRegex(line, r"https://x\.com/\w+/status/\d+")
+        if not (ROOT / "docs" / "video").exists():
+            self.assertIn("not in this repository", line)
+            self.assertNotIn("docs/video", line)
 
 
 class DisclosureTest(unittest.TestCase):
