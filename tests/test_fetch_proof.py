@@ -100,7 +100,7 @@ def decision(chat_id=CHAT, m=0):
 EVENTS = [{"imr": 3, "event_type": 134217729, "digest": "", "event": "app-id", "event_payload": "2c0a"}]
 
 
-def nearai_world(calls, signature_status=200, report_status=200, signature=None):
+def nearai_world(calls, signature_status=200, report_status=200, signature=None, replicas=1):
     """A fake NEAR AI: records each call and answers like the real endpoints. A status may be a list,
     one per call, for a reply that changes between attempts."""
     statuses = {"signature": signature_status, "report": report_status}
@@ -130,7 +130,9 @@ def nearai_world(calls, signature_status=200, report_status=200, signature=None)
             entry = {"model_name": query["model"], "signing_address": query["signing_address"],
                      "request_nonce": query["nonce"], "intel_quote": "0400", "nvidia_payload": "{}", "event_log": EVENTS}
             other = dict(entry, signing_address="0x" + "22" * 20)
-            return {"gateway_attestation": {}, "model_attestations": [other, entry]}
+            # NEAR AI runs several replicas of one model behind one signing key, each with its own quote.
+            mine = [dict(entry, intel_quote=f"04{n:02x}") for n in range(replicas)]
+            return {"gateway_attestation": {}, "model_attestations": [other, *mine]}
         raise AssertionError(url)
 
     return reply
@@ -199,6 +201,17 @@ class AdvisorSignature(unittest.TestCase):
                 result, calls, _ = self.archive(decision(), signature_status=status)
                 self.assertEqual(result, {"missing": f"signature: key refused (HTTP {status})"})
                 self.assertEqual(len(calls), 1)
+
+    def test_several_replicas_behind_one_signer_archive_the_first_report(self):
+        result, _, collateral = self.archive(decision(), replicas=3)
+        self.assertEqual(result["report"]["intel_quote"], "0400")
+        self.assertEqual(result["report"]["signing_address"], SIGNER)
+        collateral.assert_called_once_with("/bin/fv", bytes.fromhex("0400"))
+
+    def test_a_report_with_no_entry_for_the_signer_is_a_source_error(self):
+        with self.assertRaises(fetch.SourceError) as caught:
+            self.archive(decision(), replicas=0)
+        self.assertIn("no entry for signer", str(caught.exception))
 
     def test_a_malformed_reply_is_a_source_error(self):
         for signature in ({"text": "x"}, ["not", "an", "object"], {"text": "x", "signature": "s", "signing_algo": "ecdsa", "signing_address": 7}):
