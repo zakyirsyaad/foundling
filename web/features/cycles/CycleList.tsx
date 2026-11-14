@@ -2,9 +2,9 @@ import Link from "next/link";
 
 import { Hash } from "@/components/fm/Hash";
 import { Status } from "@/components/fm/Status";
-import { formatUnits } from "@/lib/format/units";
 import type { CycleFilter, CycleRow } from "@/lib/history/client";
 import type { PartialCycle } from "@/lib/cycles/fallback";
+import { tradeAmountText } from "@/lib/cycles/amount";
 import { cycleWord } from "@/lib/cycles/outcome";
 import { proofWord } from "@/lib/proof/tally";
 
@@ -152,7 +152,7 @@ export function CycleTable({ rows }: { rows: CycleRow[] }) {
               <td data-label="Time" className="mono whitespace-nowrap">{r.startedAt.replace("T", " ").slice(0, 16)}</td>
               <td data-label="Result"><Status group="cycle" word={cycleWord(r.events)} /></td>
               <td data-label="Proof"><Status group="proof" word={proofWord(r.verifier, r.obsRecheck)} /></td>
-              <td data-label="Amount" className="mono">{r.amountIn === null ? "—" : `${formatUnits(r.amountIn, 6, 2)} USDC`}</td>
+              <td data-label="Amount" className="mono">{tradeAmountText(r.amountIn, r.amountOut)}</td>
               <td data-label="Tx">{r.txHashes[0] ? <Hash value={r.txHashes[0]} label="transaction hash" /> : "—"}</td>
             </tr>
           ))}

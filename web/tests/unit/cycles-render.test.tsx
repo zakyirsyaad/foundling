@@ -21,6 +21,11 @@ test("the table shows result and proof words from the status table", () => {
   expect(within(r41).getByText("12.4 USDC")).toBeInTheDocument();
   expect(within(screen.getByRole("row", { name: /#40/ })).getByText("Hold")).toBeInTheDocument();
 });
+test("a sell row shows its amount in wNEAR", () => {
+  const sell: CycleRow = { ...row(34n, "executed"), amountIn: 221_370_821_874_649_239_540_000n, amountOut: 737_622n };
+  render(<CycleTable rows={[sell]} />);
+  expect(within(screen.getByRole("row", { name: /#34/ })).getByText("0.2213 wNEAR")).toBeInTheDocument();
+});
 test("an empty history still reads well", () => {
   render(<CycleTable rows={[]} />);
   expect(screen.getByText(/No cycles yet/)).toBeInTheDocument();
