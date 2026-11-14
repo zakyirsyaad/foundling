@@ -198,8 +198,11 @@ def archive_of(binary, chat_id, model, reply_hash, key):
     query = {"model": model, "signing_algo": "ecdsa", "signing_address": signer, "nonce": reply_hash}
     report = nearai_get("attestation report", "/attestation/report", query, key)
     entries = [e for e in report["model_attestations"] if e["signing_address"].lower() == signer.lower()]
-    if len(entries) != 1:
-        raise SourceError(f"the attestation report has {len(entries)} entries for signer {signer}")
+    # NEAR AI may run several replicas of a model behind one signing key, each with its own quote.
+    # One attested replica is enough to show the key lives in a TEE, and the verifier checks the
+    # one kept here in full, so the first is taken as the report came.
+    if not entries:
+        raise SourceError(f"the attestation report has no entry for signer {signer}")
     entry = {field: entries[0][field] for field in REPORT_FIELDS}
     if isinstance(entry["event_log"], str):
         entry["event_log"] = json.loads(entry["event_log"])
