@@ -47,7 +47,7 @@ Screenshots of https://foundling.xyz, taken on 2026-11-14. Each one links to the
 
 ## At a glance
 
-Numbers as of 2026-11-14 05:15 UTC. The right column says where to check each one.
+Numbers as of 2026-11-14 07:32 UTC. The right column says where to check each one.
 
 | Fact | Value | Check |
 | --- | --- | --- |
@@ -55,10 +55,10 @@ Numbers as of 2026-11-14 05:15 UTC. The right column says where to check each on
 | Attacks refused or contained in the Attack Lab | 16 of 16 | step 5 |
 | Claims backed by evidence and a command | 6 of 7; the seventh is listed as not proven | [`claims.json`](claims.json) |
 | Checks passed by the proof of the first trade | 21 of 21 | step 3 |
-| Cycles run on mainnet | 34 | https://foundling.xyz/app/cycles |
+| Cycles run on mainnet | 38 | https://foundling.xyz/app/cycles |
 | Trades on mainnet | 3: two buys (cycles 21 and 22) and one sell (cycle 34) | the same page, filter "Executed" |
 | Deposits | 4 USDC, from the lead | https://foundling.xyz/app |
-| Share price since start | -1.4%: the vault bought NEAR before a market drop, then sold | https://foundling.xyz/app |
+| Share price since start | -1.5%: the vault bought NEAR before a market drop, then sold | https://foundling.xyz/app |
 
 ## In plain words
 
