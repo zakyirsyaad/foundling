@@ -43,7 +43,7 @@ test("mainnet pins the tokens and the origin chains, all off until SP4", () => {
   expect(c.wnear).toBe("wrap.near");
   expect(c.oneClick?.baseUrl).toBe("https://1click.chaindefuser.com");
   expect(c.oneClick?.chains.map((ch) => [ch.id, ch.marginMs, ch.deadlineMs, ch.enabled])).toEqual([
-    ["base", 120000, 1200000, false],
+    ["base", 120000, 1200000, true],
     ["arb", 120000, 1200000, false],
     ["eth", 300000, 2400000, false],
   ]);
@@ -73,7 +73,8 @@ test("a test build may use the mock quote key and turn chains on; a real build m
   const t = loadConfig({ ...mainnetEnv, NEXT_PUBLIC_TEST_BUILD: "1", NEXT_PUBLIC_ONECLICK_KEY: "ed25519:test", NEXT_PUBLIC_ONECLICK_CHAINS: "base,eth" });
   expect(t.oneClick?.quotePublicKey).toBe("ed25519:test");
   expect(t.oneClick?.chains.map((c) => [c.id, c.enabled])).toEqual([["base", true], ["arb", false], ["eth", true]]);
-  const real = loadConfig({ ...mainnetEnv, NEXT_PUBLIC_ONECLICK_KEY: "ed25519:test", NEXT_PUBLIC_ONECLICK_CHAINS: "base" });
+  const real = loadConfig({ ...mainnetEnv, NEXT_PUBLIC_ONECLICK_KEY: "ed25519:test", NEXT_PUBLIC_ONECLICK_CHAINS: "arb,eth" });
   expect(real.oneClick?.quotePublicKey).toBe("ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc");
-  expect(real.oneClick?.chains.every((c) => !c.enabled)).toBe(true);
+  // Only the file decides: Base is on there, and the variable cannot turn the others on or Base off.
+  expect(real.oneClick?.chains.map((c) => [c.id, c.enabled])).toEqual([["base", true], ["arb", false], ["eth", false]]);
 });
