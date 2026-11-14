@@ -31,7 +31,7 @@ SUMMARY pass=2 skip=0 fail=0 mode=offline keys=none
 - **Understand it:** [In plain words](#in-plain-words) · [Words used here](#words-used-here) · [What NEAR does here](#what-near-does-here)
 - **Check it:** [Check it yourself, in order](#check-it-yourself-in-order) · [The vault on mainnet](#the-vault-on-mainnet) · [One cycle, end to end](#one-cycle-end-to-end) · [Try the website](#try-the-website) · [Try to rob it](#try-to-rob-it)
 - **Know its limits:** [Not proven yet](#not-proven-yet) · [What you still have to trust](#what-you-still-have-to-trust) · [Who holds which key](#who-holds-which-key) · [Tracks](#tracks)
-- **About the repository:** [Repository map](#repository-map) · [Provenance](#provenance) · [Team](#team) · [Disclaimer](#disclaimer) · [More](#more)
+- **About the repository:** [Repository map](#repository-map) · [Provenance](#provenance) · [Team](#team) · [Other projects by the author](#other-projects-by-the-author) · [Disclaimer](#disclaimer) · [More](#more)
 
 ## In plain words
 
@@ -218,6 +218,10 @@ Needed to build everything: Rust 1.97.1 with the wasm targets, `cargo-near` 0.22
 ## Team
 
 Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner (GitHub: maziazi). The lead holds the governor and keeper roles; the partner holds the guardian role.
+
+## Other projects by the author
+
+One other submission to this hackathon, independent of this one: [Zorvo Private](https://github.com/zakyirsyaad/zorvo/tree/hackathon/near-credits), a private mode for a macOS app that hosts coding agents on NEAR AI Cloud TEE models. It shares no code, contract or service with Foundling.
 
 ## Disclaimer
 
