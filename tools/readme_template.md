@@ -19,6 +19,13 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 - **Video:** a one-minute demo is attached to the demo post, https://x.com/0xKayz_/status/2121447382101696649. The video file and a timestamped transcript are not in this repository.
 - **Try to rob it:** `make attack-lab-full` builds the contracts and runs 16 attacks against a local sandbox with throwaway keys. The last line should be `PASS=16 FAIL=0 NOT_IMPLEMENTED=0 ERROR=0` (details below).
 
+## Contents
+
+- **Understand it:** [In plain words](#in-plain-words) · [Words used here](#words-used-here) · [What NEAR does here](#what-near-does-here)
+- **Check it:** [Check it yourself, in order](#check-it-yourself-in-order) · [The vault on mainnet](#the-vault-on-mainnet) · [One cycle, end to end](#one-cycle-end-to-end) · [Try the website](#try-the-website) · [Try to rob it](#try-to-rob-it)
+- **Know its limits:** [Not proven yet](#not-proven-yet) · [What you still have to trust](#what-you-still-have-to-trust) · [Who holds which key](#who-holds-which-key) · [Tracks](#tracks)
+- **About the repository:** [Repository map](#repository-map) · [Provenance](#provenance) · [Team](#team) · [Disclaimer](#disclaimer) · [More](#more)
+
 ## In plain words
 
 1. You deposit USDC into a vault contract and get shares. You can redeem them at any time, also while trading is frozen.
@@ -29,6 +36,32 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 6. The vault account has no access keys, so no person can sign for it or move its funds directly.
 
 What this shows: an AI agent can manage funds while the contract, not the agent or its operator, decides how much it may risk and whether you can leave.
+
+## Words used here
+
+| Word | Meaning in this repository |
+| --- | --- |
+| Vault | The contract at `vault.foundling.near` that holds the funds and enforces the limits. |
+| Agent, strategy | The WASM that OutLayer runs in a TEE and that returns one decision per cycle. Not the keeper, and not a coding assistant. |
+| Keeper | The account, run by a bot, that starts a cycle. It cannot choose the trade. |
+| Guardian | The second teammate's account. It can freeze trading and cancel a keeper change, nothing else. |
+| Governor | The lead's account. It can unfreeze and tighten limits; it cannot loosen them or move funds. |
+| Cycle | One round: trigger, decision, limit check, and a swap or a hold. |
+| TEE | A hardware enclave that runs code its operator cannot read or change, and signs a report of what it ran. |
+| Commitment, reveal | The hash of the secret parameters, stored at birth; and the later transaction that published them. The contract accepted the reveal only because the hash matched. |
+| Replay | Running the public strategy again on the recorded inputs and getting the same decision. |
+
+## What NEAR does here
+
+| NEAR piece | What it does in Foundling | Where to look |
+| --- | --- | --- |
+| An account with no access keys | The vault account was created, funded and given its contract in one transaction that added no key. Nobody can sign for it. | `access_keys` and `birth` in [`proofs/mainnet.json`](proofs/mainnet.json); step 2 of "Check it yourself" |
+| Function-call access keys | The keeper's server key can call only the cycle methods, and the guardian's key only `freeze` and `cancel_keeper_change`. The lead also holds a full-access key on the keeper account. | `access_keys` in [`proofs/mainnet.json`](proofs/mainnet.json) |
+| OutLayer | Runs the strategy WASM in a TEE when the vault contract calls it. The secret parameters open only for that WASM hash called by that vault. | [`contracts/vault/src/cycle.rs`](contracts/vault/src/cycle.rs), [`strategy/src/lib.rs`](strategy/src/lib.rs) |
+| NEAR AI Cloud | A model in a TEE gives a risk score from 0 to 100 with a one-line reason. Its answer is signed, and the signature is checked offline. | [`strategy/src/advisor.rs`](strategy/src/advisor.rs); step 3 of "Check it yourself" |
+| Rhea | The vault swaps USDC and wNEAR in one pinned pool. | [`contracts/vault/src/swap.rs`](contracts/vault/src/swap.rs) |
+| An on-chain price oracle | The contract reads `aggregate-oracle.near` itself. The swap bound comes from that price, never from the agent, and a decision whose price is too far from it is refused. | [`contracts/vault/src/pricing.rs`](contracts/vault/src/pricing.rs), [`contracts/vault/src/limits.rs`](contracts/vault/src/limits.rs) |
+| NEAR Intents (1Click) | Deposits from Base are switched on at the website. No real deposit is recorded yet, so this is not claimed. | [`web/features/crosschain`](web/features/crosschain) |
 
 ## Check it yourself, in order
 
@@ -48,53 +81,16 @@ Each row is one step: run the command, compare the last line. Times were measure
 - Step 5 runs against mocks on a local node (see "Not proven yet"). It does not touch mainnet.
 - No step asks for a wallet, a key or funds.
 
-## What NEAR does here
-
-| NEAR piece | What it does in Foundling | Where to look |
-| --- | --- | --- |
-| An account with no access keys | The vault account was created, funded and given its contract in one transaction that added no key. Nobody can sign for it. | `access_keys` and `birth` in [`proofs/mainnet.json`](proofs/mainnet.json); step 2 above |
-| Function-call access keys | The keeper's server key can call only the cycle methods, and the guardian's key only `freeze` and `cancel_keeper_change`. The lead also holds a full-access key on the keeper account. | `access_keys` in [`proofs/mainnet.json`](proofs/mainnet.json) |
-| OutLayer | Runs the strategy WASM in a TEE when the vault contract calls it. The secret parameters open only for that WASM hash called by that vault. | [`contracts/vault/src/cycle.rs`](contracts/vault/src/cycle.rs), [`strategy/src/lib.rs`](strategy/src/lib.rs) |
-| NEAR AI Cloud | A model in a TEE gives a risk score from 0 to 100 with a one-line reason. Its answer is signed, and the signature is checked offline. | [`strategy/src/advisor.rs`](strategy/src/advisor.rs); step 3 above |
-| Rhea | The vault swaps USDC and wNEAR in one pinned pool. | [`contracts/vault/src/swap.rs`](contracts/vault/src/swap.rs) |
-| An on-chain price oracle | The contract reads `aggregate-oracle.near` itself. The swap bound comes from that price, never from the agent, and a decision whose price is too far from it is refused. | [`contracts/vault/src/pricing.rs`](contracts/vault/src/pricing.rs), [`contracts/vault/src/limits.rs`](contracts/vault/src/limits.rs) |
-| NEAR Intents (1Click) | Deposits from Base are switched on at the website. No real deposit is recorded yet, so this is not claimed. | [`web/features/crosschain`](web/features/crosschain) |
-
-## Words used here
-
-| Word | Meaning in this repository |
-| --- | --- |
-| Vault | The contract at `vault.foundling.near` that holds the funds and enforces the limits. |
-| Agent, strategy | The WASM that OutLayer runs in a TEE and that returns one decision per cycle. Not the keeper, and not a coding assistant. |
-| Keeper | The account, run by a bot, that starts a cycle. It cannot choose the trade. |
-| Guardian | The second teammate's account. It can freeze trading and cancel a keeper change, nothing else. |
-| Governor | The lead's account. It can unfreeze and tighten limits; it cannot loosen them or move funds. |
-| Cycle | One round: trigger, decision, limit check, and a swap or a hold. |
-| TEE | A hardware enclave that runs code its operator cannot read or change, and signs a report of what it ran. |
-| Commitment, reveal | The hash of the secret parameters, stored at birth; and the later transaction that published them. The contract accepted the reveal only because the hash matched. |
-| Replay | Running the public strategy again on the recorded inputs and getting the same decision. |
-
-## Not proven yet
-
-{{not_proven}}
-- No third-party audit of the vault code has been done.
-- {{mainnet_status}}
-- The sandbox runs the vault against mocks of the price oracle, Rhea (the swap venue), OutLayer and the tokens (`contracts/mock-oracle`, `contracts/mock-ref`, `contracts/mock-outlayer`, `contracts/mock-token`). The Attack Lab results hold for the vault against these mocks, not against the real services.
-- The fixtures behind `python3 verify.py` are synthetic.
-
 ## The vault on mainnet
 
 - **Vault:** `vault.foundling.near`, live since 2026-11-13 with 4 USDC from the lead. **Website:** https://foundling.xyz
-- **Do** `python3 verify.py --live --vault vault.foundling.near --network mainnet --expect-code-hash 9ab6b6d62d627f403f5aa8719cc420fea16dc67ceeffb250d21c09aee5aa5a8a` (read-only, public RPC, no key). **See** `PASS keys`, `PASS code_hash`, `PASS commitment` and `PASS decision`, then `SUMMARY pass=4 skip=0 fail=0`. `PASS commitment` means the parameters and salt revealed on 2026-11-13 open the commitment stored at birth.
+- Step 2 of "Check it yourself" reads this vault from public RPC nodes. `PASS commitment` there means the parameters and salt revealed on 2026-11-13 open the commitment stored at birth.
 - Every transaction, from the keyless birth to a redeem while frozen, is listed in [`proofs/mainnet.json`](proofs/mainnet.json). The `init` arguments are in [`proofs/mainnet-init-args.json`](proofs/mainnet-init-args.json); their sha256 equals the `args_hash` in the vault's `initialized` event.
-- The guardian key was exercised on mainnet by the partner. On 2026-11-13 at 16:18 UTC the partner called `freeze`, signed with the function-call key that can call only `freeze` and `cancel_keeper_change`; the guardian account has no other key. The keeper bot skipped its cycles while the vault was frozen. Two hours later the lead called `unfreeze` from the governor account, and the next cycle ran within a minute. Both transactions are in [`proofs/mainnet.json`](proofs/mainnet.json) as `guardian_freeze_by_partner` and `unfreeze_after_guardian_freeze`.
-
-## Try the website
-
-- **Do** open https://foundling.xyz/app (no wallet needed). **See** the vault's stage, its book in USDC and wNEAR, the limits the contract enforces, and the footer line `0 access keys · code hash 9ab6b6…`.
-- **Do** open https://foundling.xyz/app/cycles and pick a cycle. **See** its timeline, the decision the strategy returned, the advisor's risk score with its one-sentence reason, and the transaction hashes.
-- **Do** open https://foundling.xyz/proof. **See** four facts read from the chain (access keys, vault code hash, strategy WASM hash, commitment), each with a command that needs no key.
-- The website only reads. It serves from Vercel, reads chain state from public RPC nodes, and reads cycle history from our indexer; deposits and redeems are signed in your own wallet.
+- The guardian key was exercised on mainnet by the partner, not by the lead:
+  - 2026-11-13 16:18 UTC: the partner called `freeze`, signed with the function-call key that can call only `freeze` and `cancel_keeper_change`. The guardian account has no other key.
+  - While the vault was frozen the keeper bot skipped its cycles.
+  - Two hours later the lead called `unfreeze` from the governor account, and the next cycle ran within a minute.
+  - Both transactions are in [`proofs/mainnet.json`](proofs/mainnet.json) as `guardian_freeze_by_partner` and `unfreeze_after_guardian_freeze`.
 
 ## One cycle, end to end
 
@@ -113,7 +109,7 @@ As of 2026-11-13 14:05 UTC the keeper bot had run cycles 2 to 21 unattended. Cyc
 
 The parameters and the salt were revealed on 2026-11-13, after `reveal_after` (tx `8KVToKUVS9NezbnfyoN2YQWTGWMrbgEHDJ5rBgsXqENc`). The vault accepted them only because their hash equals the commitment stored at birth. Anyone can now read them with the `revealed` view, and `foundling-verify` reproduces the decision of each of the first 21 cycles from them.
 
-- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json`. **See** `PASS commitment`, `PASS nonce 21 replay`, `PASS nonce 21 ai signer` and `SUMMARY pass=21 skip=0 fail=0`: the decision of cycle 21 is reproduced from the revealed parameters, and the model's answer carries a signature from its TEE.
+- Step 3 of "Check it yourself" shows it for cycle 21: `PASS commitment`, `PASS nonce 21 replay` and `PASS nonce 21 ai signer`. The decision is reproduced from the revealed parameters, and the model's answer carries a signature from its TEE.
 
 ### The first trade on mainnet
 
@@ -124,30 +120,23 @@ Cycle 21 ran on 2026-11-13 at 13:51 UTC, started by the keeper bot:
 - The strategy cut the base buy of 2.5 USDC by that 15%, to 2.125 USDC, and then to 0.4 USDC: the room the per-trade cap leaves, 10% of a 4 USDC book.
 - The vault swapped 0.4 USDC for 0.11043 wNEAR on Rhea pool 4512. After it the vault held 3.6 USDC and 0.11043 wNEAR.
 - Transactions: trigger `3A74n5wU8qgE3Dshto8Cnodd7vrhQ6FBRTixcuqBVxrC`, execute `GTpH3vEPtiu416yAgPyiAJJYLWAvzd3vkaVypn3FFUci`.
-- The fixture in the command above is the proof of this cycle.
+- The proof of this cycle is [`cli/fixtures/mainnet-cycle-21-proof.json`](cli/fixtures/mainnet-cycle-21-proof.json), the file step 3 checks.
 
 ### A testnet cycle where the model's cut is visible in the amount
 
-On mainnet the cap set the final amount of cycle 21, so the model's 15% cut does not show in it. This testnet cycle shows the cut alone.
+On mainnet the cap set the final amount of cycle 21, so the model's 15% cut does not show in it. Cycle 3 of the testnet rehearsal vault `vault.fdl-adv3-139b75.testnet` (same vault build and same strategy WASM as mainnet) shows the cut alone:
 
-On the testnet rehearsal vault `vault.fdl-adv3-139b75.testnet` (the same vault build `9ab6b6d6…` and the same strategy WASM `b15a66b4…` as mainnet), cycle 3 ran on 2026-11-13 with 5 test USDC:
-
-- The price rule read risk-on. The model answered risk 15 of 100: "Broad market jitters and BTC weakness, but no direct threat to NEAR Protocol, Rhea, or USDC on NEAR."
-- The strategy cut the base buy of 0.05 USDC by that 15%, to 0.0425 USDC (`amount_in: 42500`), and the keeper executed it: 0.0425 USDC for 0.01206 wNEAR.
+- The model answered risk 15 of 100, and the strategy cut the base buy of 0.05 USDC to 0.0425 USDC (`amount_in: 42500`). The keeper executed it.
 - On testnet the pool and the price oracle are our mocks. The prices the strategy read, the TEE run and the model's signed answer are real.
-- Transactions on testnet: trigger `DUpsCut376WP4gQvGRBrbbFbCTc481UATAQVsMrdL8En`, execute `ApRB2E682ZjwCqny2sTQU8BxSq22EYbJroZ8PKQ34Hev`.
-- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json`. **See** `PASS nonce 3 replay`, `PASS nonce 3 ai signer` and `SUMMARY pass=21 skip=0 fail=0`: the decision is reproduced from the revealed parameters, and the model's answer carries a signature from its TEE.
+- Testnet transactions: trigger `DUpsCut376WP4gQvGRBrbbFbCTc481UATAQVsMrdL8En`, execute `ApRB2E682ZjwCqny2sTQU8BxSq22EYbJroZ8PKQ34Hev`.
+- **Do** `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/testnet-risk-manager-proof.json`. **See** `PASS nonce 3 replay`, `PASS nonce 3 ai signer` and `SUMMARY pass=21 skip=0 fail=0`.
 
-## Tracks
+## Try the website
 
-Keywords from the hackathon tracks are named only where this repository has code and evidence for them.
-
-| Track | What is built | Evidence | Not claimed |
-| --- | --- | --- | --- |
-| `security` | AGENT SECURITY, FUNCTION CALL KEYS, TEE ATTESTATION. The contract enforces the caps, the vault account has no keys, the keeper and guardian sign with function-call keys limited to named vault methods, and the guardian can freeze trading. | `python3 verify.py --live …` above; `make attack-lab-full`; key state and transactions in [`proofs/mainnet.json`](proofs/mainnet.json) | A third-party audit. |
-| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment and reveal in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json` | That nobody knew the parameters before the reveal: the lead wrote them. The claim is that they were not published, and could not be changed, until then. |
-| `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | The first mainnet swap (`first_trade`) and a redeem in [`proofs/mainnet.json`](proofs/mainnet.json); sandbox tests and the Attack Lab | Returns of any kind: one small trade has run. NEAR INTENTS (in testing), CHAIN SIGNATURES. |
-| `agents` | AGENT COMMERCE, in one narrow sense: each cycle the vault pays for the agent's compute from an on-chain budget (`ops_budget`), with a receipt. | Step 6 above; `first_cycle` in [`proofs/mainnet.json`](proofs/mainnet.json) | Hiring other agents, revenue, NEAR INTENTS, CHAIN SIGNATURES. |
+- **Do** open https://foundling.xyz/app (no wallet needed). **See** the vault's stage, its book in USDC and wNEAR, the limits the contract enforces, and the footer line `0 access keys · code hash 9ab6b6…`.
+- **Do** open https://foundling.xyz/app/cycles and pick a cycle. **See** its timeline, the decision the strategy returned, the advisor's risk score with its one-sentence reason, and the transaction hashes.
+- **Do** open https://foundling.xyz/proof. **See** four facts read from the chain (access keys, vault code hash, strategy WASM hash, commitment), each with a command that needs no key.
+- The website only reads. It serves from Vercel, reads chain state from public RPC nodes, and reads cycle history from our indexer; deposits and redeems are signed in your own wallet.
 
 ## Try to rob it
 
@@ -163,9 +152,13 @@ make attack-lab-full
 - Results are written to the git-ignored `proofs/attack/local/`. The files in `proofs/attack/reproducible/` come from the vault built reproducibly in a pinned image (`make attack-proofs`, needs Docker); an attack without a file there has only the local result.
 - After a first build, `make attack-lab` runs the attacks again without building. If you switch branches first, run `make wasm` again, or every attack reports `ERROR`.
 
-## Who holds which key
+## Not proven yet
 
-{{roles_text}}
+{{not_proven}}
+- No third-party audit of the vault code has been done.
+- {{mainnet_status}}
+- The sandbox runs the vault against mocks of the price oracle, Rhea (the swap venue), OutLayer and the tokens (`contracts/mock-oracle`, `contracts/mock-ref`, `contracts/mock-outlayer`, `contracts/mock-token`). The Attack Lab results hold for the vault against these mocks, not against the real services.
+- The fixtures behind `python3 verify.py` are synthetic.
 
 ## What you still have to trust
 
@@ -178,20 +171,20 @@ make attack-lab-full
 
 The full threat model, with the worst case in numbers, is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) (English) and in [docs/SPEC.md](docs/SPEC.md) section 9 (Indonesian, the source).
 
-## Disclaimer
+## Who holds which key
 
-Foundling is a technical demo made for the NEAR Hackathon. It has not been audited by a third party. It is not an invitation to deposit, and nothing here is financial advice: do not put in funds you cannot lose. The demo limits deposits (`tvl_cap`, `per_user_cap` and `min_deposit`, see [docs/SPEC.md](docs/SPEC.md) section 3.6) and takes no on-chain fee.
+{{roles_text}}
 
-## Provenance
+## Tracks
 
-- This is a new project. Its git history starts on 2026-11-01. Everything made before that date is disclosed here as baseline: the design notes and the spike experiments that were run outside this repository (see [docs/SPEC.md](docs/SPEC.md) section 6). The hackathon FAQ (Q-001) counts code from the announcement on 2026-10-19 as inside the window; we list everything before 2026-11-01 as baseline anyway.
-- The SP1a spike (a test of OutLayer WASM runs) ran outside this repository. Its probe is kept in `strategy/src/bin/sp1a_probe.rs`, and the binaries OutLayer ran are in the public repository [zakyirsyaad/sp1a-wasm](https://github.com/zakyirsyaad/sp1a-wasm).
-- Code, tests and documents were written with AI assistance throughout. Many commits made in Claude Code sessions (Anthropic) carry a `Claude-Session:` trailer in the commit message; a commit without the trailer may be AI-assisted too. At run time the strategy also calls a NEAR AI Cloud model as an advisor.
-- Libraries, from the manifests: `near-sdk` (the vault and the mocks), `near-workspaces` (sandbox tests), `dcap-qvl` and `k256` (checking attestations and signatures), Next.js and React (the website), Hono (the API), Drizzle ORM and `pg` (the indexer). Services are named as text only: OutLayer, NEAR AI Cloud, Rhea, NEAR Intents (1Click) and an aggregate price oracle. The full list of dependencies, with licenses, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Keywords from the hackathon tracks are named only where this repository has code and evidence for them.
 
-## Team
-
-Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner (GitHub: maziazi). The lead holds the governor and keeper roles; the partner holds the guardian role.
+| Track | What is built | Evidence | Not claimed |
+| --- | --- | --- | --- |
+| `security` | AGENT SECURITY, FUNCTION CALL KEYS, TEE ATTESTATION. The contract enforces the caps, the vault account has no keys, the keeper and guardian sign with function-call keys limited to named vault methods, and the guardian can freeze trading. | `python3 verify.py --live …` above; `make attack-lab-full`; key state and transactions in [`proofs/mainnet.json`](proofs/mainnet.json) | A third-party audit. |
+| `privacy` | PRIVATE AI, TEE, NEAR AI CLOUD. The strategy parameters are sealed in an OutLayer secret bound to the strategy's hash and to the vault account, with a salted commitment on chain. The advisor is a NEAR AI Cloud model whose signed answer is checked offline. | Commitment and reveal in [`proofs/mainnet.json`](proofs/mainnet.json); `cargo run --manifest-path cli/Cargo.toml -- check cli/fixtures/mainnet-cycle-21-proof.json` | That nobody knew the parameters before the reveal: the lead wrote them. The claim is that they were not published, and could not be changed, until then. |
+| `defi` | TRADING. A vault that holds USDC and wNEAR, trades on Rhea inside on-chain caps, and pays redeems pro rata in kind. | The first mainnet swap (`first_trade`) and a redeem in [`proofs/mainnet.json`](proofs/mainnet.json); sandbox tests and the Attack Lab | Returns of any kind: one small trade has run. NEAR INTENTS (in testing), CHAIN SIGNATURES. |
+| `agents` | AGENT COMMERCE, in one narrow sense: each cycle the vault pays for the agent's compute from an on-chain budget (`ops_budget`), with a receipt. | Step 6 above; `first_cycle` in [`proofs/mainnet.json`](proofs/mainnet.json) | Hiring other agents, revenue, NEAR INTENTS, CHAIN SIGNATURES. |
 
 ## Repository map
 
@@ -207,6 +200,21 @@ Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner
 | `proofs/` | Committed evidence: the mainnet record, Attack Lab results, verifier fixtures. |
 
 Needed to build everything: Rust 1.97.1 with the wasm targets, `cargo-near` 0.22.0, Node 24 and Python 3.9 or newer. `python3 verify.py` needs Python only. The commands are in [AGENTS.md](AGENTS.md).
+
+## Provenance
+
+- This is a new project. Its git history starts on 2026-11-01. Everything made before that date is disclosed here as baseline: the design notes and the spike experiments that were run outside this repository (see [docs/SPEC.md](docs/SPEC.md) section 6). The hackathon FAQ (Q-001) counts code from the announcement on 2026-10-19 as inside the window; we list everything before 2026-11-01 as baseline anyway.
+- The SP1a spike (a test of OutLayer WASM runs) ran outside this repository. Its probe is kept in `strategy/src/bin/sp1a_probe.rs`, and the binaries OutLayer ran are in the public repository [zakyirsyaad/sp1a-wasm](https://github.com/zakyirsyaad/sp1a-wasm).
+- Code, tests and documents were written with AI assistance throughout. Many commits made in Claude Code sessions (Anthropic) carry a `Claude-Session:` trailer in the commit message; a commit without the trailer may be AI-assisted too. At run time the strategy also calls a NEAR AI Cloud model as an advisor.
+- Libraries, from the manifests: `near-sdk` (the vault and the mocks), `near-workspaces` (sandbox tests), `dcap-qvl` and `k256` (checking attestations and signatures), Next.js and React (the website), Hono (the API), Drizzle ORM and `pg` (the indexer). Services are named as text only: OutLayer, NEAR AI Cloud, Rhea, NEAR Intents (1Click) and an aggregate price oracle. The full list of dependencies, with licenses, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Team
+
+Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner (GitHub: maziazi). The lead holds the governor and keeper roles; the partner holds the guardian role.
+
+## Disclaimer
+
+Foundling is a technical demo made for the NEAR Hackathon. It has not been audited by a third party. It is not an invitation to deposit, and nothing here is financial advice: do not put in funds you cannot lose. The demo limits deposits (`tvl_cap`, `per_user_cap` and `min_deposit`, see [docs/SPEC.md](docs/SPEC.md) section 3.6) and takes no on-chain fee.
 
 ## More
 
