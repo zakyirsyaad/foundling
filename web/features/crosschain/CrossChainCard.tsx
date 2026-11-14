@@ -21,6 +21,7 @@ import { GATE_TEXT, type GateReason, depositGate, remainingVaultCap } from "@/li
 import { ConnectButton } from "@/features/vault/ConnectButton";
 import { NearNeed } from "@/features/portfolio/NearNeed";
 import { type BuildCtx, buildTx } from "@/lib/wallet/calls";
+import { enabledChainNames } from "@/lib/crosschain/labels";
 import { useOneClickSwap } from "./useOneClickSwap";
 
 const USDC_DECIMALS = 6;
@@ -180,7 +181,7 @@ export function CrossChainCard({ s, p, unreadable, run, busy, ctx = null, gasPri
   return (
     <section aria-labelledby="crosschain-title" className="grid gap-4 rounded-lg border p-5" data-step={flow.step}>
       <h2 id="crosschain-title" className="text-lg font-semibold">From another chain</h2>
-      <p className="text-[13px] text-muted-foreground">Send USDC from Base, Arbitrum or Ethereum through 1Click (NEAR Intents). It lands in your own NEAR account first; nothing enters the vault until you sign the deposit.</p>
+      <p className="text-[13px] text-muted-foreground">Send USDC from {enabledChainNames(x.oc.chains)} through 1Click (NEAR Intents). It lands in your own NEAR account first; nothing enters the vault until you sign the deposit.</p>
       {x.down ? <p role="status">Deposits from another chain are not available right now: 1Click did not answer. Deposits of USDC on NEAR are not affected.</p> : null}
       {flow.problem ? <p role="alert">{flow.problem}</p> : null}
 
