@@ -1,6 +1,10 @@
 # Foundling
 
+[![CI](https://github.com/zakyirsyaad/foundling/actions/workflows/ci.yml/badge.svg)](https://github.com/zakyirsyaad/foundling/actions/workflows/ci.yml) ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![NEAR mainnet](https://img.shields.io/badge/NEAR-mainnet-brightgreen) ![Vault access keys: 0](https://img.shields.io/badge/vault%20access%20keys-0-brightgreen) ![Attack Lab: 16 of 16 refused](https://img.shields.io/badge/attack%20lab-16%2F16%20refused-brightgreen)
+
 > A USDC vault on NEAR that is designed to be born without keys, to trade only inside caps its contract enforces, and to let depositors leave without us.
+
+**[Website](https://foundling.xyz)** · **[Proof page](https://foundling.xyz/proof)** · **[Demo video](https://x.com/0xKayz_/status/2121447382101696649)** · **[Threat model](docs/THREAT_MODEL.md)** · **[Claims](claims.json)**
 
 Foundling is a USDC vault on NEAR. Its strategy runs sealed in an OutLayer TEE, and the vault contract, not the agent, enforces the spending caps, the exit path and the roles.
 The problem: an autonomous trading agent asks depositors to trust its operator with both the funds and the rules. Foundling bounds what operator and agent can do on chain, and commits to the strategy parameters by hash so they can be revealed later and past decisions replayed.
@@ -21,10 +25,33 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 
 ## Contents
 
-- **Understand it:** [In plain words](#in-plain-words) · [Words used here](#words-used-here) · [What NEAR does here](#what-near-does-here)
+- **Understand it:** [What it looks like](#what-it-looks-like) · [At a glance](#at-a-glance) · [In plain words](#in-plain-words) · [How it fits together](#how-it-fits-together) · [Words used here](#words-used-here) · [What NEAR does here](#what-near-does-here)
 - **Check it:** [Check it yourself, in order](#check-it-yourself-in-order) · [The vault on mainnet](#the-vault-on-mainnet) · [One cycle, end to end](#one-cycle-end-to-end) · [Try the website](#try-the-website) · [Try to rob it](#try-to-rob-it)
 - **Know its limits:** [Not proven yet](#not-proven-yet) · [What you still have to trust](#what-you-still-have-to-trust) · [Who holds which key](#who-holds-which-key) · [Tracks](#tracks)
 - **About the repository:** [Repository map](#repository-map) · [Provenance](#provenance) · [Team](#team) · [Other projects by the author](#other-projects-by-the-author) · [Disclaimer](#disclaimer) · [More](#more)
+
+## What it looks like
+
+| Vault overview | One cycle, with its proof | Proof page |
+| --- | --- | --- |
+| [![The vault overview page: stage, book, share price and the limits set in the contract](docs/img/overview.png)](https://foundling.xyz/app) | [![Cycle 21, the first mainnet trade: why it traded, its timeline and its proof with 21 checks passed](docs/img/cycle-21.png)](https://foundling.xyz/app/cycles/21) | [![The proof page: access keys, code hash, strategy hash and commitment, each with a command](docs/img/proof.png)](https://foundling.xyz/proof) |
+
+Screenshots of https://foundling.xyz, taken on 2026-11-14. Each one links to the live page.
+
+## At a glance
+
+Numbers as of 2026-11-14 05:15 UTC. The right column says where to check each one.
+
+| Fact | Value | Check |
+| --- | --- | --- |
+| Access keys on the vault account | 0 | step 2 of "Check it yourself" |
+| Attacks refused or contained in the Attack Lab | 16 of 16 | step 5 |
+| Claims backed by evidence and a command | 6 of 7; the seventh is listed as not proven | [`claims.json`](claims.json) |
+| Checks passed by the proof of the first trade | 21 of 21 | step 3 |
+| Cycles run on mainnet | 34 | https://foundling.xyz/app/cycles |
+| Trades on mainnet | 3: two buys (cycles 21 and 22) and one sell (cycle 34) | the same page, filter "Executed" |
+| Deposits | 4 USDC, from the lead | https://foundling.xyz/app |
+| Share price since start | -1.4%: the vault bought NEAR before a market drop, then sold | https://foundling.xyz/app |
 
 ## In plain words
 
@@ -36,6 +63,40 @@ The problem: an autonomous trading agent asks depositors to trust its operator w
 6. The vault account has no access keys, so no person can sign for it or move its funds directly.
 
 What this shows: an AI agent can manage funds while the contract, not the agent or its operator, decides how much it may risk and whether you can leave.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  D[Depositor] -->|deposit and redeem| V["Vault contract<br/>no access keys"]
+  K[Keeper bot] -->|trigger_cycle| V
+  G[Guardian] -->|freeze| V
+  V -->|"calls, hash pinned"| O["OutLayer TEE<br/>strategy WASM"]
+  O -->|asks for a risk score| A["NEAR AI Cloud<br/>model in a TEE"]
+  O -->|one decision| V
+  V -->|reads the price| P[Price oracle]
+  V -->|swap inside the caps| R[Rhea pool]
+```
+
+One cycle, step by step:
+
+```mermaid
+sequenceDiagram
+  participant K as Keeper bot
+  participant V as Vault contract
+  participant O as OutLayer TEE
+  participant A as NEAR AI Cloud
+  participant R as Rhea
+  K->>V: trigger_cycle
+  V->>O: run the strategy (hash pinned, secrets sealed)
+  O->>A: how risky are the next hours?
+  A-->>O: risk 0 to 100, signed
+  O-->>V: decision: buy, sell or hold
+  V->>V: check caps, cooldown and oracle price
+  V->>R: swap, or hold and move nothing
+```
+
+The four-box line on the first screen is the same picture as text, for readers that do not render diagrams.
 
 ## Words used here
 
@@ -79,7 +140,9 @@ Each row is one step: run the command, compare the last line. Times were measure
 - Step 1 proves only that the verifier works. Steps 2, 3 and 6 are about the real vault on mainnet.
 - Step 2 reads public RPC nodes and needs no key. Step 3 is offline once built: the file is the proof of the first mainnet trade.
 - Step 5 runs against mocks on a local node (see "Not proven yet"). It does not touch mainnet.
-- No step asks for a wallet, a key or funds.
+
+> [!NOTE]
+> No step asks for a wallet, a key or funds.
 
 ## The vault on mainnet
 
@@ -218,7 +281,8 @@ One other submission to this hackathon, independent of this one: [Zorvo Private]
 
 ## Disclaimer
 
-Foundling is a technical demo made for the NEAR Hackathon. It has not been audited by a third party. It is not an invitation to deposit, and nothing here is financial advice: do not put in funds you cannot lose. The demo limits deposits (`tvl_cap`, `per_user_cap` and `min_deposit`, see [docs/SPEC.md](docs/SPEC.md) section 3.6) and takes no on-chain fee.
+> [!WARNING]
+> Foundling is a technical demo made for the NEAR Hackathon. It has not been audited by a third party. It is not an invitation to deposit, and nothing here is financial advice: do not put in funds you cannot lose. The demo limits deposits (`tvl_cap`, `per_user_cap` and `min_deposit`, see [docs/SPEC.md](docs/SPEC.md) section 3.6) and takes no on-chain fee.
 
 ## More
 
