@@ -284,7 +284,7 @@ Foundling is built by two people: the lead (GitHub: zakyirsyaad) and the partner
 
 ## Other projects by the author
 
-One other submission to this hackathon, independent of this one: [Zorvo Private](https://github.com/zakyirsyaad/zorvo/tree/hackathon/near-credits), a private mode for a macOS app that hosts coding agents on NEAR AI Cloud TEE models. It shares no code, contract or service with Foundling.
+One other submission to this hackathon, independent of this one: [Zorvo Private](https://github.com/zakyirsyaad/zorvo), a private mode for a macOS app that hosts coding agents on NEAR AI Cloud TEE models. It shares no code, contract or service with Foundling.
 
 ## Disclaimer
 
