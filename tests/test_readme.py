@@ -180,7 +180,8 @@ class FirstScreenTest(unittest.TestCase):
     def test_the_first_screen_has_what_the_spec_asks_for_within_25_lines_plus_the_table_rows(self):
         passing = sum(c["status"] == "pass" for c in CLAIMS)
         top = head(README)
-        self.assertLessEqual(len(top.splitlines()), 21 + passing, "tagline, what, problem, verify, table, diagram, video, try")
+        # 25 lines for the prescribed content plus one badge line and one quick-links line, each with its blank line.
+        self.assertLessEqual(len(top.splitlines()), 25 + passing, "badges, tagline, links, what, problem, verify, table, diagram, video, try")
         for needle in ("python3 verify.py", "claims.json", "make attack-lab", "Video", "Try to rob it"):
             self.assertIn(needle, top)
 
@@ -223,8 +224,23 @@ class DisclosureTest(unittest.TestCase):
         for needle in ("OutLayer", "NEAR AI", "Rhea", "oracle", "USDC", "lead", "guardian"):
             self.assertIn(needle, section)
 
-    def test_no_partner_logo_and_no_deposit_pitch(self):
-        self.assertNotRegex(README, r"!\[[^\]]*\]\(")
+    def test_images_are_our_own_screenshots_or_text_badges_and_never_a_logo(self):
+        """SPEC 9.4 and 11: partner names are text only. A screenshot of our own site and a text badge are not logos."""
+        images = re.findall(r"!\[([^\]]*)\]\(([^)\s]+)", README)
+        for alt, target in images:
+            own = target.startswith("docs/img/") and (ROOT / target).is_file()
+            badge = target.startswith(("https://img.shields.io/badge/", "https://github.com/zakyirsyaad/foundling/actions/workflows/"))
+            self.assertTrue(own or badge, f"{target} is neither a screenshot under docs/img nor a text badge")
+            self.assertNotIn("logo", (alt + target).lower(), target)
+        self.assertNotRegex(README, r"<img\b")
+
+    def test_an_image_from_anywhere_else_would_be_refused(self):
+        for target in ("https://near.org/logo.svg", "https://img.shields.io/badge/x-y-blue?logo=near", "docs/img/no-such.png"):
+            own = target.startswith("docs/img/") and (ROOT / target).is_file()
+            badge = target.startswith("https://img.shields.io/badge/") and "logo" not in target.lower()
+            self.assertFalse(own or badge, target)
+
+    def test_no_deposit_pitch(self):
         for word in ("guaranteed", "risk-free", "earn ", "yield", "apy"):
             self.assertNotIn(word, README.lower())
 

@@ -179,7 +179,7 @@
     "evidence": [],
     "checks": [],
     "status": "skip",
-    "downgrade": "Cross-chain deposits through NEAR Intents are in testing."
+    "downgrade": "Deposits from Base through NEAR Intents (1Click) are switched on at the website, but no real deposit has been recorded yet."
   },
   {
     "id": "near-ai-advisor",
